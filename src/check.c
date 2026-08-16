@@ -90,6 +90,24 @@ static Type *ty_var(char *name) {
     return t;
 }
 
+/* Record type returned by the gc_stats() builtin (all counters are ints). */
+static Type *gc_stats_type(void) {
+    static Type *t;
+    if (!t) {
+        static char *names[] =
+            {"collections", "live", "young", "old", "threshold"};
+        t = ty_new(TY_REC);
+        t->rec.count = 5;
+        t->rec.names = xmalloc(sizeof(char *) * 5);
+        t->rec.types = xmalloc(sizeof(Type *) * 5);
+        for (size_t i = 0; i < 5; i++) {
+            t->rec.names[i] = names[i];
+            t->rec.types[i] = &t_int;
+        }
+    }
+    return t;
+}
+
 /* --- type equality / assignability -------------------------------------- */
 
 static bool type_eq(const Type *a, const Type *b) {
@@ -435,7 +453,7 @@ static Var *lookup_var(Ck *ck, const char *name) {
 static bool is_builtin(const char *name) {
     return strcmp(name, "print") == 0 || strcmp(name, "len") == 0 ||
            strcmp(name, "range") == 0 || strcmp(name, "str") == 0 ||
-           strcmp(name, "int") == 0;
+           strcmp(name, "int") == 0 || strcmp(name, "gc_stats") == 0;
 }
 
 static FuncSig *find_func(Ck *ck, const char *name) {
@@ -786,6 +804,11 @@ static Type *infer_call(Ck *ck, const Expr *e) {
         if (argc != 1)
             ck_error(ck, e->line, "int() takes 1 argument, got %zu", argc);
         return &t_int;
+    }
+    if (strcmp(name, "gc_stats") == 0) {
+        if (argc != 0)
+            ck_error(ck, e->line, "gc_stats() takes 0 arguments, got %zu", argc);
+        return gc_stats_type();
     }
 
     FuncSig *f = find_func(ck, name);

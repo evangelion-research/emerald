@@ -1,7 +1,11 @@
-/* Emerald runtime: dynamic Value model + precise mark-and-sweep GC.
+/* Emerald runtime: dynamic Value model + precise two-generation mark-and-sweep GC.
  *
- * Every Emerald value is a small tagged struct passed by value. Heap data
- * (strings, lists, records) lives in GC-managed `Obj` nodes. The generated C
+ * Every Emerald value is a small tagged struct passed by value. Short strings
+ * (<= 7 bytes) live inline in the Value; longer strings, lists, and records
+ * live in GC-managed `Obj` nodes. New objects are born in a nursery and are
+ * promoted to a tenured generation when they survive a minor collection; a
+ * write barrier remembers tenured objects that reference the nursery. The
+ * generated C
  * code keeps all live Values in per-function `Value F[n]` arrays that are
  * registered with the GC as "root frames" (a shadow stack), so collection is
  * precise: the GC never scans the C stack and never guesses.
@@ -17,7 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef enum { V_NONE, V_BOOL, V_INT, V_FLOAT, V_OBJ } VTag;
+typedef enum { V_NONE, V_BOOL, V_INT, V_FLOAT, V_OBJ, V_STR } VTag;
 typedef enum { O_STR, O_LIST, O_REC } OTag;
 
 typedef struct Obj Obj;
@@ -29,13 +33,19 @@ typedef struct Value {
         int64_t i;
         double f;
         Obj *o;
+        /* V_STR: small strings (<= 7 bytes, NUL-terminated) live inline in
+         * the Value itself instead of a heap Obj. No allocation, no GC. */
+        struct { char bytes[8]; } s;
     } as;
 } Value;
 
 struct Obj {
     OTag tag;
     bool mark;
-    Obj *gc_next; /* intrusive list of every allocated object */
+    bool gen;         /* 0 = nursery, 1 = tenured */
+    bool remembered;  /* tenured object that may reference the nursery */
+    Obj *gc_next;     /* intrusive list: links objects within their generation */
+    Obj *rem_next;    /* intrusive list: the remembered set */
     union {
         struct { size_t len; char *data; } str;              /* NUL-terminated */
         struct { size_t len, cap; Value *items; } list;
@@ -108,5 +118,6 @@ Value em_len(Value v);
 Value em_range(Value lo, Value hi);
 Value em_str(Value v);
 Value em_int_of(Value v);
+Value em_gc_stats(void); /* record of GC counters for observability */
 
 #endif

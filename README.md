@@ -1,9 +1,9 @@
 # Emerald
 
 A Python-flavored language with **braces instead of indentation**,
-**TypeScript-style structural typing** instead of classes, a **mark-and-sweep
-GC**, and a compiler written in modern C11 that emits native binaries via
-your system `cc`.
+**TypeScript-style structural typing** instead of classes, a
+**two-generation mark-and-sweep GC**, and a compiler written in modern C11
+that emits native binaries via your system `cc`.
 
 ```
 type Point  = { x: int, y: int }

@@ -1,0 +1,21 @@
+# Generational GC: a tenured container that is mutated to point at a fresh
+# object must keep it alive across minor collections (write barrier).
+def churn(n: int) {
+    i = 0
+    while i < n {
+        tmp = [i, i, i]
+        i = i + 1
+    }
+}
+holder = [{ n: 0 }]
+churn(1000)                 # trigger minor GCs; holder becomes tenured
+holder[0] = { n: 42 }       # list write barrier: old list -> nursery record
+churn(1000)                 # more minor GCs must not collect the stored record
+print(holder[0].n, len(holder))
+rec = { a: { n: 0 } }
+churn(1000)                 # tenured rec
+rec.a = { n: 999 }          # record write barrier: old record -> nursery record
+churn(1000)
+print(rec.a.n)
+s = gc_stats()
+print(s.collections > 0, s.live >= 0, s.young >= 0, s.old > 0, s.threshold > 0)

@@ -1,15 +1,19 @@
 # Emerald's Garbage Collector
 
-A **precise mark-and-sweep** collector in `src/runtime.c`, with rooting
-done by the generated code itself (a *shadow stack*). No conservative
-C-stack scanning, no ref-counting, no leaks-until-exit arena.
+A **precise, two-generation mark-and-sweep** collector in `src/runtime.c`,
+with rooting done by the generated code itself (a *shadow stack*). No
+conservative C-stack scanning, no ref-counting, no leaks-until-exit arena.
 
 ## Object model
 
 - `Value` is a 16-byte tagged struct passed by value. `None`/`bool`/`int`/
   `float` never touch the heap.
-- Heap kinds: `O_STR`, `O_LIST`, `O_REC`. Every `Obj` sits on one intrusive
-  `gc_next` list (the allocation list) and has a `mark` bit.
+- **Small-string optimization**: strings of 7 bytes or fewer are stored inline
+  in the `Value` itself (`V_STR`), so the most common short strings never
+  allocate an `Obj` or participate in collection at all.
+- Heap kinds: `O_STR` (strings longer than 7 bytes), `O_LIST`, `O_REC`. Every
+  `Obj` sits on one intrusive `gc_next` list for its generation and has
+  `mark`, `gen`, and `remembered` bits.
 - Backing arrays (list items, record fields, string bytes) are plain
   `malloc` memory owned by their `Obj` and freed at sweep. Growing them can
   never trigger a collection — only `rt_obj_new()` can.
@@ -41,18 +45,34 @@ them in an `Obj` at the end.
 Slot frugality: temporaries are watermark-allocated per statement, so frame
 size tracks expression *depth*, not function length.
 
-## Collection
+## Generations
 
-Triggered inside `rt_obj_new()` when the live-object count passes a
-threshold (start 256, then `2 × survivors` after each cycle — a simple
-heap-growth heuristic):
+New objects are born in a **nursery**; a **minor** collection sweeps only
+the nursery and promotes survivors to the **tenured** generation. A **major**
+collection marks and sweeps both generations. Collection is triggered inside
+`rt_obj_new()` by two thresholds (nursery and tenured, both starting at 256,
+then `2 × survivors` after each cycle):
 
-1. **Mark**: walk every `RootFrame`, recursively mark reachable objects.
-2. **Sweep**: walk the allocation list, free unmarked objects, clear marks.
+1. **Minor**: mark from every `RootFrame` *and* from the remembered set,
+   treating the tenured generation as opaque; sweep the nursery, promoting
+   survivors and clearing marks.
+2. **Major**: mark everything from the roots; sweep both generations.
+
+Because a minor collection never walks the tenured generation, it costs
+`O(nursery + remembered)`, not `O(live)`. The **write barrier** in
+`em_setindex`/`em_setattr` records any tenured object that is mutated to
+reference a nursery object in the **remembered set**, so a minor collection
+can still find nursery objects reachable only from the old generation.
 
 Function returns are safe without extra ceremony: `rt_pop_frame()` happens
 before `return`, and the returned Value is stored into the *caller's*
 rooted slot before the caller can allocate again.
+
+## Observability
+
+`gc_stats()` returns a record of counters — `collections` (total cycles),
+`live` (survivors of the last collection), `young`, `old`, and `threshold` —
+for tuning and tests.
 
 ## Measured
 
@@ -62,7 +82,6 @@ strings/lists/records; a 2M-iteration record churn (~8M objects) peaks at
 
 ## Future work
 
-- Generational collection (the threshold heuristic is already
-  generation-shaped).
-- Interned short strings / small-string optimization.
-- A `gc_stats()` builtin for observability.
+- Interned long strings (short strings are already inlined via SSO).
+- Age-based tenuring / a remembered-set of fixed size (currently every nursery
+  survivor is promoted immediately and the remembered set is unbounded).

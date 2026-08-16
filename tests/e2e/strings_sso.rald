@@ -1,0 +1,21 @@
+# Small-string optimization boundary: 7 chars live inline in the Value,
+# 8+ chars are heap objects. Both must behave identically.
+short = "abcdefg"        # 7 chars, inline
+long = "abcdefgh"        # 8 chars, heap
+print(len(short), len(long))
+print(short, long)
+print(short == "abcdefg", short != "abcdefg", long == "abcdefgh", short == long)
+print(short < "abcdefh", "abcdefg" < long, long > short, short <= "abcdefg")
+print(short[0], short[6], short[-1], long[7])
+rev = ""
+for c in short { rev = c + rev }
+print(rev)
+print("ab" * 3, "abcd" * 2, "a" * 7, "ab" * 4)
+print("abc" + "defg", "abc" + "defgh")
+print(str(1234567), str(12345678))
+print(int("1234567") + 1, int("12345678") - 1)
+print("" == "", "" == "a", len(""), "a" != "")
+def surround(s: str) -> str {
+    return "<" + s + ">"
+}
+print(surround("hi"), surround("hijklmn"))

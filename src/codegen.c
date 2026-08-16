@@ -182,6 +182,8 @@ static int gen_call(Cg *cg, const Expr *e) {
             emit(cg, "%s = em_range(%s, %s);", slotref(t, tb),
                  slotref(args[0], ab), slotref(args[1], bb));
         }
+    } else if (strcmp(name, "gc_stats") == 0) {
+        emit(cg, "%s = em_gc_stats();", slotref(t, tb));
     } else {
         sb_printf(&call, "%s = emf_%s(", slotref(t, tb), name);
         for (size_t i = 0; i < argc; i++)
