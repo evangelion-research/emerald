@@ -1,0 +1,98 @@
+# Emerald build pipeline (go-task, taskfile.dev).
+#
+#   task            build bin/emeraldc (default)
+#   task test       run every stage's test suite (lexer/parser/check/e2e)
+#   task examples   compile & run all example programs
+#   task clean      remove build outputs and generated C
+
+version: '3'
+
+vars:
+  CC: '{{default "cc" .CC}}'
+  CFLAGS: -std=c11 -Wall -Wextra -O2 -g
+  SRCDIR:
+    sh: echo "$PWD/src"
+  COMPILER_SRCS: src/lexer.c src/ast.c src/parser.c src/check.c src/codegen.c src/main.c
+
+tasks:
+  default:
+    deps: [build]
+
+  build:
+    desc: Build the Emerald compiler (bin/emeraldc)
+    sources:
+      - src/*.c
+      - src/*.h
+    generates:
+      - bin/emeraldc
+    cmds:
+      - mkdir -p bin
+      - >-
+        {{.CC}} {{.CFLAGS}} -DEMERALD_SRC_DIR='"{{.SRCDIR}}"'
+        -o bin/emeraldc {{.COMPILER_SRCS}}
+
+  runtime-check:
+    desc: Prove the runtime compiles standalone under strict flags
+    cmds:
+      - '{{.CC}} {{.CFLAGS}} -c src/runtime.c -o /dev/null'
+
+  test:
+    desc: Run all stage test suites (lexer, parser, check, e2e)
+    deps: [build]
+    cmds:
+      - task: runtime-check
+      - ./tests/run_tests.sh
+
+  test:lexer:
+    desc: Golden tests for the lexer (--emit-tokens)
+    deps: [build]
+    cmds:
+      - ./tests/run_tests.sh lexer
+
+  test:parser:
+    desc: Golden tests for the parser (--emit-ast)
+    deps: [build]
+    cmds:
+      - ./tests/run_tests.sh parser
+
+  test:check:
+    desc: Golden tests for the type checker (--check)
+    deps: [build]
+    cmds:
+      - ./tests/run_tests.sh check
+
+  test:e2e:
+    desc: Compile-and-run golden tests (full pipeline through cc)
+    deps: [build]
+    cmds:
+      - ./tests/run_tests.sh e2e
+
+  examples:
+    desc: Compile and run every example program
+    deps: [build]
+    cmds:
+      - |
+        for f in examples/*.rald; do
+          echo "== $f"
+          ./bin/emeraldc "$f" && "${f%.rald}"
+        done
+
+  bless:
+    desc: Regenerate all golden .expected files (review the diff before committing!)
+    deps: [build]
+    cmds:
+      - for f in tests/lexer/*.rald; do ./bin/emeraldc --emit-tokens "$f" > "${f%.rald}.expected"; done
+      - for f in tests/parser/*.rald; do ./bin/emeraldc --emit-ast "$f" > "${f%.rald}.expected"; done
+      - for f in tests/check/*.rald; do ./bin/emeraldc --check "$f" > "${f%.rald}.expected" 2>&1 || true; done
+      - |
+        for f in tests/e2e/*.rald; do
+          ./bin/emeraldc -o "${f%.rald}" "$f" && "${f%.rald}" > "${f%.rald}.expected"
+          rm -f "${f%.rald}"
+        done
+
+  clean:
+    desc: Remove build outputs and generated C
+    cmds:
+      - rm -rf bin
+      - rm -f examples/*.gen.c tests/e2e/*.gen.c
+      - for f in examples/*.rald tests/e2e/*.rald; do rm -f "${f%.rald}"; done

@@ -1,0 +1,5 @@
+tests/check/bad_annot.rald:1: type error: cannot assign str to 'n' declared as int
+tests/check/bad_annot.rald:2: type error: unknown type 'unknown_type'
+tests/check/bad_annot.rald:3: type error: cannot assign list[int | str] to 'xs' declared as list[int]
+tests/check/bad_annot.rald:5: type error: 'return' outside of a function
+tests/check/bad_annot.rald:4: type error: returning int from a function declared to return str

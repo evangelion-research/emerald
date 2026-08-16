@@ -1,0 +1,17 @@
+# Allocates millions of short-lived objects; the mark-and-sweep collector
+# keeps memory flat. Try: /usr/bin/time -l ./gc_stress
+#
+# Scoping gotcha worth knowing: a name assigned inside a `def` updates the
+# global of the same name if one exists, so the loop variable here is `j`,
+# not `i` (the global driving the outer loop).
+def build(n: int) -> str {
+    s = ""
+    for j in range(n) { s = s + str(j % 10) }
+    return s
+}
+i = 0
+while i < 200000 {
+    tmp = { i: i, s: build(10), l: [i] * 4 }
+    i = i + 1
+}
+print("done", build(30))

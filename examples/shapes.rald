@@ -1,0 +1,23 @@
+# Structural typing instead of classes: a value belongs to a type if it has
+# the right shape. `&` extends record types the way `extends` works in TS.
+
+type Shape  = { kind: str }
+type Circle = Shape & { r: float }
+type Rect   = Shape & { w: float, h: float }
+
+def area(kind: str, r: float, w: float, h: float) -> float {
+    if kind == "circle" { return 3.14159 * r * r }
+    return w * h
+}
+
+def describe(s: Shape) -> str {          # accepts anything with a .kind
+    return "a shape of kind " + s.kind
+}
+
+c: Circle = { kind: "circle", r: 2.0 }
+b: Rect   = { kind: "rect", w: 3.0, h: 4.0 }
+
+print(describe(c))                        # Circle is-a Shape structurally
+print(describe(b))
+print(area(c.kind, c.r, 0.0, 0.0))
+print(area(b.kind, 0.0, b.w, b.h))

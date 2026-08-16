@@ -1,0 +1,14 @@
+def churn(n: int) -> int {
+    keep = []
+    i = 0
+    while i < n {
+        tmp = { id: i, data: [i, i * 2, str(i)] }   # garbage each iteration
+        if i % 1000 == 0 { keep = keep + [tmp.id] }
+        i = i + 1
+    }
+    return len(keep)
+}
+print(churn(10000))
+survivors = []
+for i in range(50) { survivors = survivors + [[i] * 10] }
+print(len(survivors), survivors[49][9], churn(5000))

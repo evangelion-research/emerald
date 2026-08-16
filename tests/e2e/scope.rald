@@ -1,0 +1,13 @@
+counter = 0
+def bump() {
+    counter = counter + 1   # assigns the global, per Emerald scoping rules
+}
+def local_shadow() {
+    fresh = 99              # 'fresh' is local: not a global name
+    return fresh
+}
+bump()
+bump()
+print(counter, local_shadow())
+{ grouped = counter + 1 }   # bare blocks don't create scope
+print(grouped)

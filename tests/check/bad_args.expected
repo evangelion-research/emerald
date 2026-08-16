@@ -1,0 +1,4 @@
+tests/check/bad_args.rald:2: type error: f() takes 2 arguments, got 1
+tests/check/bad_args.rald:3: type error: argument 1 of f(): expected int, got str
+tests/check/bad_args.rald:4: type error: call to undefined function 'g'
+tests/check/bad_args.rald:5: type error: range() argument 1 must be int, got str

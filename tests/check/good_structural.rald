@@ -1,0 +1,13 @@
+type Point = { x: int, y: int }
+type Labeled = Point & { label: str }
+type MaybeInt = int | None
+
+def dist2(p: Point) -> int { return p.x * p.x + p.y * p.y }
+def pick(flag: bool) -> MaybeInt {
+    if flag { return 42 }
+    return None
+}
+
+l: Labeled = { x: 1, y: 2, label: "origin-ish" }
+print(dist2(l))
+xs: list[float] = [1, 2.5]

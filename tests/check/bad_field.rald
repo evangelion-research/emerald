@@ -1,0 +1,5 @@
+type Point = { x: int, y: int }
+p: Point = { x: 1, y: 2 }
+print(p.z)
+p.x = "nope"
+q: Point = { x: 1 }

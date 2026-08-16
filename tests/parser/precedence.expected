@@ -1,0 +1,6 @@
+(program
+  (assign x (- (+ 1 (* 2 3)) (/ (neg 4) (% 5 6))))
+  (assign y (or (and (not (== a b)) (< c d)) e))
+  (assign z (attr (index (call f 1 (call g 2) (call h)) (+ i 1)) field))
+  (assign p (record (x 1) (y (list 2 3)) (nested (record (z "s")))))
+)

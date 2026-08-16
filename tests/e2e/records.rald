@@ -1,0 +1,13 @@
+type Point = { x: int, y: int }
+type Circle = Point & { r: int }
+
+def area_ish(c: Circle) -> int { return c.r * c.r * 3 }
+def shift(p: Point, dx: int) { p.x = p.x + dx }
+
+c: Circle = { x: 1, y: 2, r: 5 }
+shift(c, 10)             # a Circle is structurally a Point
+print(c, area_ish(c))
+print(c.x + c.y + c.r, len(c))
+anon = { name: "emerald", tags: ["lang", "gc"] }
+print(anon.name, anon.tags[1])
+print({ a: 1 } == { a: 1 }, { a: 1 } == { a: 2 })

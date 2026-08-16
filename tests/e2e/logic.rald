@@ -1,0 +1,9 @@
+def loud(v, tag: str) {
+    print("eval", tag)
+    return v
+}
+a = loud(False, "a") and loud(True, "b")   # b must not run
+c = loud(True, "c") or loud(True, "d")     # d must not run
+print(a, c)
+print(0 or "fallback", "" and "unused", None or [] or 7)
+print(not 0, not "x", not [])

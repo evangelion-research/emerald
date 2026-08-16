@@ -1,0 +1,5 @@
+n: int = "hello"
+m: unknown_type = 1
+xs: list[int] = [1, "two"]
+def f() -> str { return 3 }
+return 1

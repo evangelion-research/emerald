@@ -1,0 +1,32 @@
+(program
+  (type Named {name: str})
+  (type Aged (| (& Named {age: int}) None))
+  (def greet (who:Named times:any) -> str
+    (assign result "")
+    (for i (call range times)
+      (if
+        (arm (== (% i 2) 0)
+          (assign result (+ result (attr who name)))
+        )
+        (arm (== i 3)
+          (continue)
+        )
+        (arm (== i 5)
+          (break)
+        )
+        (else
+          (pass)
+        )
+      )
+    )
+    (while (not result)
+      (return "empty")
+    )
+    (return result)
+  )
+  (assign a 1)
+  (assign b 2)
+  (block
+    (assign c (+ a b))
+  )
+)

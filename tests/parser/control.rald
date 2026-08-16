@@ -1,0 +1,16 @@
+type Named = { name: str }
+type Aged = Named & { age: int } | None
+
+def greet(who: Named, times) -> str {
+    result = ""
+    for i in range(times) {
+        if i % 2 == 0 { result = result + who.name }
+        elif i == 3 { continue }
+        else if i == 5 { break }
+        else { pass }
+    }
+    while not result { return "empty" }
+    return result
+}
+a = 1; b = 2
+{ c = a + b }

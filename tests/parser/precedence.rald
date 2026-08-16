@@ -1,0 +1,4 @@
+x = 1 + 2 * 3 - -4 / (5 % 6)
+y = not a == b and c < d or e
+z = f(1, g(2), h())[i + 1].field
+p = { x: 1, y: [2, 3], nested: { z: "s" } }

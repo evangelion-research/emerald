@@ -1,0 +1,7 @@
+xs = []
+for i in range(5) { xs = xs + [i * i] }
+print(xs, len(xs), xs[-1])
+
+matrix = [[1, 2], [3, 4]]
+matrix[0][1] = 20
+for row in matrix { print(row) }
