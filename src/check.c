@@ -17,6 +17,7 @@
  * The checker never mutates the AST; codegen is untyped and independent.
  */
 #include "check.h"
+#include "diag.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -498,6 +499,7 @@ typedef struct Scope {
 
 typedef struct {
     const char *filename;
+    DiagList *diags;  /* where diagnostics are collected */
     int errors;
     Alias *aliases;
     size_t alias_count, alias_cap;
@@ -510,13 +512,31 @@ typedef struct {
     int loop_depth;
 } Ck;
 
-static void ck_error(Ck *ck, int line, const char *fmt, ...) {
+static void ck_error(Ck *ck, const char *code, int line, int col,
+                     const char *fmt, ...) {
+    char msg[512];
     va_list ap;
     va_start(ap, fmt);
-    fprintf(stderr, "%s:%d: type error: ", ck->filename, line);
-    vfprintf(stderr, fmt, ap);
-    fputc('\n', stderr);
+    vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
+    diag_add(ck->diags, DIA_TYPE, code, ck->filename, line, col, "%s", msg);
+    ck->errors++;
+}
+
+/* A type mismatch: attach the expected/actual types as structured fields so
+ * machine consumers (and LLMs) can read them without parsing the prose. */
+static void ck_error_t(Ck *ck, const char *code, int line, int col,
+                       const Type *expected, const Type *actual,
+                       const char *fmt, ...) {
+    char msg[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof msg, fmt, ap);
+    va_end(ap);
+    Diag *d = diag_add(ck->diags, DIA_TYPE, code, ck->filename, line, col,
+                       "%s", msg);
+    diag_set_types(d, expected ? type_str(expected) : NULL,
+                   actual ? type_str(actual) : NULL);
     ck->errors++;
 }
 
@@ -577,8 +597,8 @@ static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
         for (size_t i = 0; i < env->count; i++)
             if (strcmp(env->names[i], te->name) == 0) {
                 if (te->arg_count) {
-                    ck_error(ck, te->line, "type parameter '%s' is not generic",
-                             te->name);
+                    ck_error(ck, "E_TYPE_NOT_GENERIC", te->line, te->col,
+                             "type parameter '%s' is not generic", te->name);
                     return &t_any;
                 }
                 return env->types[i];
@@ -593,7 +613,8 @@ static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
     else if (strcmp(te->name, "str") == 0) builtin = &t_str;
     if (builtin) {
         if (te->arg_count) {
-            ck_error(ck, te->line, "type '%s' is not generic", te->name);
+            ck_error(ck, "E_TYPE_NOT_GENERIC", te->line, te->col,
+                     "type '%s' is not generic", te->name);
             return &t_any;
         }
         return builtin;
@@ -603,7 +624,8 @@ static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
         if (strcmp(al->name, te->name) != 0) continue;
         if (al->param_count == 0) {
             if (te->arg_count) {
-                ck_error(ck, te->line, "type '%s' is not generic", te->name);
+                ck_error(ck, "E_TYPE_NOT_GENERIC", te->line, te->col,
+                         "type '%s' is not generic", te->name);
                 return &t_any;
             }
             if (al->resolving) { /* recursive self-reference */
@@ -616,15 +638,15 @@ static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
             return al->type;
         }
         if (te->arg_count != al->param_count) {
-            ck_error(ck, te->line,
+            ck_error(ck, "E_TYPE_ARITY", te->line, te->col,
                      "generic type '%s' takes %zu type argument%s, got %zu",
                      te->name, al->param_count,
                      al->param_count == 1 ? "" : "s", te->arg_count);
             return &t_any;
         }
         if (ck->alias_depth > 32) {
-            ck_error(ck, te->line, "recursive generic type '%s' is not supported",
-                     te->name);
+            ck_error(ck, "E_TYPE_RECURSIVE_GENERIC", te->line, te->col,
+                     "recursive generic type '%s' is not supported", te->name);
             return &t_any;
         }
         TyEnv sub;
@@ -639,7 +661,8 @@ static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
         free(sub.types);
         return r;
     }
-    ck_error(ck, te->line, "unknown type '%s'", te->name);
+    ck_error(ck, "E_TYPE_UNKNOWN_TYPE", te->line, te->col,
+             "unknown type '%s'", te->name);
     return &t_any;
 }
 
@@ -678,7 +701,8 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
         Type *a = resolve_type(ck, te->lhs, env);
         Type *b = resolve_type(ck, te->rhs, env);
         if (a->k != TY_REC || b->k != TY_REC) {
-            ck_error(ck, te->line, "'&' requires two record types, got %s and %s",
+            ck_error(ck, "E_TYPE_INTERSECTION", te->line, te->col,
+                     "'&' requires two record types, got %s and %s",
                      type_str(a), type_str(b));
             return &t_any;
         }
@@ -868,7 +892,8 @@ static Type *infer_binop(Ck *ck, const Expr *e) {
                   l->k == TY_ANY || r->k == TY_ANY ||
                   l->k == TY_UNION || r->k == TY_UNION;
         if (!ok)
-            ck_error(ck, e->line, "cannot order %s and %s", type_str(l), type_str(r));
+            ck_error(ck, "E_TYPE_ORDER", e->line, e->col,
+                     "cannot order %s and %s", type_str(l), type_str(r));
         return &t_bool;
     }
     case B_ADD:
@@ -889,7 +914,8 @@ static Type *infer_binop(Ck *ck, const Expr *e) {
         if (!is_numeric(l) || !is_numeric(r) ||
             l->k == TY_UNION || r->k == TY_UNION) {
             static const char *names[] = {"+", "-", "*", "/", "%"};
-            ck_error(ck, e->line, "unsupported operand types for %s: %s and %s",
+            ck_error(ck, "E_TYPE_OPERAND", e->line, e->col,
+                     "unsupported operand types for %s: %s and %s",
                      names[op], type_str(l), type_str(r));
             return &t_any;
         }
@@ -913,72 +939,87 @@ static Type *infer_call(Ck *ck, const Expr *e) {
         if (strcmp(name, "print") == 0) return &t_none;
         if (strcmp(name, "len") == 0) {
             if (argc != 1)
-                ck_error(ck, e->line, "len() takes 1 argument, got %zu", argc);
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "len() takes 1 argument, got %zu", argc);
             else {
                 Type *a = ty_base(argt[0]);
                 if (a->k != TY_ANY && a->k != TY_STR && a->k != TY_LIST &&
                     a->k != TY_REC && a->k != TY_UNION && a->k != TY_NEVER)
-                    ck_error(ck, e->line, "%s has no len()", type_str(argt[0]));
+                    ck_error(ck, "E_TYPE_NO_LEN", e->line, e->col,
+                             "%s has no len()", type_str(argt[0]));
             }
             return &t_int;
         }
         if (strcmp(name, "range") == 0) {
             if (argc != 1 && argc != 2)
-                ck_error(ck, e->line, "range() takes 1 or 2 arguments, got %zu", argc);
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "range() takes 1 or 2 arguments, got %zu", argc);
             for (size_t i = 0; i < argc; i++)
                 if (!assignable(&t_int, argt[i]))
-                    ck_error(ck, e->line, "range() argument %zu must be int, got %s",
+                    ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                             "range() argument %zu must be int, got %s",
                              i + 1, type_str(argt[i]));
             return ty_list(&t_int);
         }
         if (strcmp(name, "str") == 0) {
             if (argc != 1)
-                ck_error(ck, e->line, "str() takes 1 argument, got %zu", argc);
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "str() takes 1 argument, got %zu", argc);
             return &t_str;
         }
         if (strcmp(name, "int") == 0) {
             if (argc != 1)
-                ck_error(ck, e->line, "int() takes 1 argument, got %zu", argc);
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "int() takes 1 argument, got %zu", argc);
             return &t_int;
         }
         if (strcmp(name, "gc_stats") == 0) {
             if (argc != 0)
-                ck_error(ck, e->line, "gc_stats() takes 0 arguments, got %zu", argc);
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "gc_stats() takes 0 arguments, got %zu", argc);
             return gc_stats_type();
         }
         if (strcmp(name, "read_file") == 0) {
             if (argc != 1)
-                ck_error(ck, e->line, "read_file() takes 1 argument, got %zu", argc);
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "read_file() takes 1 argument, got %zu", argc);
             else if (!assignable(&t_str, argt[0]))
-                ck_error(ck, e->line, "read_file() path must be str, got %s", type_str(argt[0]));
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "read_file() path must be str, got %s", type_str(argt[0]));
             return &t_str;
         }
         if (strcmp(name, "write_file") == 0) {
             if (argc != 2)
-                ck_error(ck, e->line, "write_file() takes 2 arguments, got %zu", argc);
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "write_file() takes 2 arguments, got %zu", argc);
             return &t_none;
         }
         if (strcmp(name, "run") == 0) {
             if (argc != 1)
-                ck_error(ck, e->line, "run() takes 1 argument, got %zu", argc);
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "run() takes 1 argument, got %zu", argc);
             else if (!assignable(&t_str, argt[0]))
-                ck_error(ck, e->line, "run() command must be str, got %s", type_str(argt[0]));
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "run() command must be str, got %s", type_str(argt[0]));
             return &t_int;
         }
 
         FuncSig *f = find_func(ck, name);
         if (f) {
             if (argc != f->param_count) {
-                ck_error(ck, e->line, "%s() takes %zu argument%s, got %zu", name,
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "%s() takes %zu argument%s, got %zu", name,
                          f->param_count, f->param_count == 1 ? "" : "s", argc);
                 return f->tparam_count ? &t_any : f->ret;
             }
             if (f->tparam_count == 0) {
                 for (size_t i = 0; i < argc; i++)
                     if (!assignable(f->params[i], argt[i]))
-                        ck_error(ck, e->line,
-                                 "argument %zu of %s(): expected %s, got %s",
-                                 i + 1, name, type_str(f->params[i]), type_str(argt[i]));
+                        ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
+                                   f->params[i], argt[i],
+                                   "argument %zu of %s(): expected %s, got %s",
+                                   i + 1, name, type_str(f->params[i]),
+                                   type_str(argt[i]));
                 return f->ret;
             }
             /* generic call: infer type arguments by unification, then re-check */
@@ -994,9 +1035,10 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             for (size_t i = 0; i < argc; i++) {
                 Type *pi = ty_subst(f->params[i], &sub);
                 if (!assignable(pi, argt[i]))
-                    ck_error(ck, e->line,
-                             "argument %zu of %s(): expected %s, got %s",
-                             i + 1, name, type_str(pi), type_str(argt[i]));
+                    ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
+                               pi, argt[i],
+                               "argument %zu of %s(): expected %s, got %s",
+                               i + 1, name, type_str(pi), type_str(argt[i]));
             }
             Type *ret = ty_subst(f->ret, &sub);
             free(sub.types);
@@ -1004,7 +1046,8 @@ static Type *infer_call(Ck *ck, const Expr *e) {
         }
         /* an undefined name being called is its own error */
         if (!lookup_var(ck, name)) {
-            ck_error(ck, e->line, "call to undefined function '%s'", name);
+            ck_error(ck, "E_TYPE_UNDEFINED", e->line, e->col,
+                     "call to undefined function '%s'", name);
             return &t_any;
         }
         /* otherwise a function value held in a variable: indirect call */
@@ -1012,18 +1055,22 @@ static Type *infer_call(Ck *ck, const Expr *e) {
 
     Type *ft = ty_resolve(infer(ck, fn));
     if (ft->k != TY_FUNC) {
-        ck_error(ck, e->line, "value of type %s is not callable", type_str(ft));
+        ck_error(ck, "E_TYPE_NOT_CALLABLE", e->line, e->col,
+                 "value of type %s is not callable", type_str(ft));
         return &t_any;
     }
     if (argc != ft->fun.count) {
-        ck_error(ck, e->line, "function takes %zu argument%s, got %zu",
+        ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                 "function takes %zu argument%s, got %zu",
                  ft->fun.count, ft->fun.count == 1 ? "" : "s", argc);
         return ft->fun.ret;
     }
     for (size_t i = 0; i < argc; i++)
         if (!assignable(ft->fun.params[i], argt[i]))
-            ck_error(ck, e->line, "argument %zu: expected %s, got %s",
-                     i + 1, type_str(ft->fun.params[i]), type_str(argt[i]));
+            ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
+                       ft->fun.params[i], argt[i],
+                       "argument %zu: expected %s, got %s",
+                       i + 1, type_str(ft->fun.params[i]), type_str(argt[i]));
     return ft->fun.ret;
 }
 
@@ -1065,11 +1112,12 @@ static Type *infer(Ck *ck, const Expr *e) {
             return ty_func(params, f->param_count, f->ret);
         }
         if (is_builtin(e->as.sval)) {
-            ck_error(ck, e->line, "'%s' is a builtin; builtins are not values",
-                     e->as.sval);
+            ck_error(ck, "E_TYPE_BUILTIN_VALUE", e->line, e->col,
+                     "'%s' is a builtin; builtins are not values", e->as.sval);
             return &t_any;
         }
-        ck_error(ck, e->line, "undefined name '%s'", e->as.sval);
+        ck_error(ck, "E_TYPE_UNDEFINED", e->line, e->col,
+                 "undefined name '%s'", e->as.sval);
         return &t_any;
     }
     case E_LIST: {
@@ -1097,8 +1145,8 @@ static Type *infer(Ck *ck, const Expr *e) {
         if (t->k == TY_INT || t->k == TY_BOOL) return &t_int;
         if (t->k == TY_FLOAT) return &t_float;
         if (t->k != TY_ANY)
-            ck_error(ck, e->line, "unsupported operand type for unary -: %s",
-                     type_str(t));
+            ck_error(ck, "E_TYPE_OPERAND", e->line, e->col,
+                     "unsupported operand type for unary -: %s", type_str(t));
         return &t_any;
     }
     case E_CALL:
@@ -1107,12 +1155,14 @@ static Type *infer(Ck *ck, const Expr *e) {
         Type *seq = ty_base(infer(ck, e->as.index.seq));
         Type *idx = infer(ck, e->as.index.idx);
         if (!assignable(&t_int, idx) || idx->k == TY_FLOAT)
-            ck_error(ck, e->line, "index must be int, got %s", type_str(idx));
+            ck_error(ck, "E_TYPE_INDEX", e->line, e->col,
+                     "index must be int, got %s", type_str(idx));
         if (seq->k == TY_NEVER) return &t_never;
         if (seq->k == TY_LIST) return seq->elem;
         if (seq->k == TY_STR) return &t_str;
         if (seq->k == TY_ANY || seq->k == TY_UNION) return &t_any;
-        ck_error(ck, e->line, "%s is not indexable", type_str(seq));
+        ck_error(ck, "E_TYPE_INDEX", e->line, e->col,
+                 "%s is not indexable", type_str(seq));
         return &t_any;
     }
     case E_ATTR: {
@@ -1123,7 +1173,8 @@ static Type *infer(Ck *ck, const Expr *e) {
             for (size_t i = 0; i < obj->rec.count; i++)
                 if (strcmp(obj->rec.names[i], e->as.attr.name) == 0)
                     return obj->rec.types[i];
-            ck_error(ck, e->line, "type %s has no field '%s'",
+            ck_error(ck, "E_TYPE_FIELD", e->line, e->col,
+                     "type %s has no field '%s'",
                      type_str(obj), e->as.attr.name);
             return &t_any;
         }
@@ -1141,7 +1192,7 @@ static Type *infer(Ck *ck, const Expr *e) {
                         }
                 }
                 if (!ft) {
-                    ck_error(ck, e->line,
+                    ck_error(ck, "E_TYPE_FIELD", e->line, e->col,
                              "field '%s' does not exist on every alternative of %s",
                              e->as.attr.name, type_str(obj));
                     return &t_any;
@@ -1150,7 +1201,8 @@ static Type *infer(Ck *ck, const Expr *e) {
             }
             return result ? result : &t_any;
         }
-        ck_error(ck, e->line, "type %s has no fields (looking for '%s')",
+        ck_error(ck, "E_TYPE_FIELD", e->line, e->col,
+                 "type %s has no fields (looking for '%s')",
                  type_str(obj), e->as.attr.name);
         return &t_any;
     }
@@ -1478,7 +1530,8 @@ static void check_assign(Ck *ck, const Stmt *s) {
     if (target->kind == E_NAME) {
         const char *name = target->as.sval;
         if (is_builtin(name) || find_func(ck, name)) {
-            ck_error(ck, s->line, "cannot assign to function name '%s'", name);
+            ck_error(ck, "E_TYPE_ASSIGN", s->line, s->col,
+                     "cannot assign to function name '%s'", name);
             return;
         }
         VarEnv *env = ck->scope ? &ck->scope->locals : &ck->globals;
@@ -1487,8 +1540,9 @@ static void check_assign(Ck *ck, const Stmt *s) {
         if (s->as.assign.ann) {
             Type *ann = resolve_type(ck, s->as.assign.ann, NULL);
             if (!assignable(ann, val))
-                ck_error(ck, s->line, "cannot assign %s to '%s' declared as %s",
-                         type_str(val), name, type_str(ann));
+                ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, ann, val,
+                           "cannot assign %s to '%s' declared as %s",
+                           type_str(val), name, type_str(ann));
             if (!v) v = env_add(env, name, ann, true);
             v->decl = ann;
             v->annotated = true;
@@ -1503,15 +1557,17 @@ static void check_assign(Ck *ck, const Stmt *s) {
         if (!v->bound) { /* first assignment fixes the inferred type */
             if (!v->annotated) v->decl = widen(val);
             else if (!assignable(v->decl, val))
-                ck_error(ck, s->line, "cannot assign %s to '%s' declared as %s",
-                         type_str(val), name, type_str(v->decl));
+                ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, v->decl, val,
+                           "cannot assign %s to '%s' declared as %s",
+                           type_str(val), name, type_str(v->decl));
             set_flow(v, val);
             return;
         }
         if (assignable(v->decl, val)) { set_flow(v, val); return; }
         if (v->annotated) {
-            ck_error(ck, s->line, "cannot assign %s to '%s' declared as %s",
-                     type_str(val), name, type_str(v->decl));
+            ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, v->decl, val,
+                       "cannot assign %s to '%s' declared as %s",
+                       type_str(val), name, type_str(v->decl));
             set_flow(v, val);
         } else {
             v->decl = ty_join(v->decl, widen(val)); /* inferred vars widen */
@@ -1524,17 +1580,21 @@ static void check_assign(Ck *ck, const Stmt *s) {
         Type *seq = ty_base(infer(ck, target->as.index.seq));
         Type *idx = infer(ck, target->as.index.idx);
         if (!assignable(&t_int, idx) || idx->k == TY_FLOAT)
-            ck_error(ck, s->line, "index must be int, got %s", type_str(idx));
+            ck_error(ck, "E_TYPE_INDEX", s->line, s->col,
+                     "index must be int, got %s", type_str(idx));
         if (seq->k == TY_STR) {
-            ck_error(ck, s->line, "strings are immutable");
+            ck_error(ck, "E_TYPE_IMMUTABLE", s->line, s->col,
+                     "strings are immutable");
             return;
         }
         if (seq->k == TY_LIST && !assignable(seq->elem, val))
-            ck_error(ck, s->line, "cannot store %s in %s",
-                     type_str(val), type_str(seq));
+            ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, seq->elem, val,
+                       "cannot store %s in %s",
+                       type_str(val), type_str(seq));
         else if (seq->k != TY_LIST && seq->k != TY_ANY && seq->k != TY_UNION &&
                  seq->k != TY_NEVER)
-            ck_error(ck, s->line, "%s does not support item assignment",
+            ck_error(ck, "E_TYPE_ASSIGN", s->line, s->col,
+                     "%s does not support item assignment",
                      type_str(seq));
         return;
     }
@@ -1543,19 +1603,23 @@ static void check_assign(Ck *ck, const Stmt *s) {
     Type *obj = ty_resolve(infer(ck, target->as.attr.obj));
     if (obj->k == TY_ANY || obj->k == TY_NEVER) return;
     if (obj->k != TY_REC) {
-        ck_error(ck, s->line, "type %s has no fields (assigning '%s')",
+        ck_error(ck, "E_TYPE_FIELD", s->line, s->col,
+                 "type %s has no fields (assigning '%s')",
                  type_str(obj), target->as.attr.name);
         return;
     }
     for (size_t i = 0; i < obj->rec.count; i++)
         if (strcmp(obj->rec.names[i], target->as.attr.name) == 0) {
             if (!assignable(obj->rec.types[i], val))
-                ck_error(ck, s->line, "cannot assign %s to field '%s' of type %s",
-                         type_str(val), target->as.attr.name,
-                         type_str(obj->rec.types[i]));
+                ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col,
+                           obj->rec.types[i], val,
+                           "cannot assign %s to field '%s' of type %s",
+                           type_str(val), target->as.attr.name,
+                           type_str(obj->rec.types[i]));
             return;
         }
-    ck_error(ck, s->line, "type %s has no field '%s'",
+    ck_error(ck, "E_TYPE_FIELD", s->line, s->col,
+             "type %s has no field '%s'",
              type_str(obj), target->as.attr.name);
 }
 
@@ -1640,15 +1704,17 @@ static void check_stmt(Ck *ck, const Stmt *s) {
         if (seq->k == TY_LIST) elem = widen(seq->elem);
         else if (seq->k == TY_STR) elem = &t_str;
         else if (seq->k != TY_ANY && seq->k != TY_UNION && seq->k != TY_NEVER)
-            ck_error(ck, s->line, "%s is not iterable", type_str(seq));
+            ck_error(ck, "E_TYPE_ITER", s->line, s->col,
+                     "%s is not iterable", type_str(seq));
         VarEnv *env = ck->scope ? &ck->scope->locals : &ck->globals;
         Var *v = env_find(env, s->as.fr.var);
         if (!v && ck->scope) v = env_find(&ck->globals, s->as.fr.var);
         if (!v) v = env_add(env, s->as.fr.var, elem, false);
         else if (!v->annotated) v->decl = v->bound ? ty_join(v->decl, elem) : elem;
         else if (!assignable(v->decl, elem))
-            ck_error(ck, s->line, "loop assigns %s to '%s' declared as %s",
-                     type_str(elem), s->as.fr.var, type_str(v->decl));
+            ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, v->decl, elem,
+                       "loop assigns %s to '%s' declared as %s",
+                       type_str(elem), s->as.fr.var, type_str(v->decl));
         set_flow(v, elem);
         ck->loop_depth++;
         check_block(ck, &s->as.fr.body);
@@ -1657,22 +1723,26 @@ static void check_stmt(Ck *ck, const Stmt *s) {
     }
     case S_RETURN: {
         if (!ck->scope) {
-            ck_error(ck, s->line, "'return' outside of a function");
+            ck_error(ck, "E_TYPE_RETURN", s->line, s->col,
+                     "'return' outside of a function");
             break;
         }
         Type *t = s->as.ret ? infer(ck, s->as.ret) : &t_none;
         if (!assignable(ck->cur_ret, t))
-            ck_error(ck, s->line, "returning %s from a function declared to return %s",
-                     type_str(t), type_str(ck->cur_ret));
+            ck_error_t(ck, "E_TYPE_RETURN", s->line, s->col, ck->cur_ret, t,
+                       "returning %s from a function declared to return %s",
+                       type_str(t), type_str(ck->cur_ret));
         break;
     }
     case S_BREAK:
         if (ck->loop_depth == 0)
-            ck_error(ck, s->line, "'break' outside of a loop");
+            ck_error(ck, "E_TYPE_BREAK", s->line, s->col,
+                     "'break' outside of a loop");
         break;
     case S_CONTINUE:
         if (ck->loop_depth == 0)
-            ck_error(ck, s->line, "'continue' outside of a loop");
+            ck_error(ck, "E_TYPE_CONTINUE", s->line, s->col,
+                     "'continue' outside of a loop");
         break;
     case S_PASS:
         break;
@@ -1722,14 +1792,16 @@ static TyEnv func_tyenv(const Stmt *s) {
 /* register a function signature into `scope` (nested) or ck->funcs (top). */
 static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
     if (is_builtin(s->as.func.name)) {
-        ck_error(ck, s->line, "cannot redefine builtin '%s'", s->as.func.name);
+        ck_error(ck, "E_TYPE_REDEFINE", s->line, s->col,
+                 "cannot redefine builtin '%s'", s->as.func.name);
         return;
     }
     FuncSig *f;
     if (scope) {
         for (size_t i = 0; i < scope->func_count; i++)
             if (strcmp(scope->funcs[i].name, s->as.func.name) == 0) {
-                ck_error(ck, s->line, "function '%s' is already defined",
+                ck_error(ck, "E_TYPE_REDEFINE", s->line, s->col,
+                         "function '%s' is already defined",
                          s->as.func.name);
                 return;
             }
@@ -1742,7 +1814,8 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
     } else {
         for (size_t i = 0; i < ck->func_count; i++)
             if (strcmp(ck->funcs[i].name, s->as.func.name) == 0) {
-                ck_error(ck, s->line, "function '%s' is already defined",
+                ck_error(ck, "E_TYPE_REDEFINE", s->line, s->col,
+                         "function '%s' is already defined",
                          s->as.func.name);
                 return;
             }
@@ -1817,7 +1890,7 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     /* falling off the end returns None, so a stricter return type demands
      * that every path return explicitly */
     if (!assignable(ck->cur_ret, &t_none) && !block_returns(&s->as.func.body))
-        ck_error(ck, s->line,
+        ck_error(ck, "E_TYPE_MISSING_RETURN", s->line, s->col,
                  "%s() can finish without returning a value, but is declared "
                  "to return %s", s->as.func.name, type_str(ck->cur_ret));
     check_block(ck, &s->as.func.body);

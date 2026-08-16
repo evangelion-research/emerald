@@ -24,12 +24,14 @@ typedef struct {
     const char *start; /* points into the source buffer */
     int len;
     int line;
+    int col;           /* 1-based column of the token's first character */
 } Token;
 
 typedef struct {
     const char *src;
     const char *cur;
     int line;
+    int col;           /* 1-based column of `cur` */
 } Lexer;
 
 void lexer_init(Lexer *lx, const char *src);

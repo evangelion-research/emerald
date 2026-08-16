@@ -10,6 +10,7 @@ void lexer_init(Lexer *lx, const char *src) {
     lx->src = src;
     lx->cur = src;
     lx->line = 1;
+    lx->col = 1;
 }
 
 static const struct { const char *word; TokKind kind; } keywords[] = {
@@ -21,112 +22,117 @@ static const struct { const char *word; TokKind kind; } keywords[] = {
     {"type", TK_TYPE},
 };
 
-static Token make(Lexer *lx, TokKind k, const char *start) {
+static Token make(Lexer *lx, TokKind k, const char *start, int start_col) {
     Token t;
     t.kind = k;
     t.start = start;
     t.len = (int)(lx->cur - start);
     t.line = lx->line;
+    t.col = start_col;
     return t;
 }
 
 Token lexer_next(Lexer *lx) {
     for (;;) {
         char c = *lx->cur;
-        if (c == '\n') { lx->line++; lx->cur++; }
-        else if (c == ' ' || c == '\t' || c == '\r') lx->cur++;
-        else if (c == '#') { while (*lx->cur && *lx->cur != '\n') lx->cur++; }
+        if (c == '\n') { lx->line++; lx->col = 1; lx->cur++; }
+        else if (c == ' ' || c == '\t' || c == '\r') { lx->col++; lx->cur++; }
+        else if (c == '#') { while (*lx->cur && *lx->cur != '\n') { lx->col++; lx->cur++; } }
         else break;
     }
 
     const char *start = lx->cur;
+    int start_col = lx->col;
     char c = *lx->cur;
 
-    if (c == '\0') return make(lx, TK_EOF, start);
+    if (c == '\0') return make(lx, TK_EOF, start, start_col);
 
     if (isalpha((unsigned char)c) || c == '_') {
-        while (isalnum((unsigned char)*lx->cur) || *lx->cur == '_') lx->cur++;
+        while (isalnum((unsigned char)*lx->cur) || *lx->cur == '_') { lx->col++; lx->cur++; }
         size_t n = (size_t)(lx->cur - start);
         for (size_t i = 0; i < sizeof keywords / sizeof keywords[0]; i++)
             if (strlen(keywords[i].word) == n && memcmp(keywords[i].word, start, n) == 0)
-                return make(lx, keywords[i].kind, start);
-        return make(lx, TK_IDENT, start);
+                return make(lx, keywords[i].kind, start, start_col);
+        return make(lx, TK_IDENT, start, start_col);
     }
 
     if (isdigit((unsigned char)c)) {
-        while (isdigit((unsigned char)*lx->cur)) lx->cur++;
+        while (isdigit((unsigned char)*lx->cur)) { lx->col++; lx->cur++; }
         TokKind kind = TK_INT;
         if (*lx->cur == '.' && isdigit((unsigned char)lx->cur[1])) {
             kind = TK_FLOAT;
-            lx->cur++;
-            while (isdigit((unsigned char)*lx->cur)) lx->cur++;
+            lx->col++; lx->cur++;
+            while (isdigit((unsigned char)*lx->cur)) { lx->col++; lx->cur++; }
         } else if (*lx->cur == '.' && !isalpha((unsigned char)lx->cur[1]) &&
                    lx->cur[1] != '_') {
             kind = TK_FLOAT; /* `3.` */
-            lx->cur++;
+            lx->col++; lx->cur++;
         }
         if (*lx->cur == 'e' || *lx->cur == 'E') {
             const char *save = lx->cur;
-            lx->cur++;
-            if (*lx->cur == '+' || *lx->cur == '-') lx->cur++;
+            int save_col = lx->col;
+            lx->col++; lx->cur++;
+            if (*lx->cur == '+' || *lx->cur == '-') { lx->col++; lx->cur++; }
             if (isdigit((unsigned char)*lx->cur)) {
                 kind = TK_FLOAT;
-                while (isdigit((unsigned char)*lx->cur)) lx->cur++;
+                while (isdigit((unsigned char)*lx->cur)) { lx->col++; lx->cur++; }
             } else {
                 lx->cur = save; /* `1else` style: leave the e for the ident */
+                lx->col = save_col;
             }
         }
-        return make(lx, kind, start);
+        return make(lx, kind, start, start_col);
     }
 
     if (c == '"' || c == '\'') {
         char quote = c;
-        lx->cur++;
+        lx->col++; lx->cur++;
         while (*lx->cur && *lx->cur != quote) {
-            if (*lx->cur == '\\' && lx->cur[1]) lx->cur++;
-            if (*lx->cur == '\n') lx->line++;
+            if (*lx->cur == '\\' && lx->cur[1]) { lx->col++; lx->cur++; }
+            if (*lx->cur == '\n') { lx->line++; lx->col = 1; }
+            else lx->col++;
             lx->cur++;
         }
-        if (*lx->cur != quote) return make(lx, TK_ERROR, start); /* unterminated */
-        lx->cur++;
-        return make(lx, TK_STR, start); /* includes quotes; parser unescapes */
+        if (*lx->cur != quote) return make(lx, TK_ERROR, start, start_col); /* unterminated */
+        lx->col++; lx->cur++;
+        return make(lx, TK_STR, start, start_col); /* includes quotes; parser unescapes */
     }
 
-    lx->cur++;
+    lx->col++; lx->cur++;
     switch (c) {
-    case '{': return make(lx, TK_LBRACE, start);
-    case '}': return make(lx, TK_RBRACE, start);
-    case '(': return make(lx, TK_LPAREN, start);
-    case ')': return make(lx, TK_RPAREN, start);
-    case '[': return make(lx, TK_LBRACK, start);
-    case ']': return make(lx, TK_RBRACK, start);
-    case ',': return make(lx, TK_COMMA, start);
-    case '.': return make(lx, TK_DOT, start);
-    case ':': return make(lx, TK_COLON, start);
-    case ';': return make(lx, TK_SEMI, start);
-    case '|': return make(lx, TK_PIPE, start);
-    case '&': return make(lx, TK_AMP, start);
-    case '+': return make(lx, TK_PLUS, start);
-    case '*': return make(lx, TK_STAR, start);
-    case '/': return make(lx, TK_SLASH, start);
-    case '%': return make(lx, TK_PERCENT, start);
+    case '{': return make(lx, TK_LBRACE, start, start_col);
+    case '}': return make(lx, TK_RBRACE, start, start_col);
+    case '(': return make(lx, TK_LPAREN, start, start_col);
+    case ')': return make(lx, TK_RPAREN, start, start_col);
+    case '[': return make(lx, TK_LBRACK, start, start_col);
+    case ']': return make(lx, TK_RBRACK, start, start_col);
+    case ',': return make(lx, TK_COMMA, start, start_col);
+    case '.': return make(lx, TK_DOT, start, start_col);
+    case ':': return make(lx, TK_COLON, start, start_col);
+    case ';': return make(lx, TK_SEMI, start, start_col);
+    case '|': return make(lx, TK_PIPE, start, start_col);
+    case '&': return make(lx, TK_AMP, start, start_col);
+    case '+': return make(lx, TK_PLUS, start, start_col);
+    case '*': return make(lx, TK_STAR, start, start_col);
+    case '/': return make(lx, TK_SLASH, start, start_col);
+    case '%': return make(lx, TK_PERCENT, start, start_col);
     case '-':
-        if (*lx->cur == '>') { lx->cur++; return make(lx, TK_ARROW, start); }
-        return make(lx, TK_MINUS, start);
+        if (*lx->cur == '>') { lx->col++; lx->cur++; return make(lx, TK_ARROW, start, start_col); }
+        return make(lx, TK_MINUS, start, start_col);
     case '=':
-        if (*lx->cur == '=') { lx->cur++; return make(lx, TK_EQ, start); }
-        return make(lx, TK_ASSIGN, start);
+        if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_EQ, start, start_col); }
+        return make(lx, TK_ASSIGN, start, start_col);
     case '!':
-        if (*lx->cur == '=') { lx->cur++; return make(lx, TK_NE, start); }
-        return make(lx, TK_ERROR, start);
+        if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_NE, start, start_col); }
+        return make(lx, TK_ERROR, start, start_col);
     case '<':
-        if (*lx->cur == '=') { lx->cur++; return make(lx, TK_LE, start); }
-        return make(lx, TK_LT, start);
+        if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_LE, start, start_col); }
+        return make(lx, TK_LT, start, start_col);
     case '>':
-        if (*lx->cur == '=') { lx->cur++; return make(lx, TK_GE, start); }
-        return make(lx, TK_GT, start);
+        if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_GE, start, start_col); }
+        return make(lx, TK_GT, start, start_col);
     }
-    return make(lx, TK_ERROR, start);
+    return make(lx, TK_ERROR, start, start_col);
 }
 
 const char *token_kind_name(TokKind k) {

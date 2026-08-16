@@ -27,6 +27,7 @@ typedef struct TypeExpr TypeExpr;
 struct TypeExpr {
     TypeExprKind kind;
     int line;
+    int col;                /* 1-based column of the first token */
     char *name;             /* TE_NAME */
     TypeExpr **args;        /* TE_NAME: generic application `Name[T, ...]` */
     size_t arg_count;
@@ -69,6 +70,7 @@ typedef struct Expr Expr;
 struct Expr {
     ExprKind kind;
     int line;
+    int col;                /* 1-based column of the first token */
     union {
         int64_t ival;                 /* E_INT */
         double fval;                  /* E_FLOAT */
@@ -97,6 +99,7 @@ typedef struct { Stmt **items; size_t count; } Block;
 struct Stmt {
     StmtKind kind;
     int line;
+    int col;                /* 1-based column of the first token */
     union {
         Expr *expr;                                   /* S_EXPR */
         struct {                                      /* S_ASSIGN */
