@@ -123,7 +123,7 @@ int main(int argc, char **argv) {
         return errors ? 1 : 0;
     }
     if (errors) {
-        diag_render(&diags, stderr);
+        diag_render(&diags, diags.json ? stdout : stderr);
         return 1;
     }
 
