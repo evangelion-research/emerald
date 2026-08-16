@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Emerald test runner: golden tests per compiler stage.
 #
-#   tests/run_tests.sh [lexer|parser|check|e2e]...   (default: all stages)
+#   tests/run_tests.sh [lexer|parser|check|json|e2e]...   (default: all stages)
 #
 # Each stage compares tool output against a .expected file:
 #   lexer/   emeraldc --emit-tokens X.rald  vs X.expected
 #   parser/  emeraldc --emit-ast X.rald     vs X.expected
 #   check/   emeraldc --check X.rald        vs X.expected (stdout+stderr)
+#   json/    emeraldc --check --json X.rald vs X.json.expected (machine-readable)
 #   e2e/     compile X.rald, run the binary vs X.expected (stdout)
 set -u
 cd "$(dirname "$0")/.."   # repo root, so diagnostics have stable paths
@@ -47,6 +48,13 @@ run_check() {
     done
 }
 
+run_json() {
+    echo "== json diagnostics"
+    for f in tests/check/*.rald; do
+        report "$f" "${f%.rald}.json.expected" "$("$EMERALDC" --check --json "$f" 2>&1)"
+    done
+}
+
 run_e2e() {
     echo "== e2e"
     for f in tests/e2e/*.rald; do
@@ -64,12 +72,13 @@ run_e2e() {
     done
 }
 
-stages="${*:-lexer parser check e2e}"
+stages="${*:-lexer parser check json e2e}"
 for s in $stages; do
     case "$s" in
         lexer) run_lexer ;;
         parser) run_parser ;;
         check) run_check ;;
+        json) run_json ;;
         e2e) run_e2e ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac

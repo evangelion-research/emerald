@@ -89,13 +89,42 @@ foo.rald ─► lexer ─► parser ─► type checker ─► C codegen ─► 
 Every stage has a driver flag (`--emit-tokens`, `--emit-ast`, `--check`,
 `--emit-c`, `--keep-c`) and its own golden test directory under `tests/`.
 
+## Diagnostics
+
+Errors are reported as **structured diagnostics** with a stable machine-readable
+code, a precise `file:line:column`, the offending source line with a caret, and
+— for type mismatches — the expected and actual types as separate fields.
+
+```
+error[E_TYPE_RETURN]: returning str from a function declared to return int
+  --> foo.rald:3:5
+    |
+ 3 |     return y
+   |     ^
+   = expected: int
+   = actual:   str
+```
+
+Pass `--json` to any mode to emit the same diagnostics as JSON (one object per
+error, including `kind`, `code`, `line`, `column`, `message`, `expected`,
+`actual`, and the `source_line`). This is designed to be fed back into an LLM
+(or another tool) to fix the program and re-run. Runtime errors in compiled
+programs also report their source location:
+
+```
+emerald: runtime error: division by zero (at foo.rald:7)
+```
+
+See [`docs/diagnostics.md`](docs/diagnostics.md) for the error-code reference
+and the JSON schema.
+
 ## Layout
 
 | Path            | What                                                    |
 |-----------------|---------------------------------------------------------|
 | `include/`      | compiler headers (`.h` files)                           |
 | `src/`          | compiler implementation (`.c` files: `lexer` → `parser` → `check` → `codegen` → `main`) and `runtime.c` (Value model + GC, compiled into every program) |
-| `docs/`         | grammar, plan, `type-system.md`, `proofs.md`, `gc.md`   |
+| `docs/`         | grammar, plan, `type-system.md`, `proofs.md`, `gc.md`, `diagnostics.md` |
 | `tests/`        | golden tests per stage + `run_tests.sh`                 |
 | `examples/`     | runnable programs (`shapes.rald` shows structural typing, `proofs.rald` the proof features, `gc_stress.rald` the collector) |
 | `Taskfile.yml`  | build/test/examples/bless/clean                         |

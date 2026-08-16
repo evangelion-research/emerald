@@ -34,6 +34,9 @@ static size_t gc_young_threshold = 256;
 static size_t gc_old_threshold = 256;
 static size_t gc_collections = 0;  /* total cycles (minor + major) */
 
+const char *rt_cur_file = NULL; /* set by generated code; for runtime errors */
+int rt_cur_line = 0;
+
 void rt_init(void) { /* nothing yet; reserved for future config */ }
 
 void rt_fatal(const char *fmt, ...) {
@@ -41,6 +44,8 @@ void rt_fatal(const char *fmt, ...) {
     va_start(ap, fmt);
     fputs("emerald: runtime error: ", stderr);
     vfprintf(stderr, fmt, ap);
+    if (rt_cur_file)
+        fprintf(stderr, " (at %s:%d)", rt_cur_file, rt_cur_line);
     fputc('\n', stderr);
     va_end(ap);
     exit(1);

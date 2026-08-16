@@ -14,6 +14,7 @@
  */
 #include "check.h"
 #include "codegen.h"
+#include "diag.h"
 #include "lexer.h"
 #include "parser.h"
 
@@ -71,7 +72,7 @@ static char *default_output(const char *path) {
 
 static void usage(void) {
     fputs("usage: emeraldc [--emit-tokens|--emit-ast|--check|--emit-c]\n"
-          "                [--keep-c] [-o OUT] file.rald\n", stderr);
+          "                [--json] [--keep-c] [-o OUT] file.rald\n", stderr);
     exit(2);
 }
 
@@ -79,12 +80,14 @@ int main(int argc, char **argv) {
     const char *file = NULL, *out_path = NULL;
     enum { MODE_BUILD, MODE_TOKENS, MODE_AST, MODE_CHECK, MODE_C } mode = MODE_BUILD;
     bool keep_c = false;
+    bool json_errors = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--emit-tokens") == 0) mode = MODE_TOKENS;
         else if (strcmp(argv[i], "--emit-ast") == 0) mode = MODE_AST;
         else if (strcmp(argv[i], "--check") == 0) mode = MODE_CHECK;
         else if (strcmp(argv[i], "--emit-c") == 0) mode = MODE_C;
+        else if (strcmp(argv[i], "--json") == 0) json_errors = true;
         else if (strcmp(argv[i], "--keep-c") == 0) keep_c = true;
         else if (strcmp(argv[i], "-o") == 0) {
             if (++i == argc) usage();
@@ -96,28 +99,36 @@ int main(int argc, char **argv) {
     if (!file) usage();
 
     char *src = read_file(file);
+    DiagList diags;
+    diag_init(&diags, src);
+    diags.json = json_errors;
 
     if (mode == MODE_TOKENS) {
         emit_tokens(src);
         return 0;
     }
 
-    Program *prog = parse_program(src, file);
+    Program *prog = parse_program(src, file, &diags);
 
     if (mode == MODE_AST) {
         ast_print_program(stdout, prog);
         return 0;
     }
 
-    int errors = check_program(prog, file);
+    int errors = check_program(prog, file, &diags);
     if (mode == MODE_CHECK) {
-        if (errors == 0) printf("ok\n");
+        if (diags.json) diag_render(&diags, stdout);
+        else if (errors == 0) printf("ok\n");
+        else diag_render(&diags, stderr);
         return errors ? 1 : 0;
     }
-    if (errors) return 1;
+    if (errors) {
+        diag_render(&diags, stderr);
+        return 1;
+    }
 
     if (mode == MODE_C) {
-        codegen_program(stdout, prog);
+        codegen_program(stdout, prog, file);
         return 0;
     }
 
@@ -132,7 +143,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "emeraldc: cannot write '%s'\n", cfile);
         return 1;
     }
-    codegen_program(cf, prog);
+    codegen_program(cf, prog, file);
     fclose(cf);
 
     const char *srcdir = getenv("EMERALD_SRC");

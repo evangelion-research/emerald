@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_NOT_CALLABLE",
+    "file": "tests/check/bad_call_nonfunction.rald",
+    "line": 2,
+    "column": 2,
+    "message": "value of type int is not callable",
+    "source_line": "x(1)"
+  }
+]

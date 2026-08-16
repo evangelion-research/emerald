@@ -1,0 +1,2 @@
+emerald: runtime error: list index out of range (index 9, length 3) (at tests/e2e/runtime_error.rald:3)
+before

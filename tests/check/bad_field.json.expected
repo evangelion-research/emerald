@@ -1,0 +1,36 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_FIELD",
+    "file": "tests/check/bad_field.rald",
+    "line": 3,
+    "column": 8,
+    "message": "type {x: int, y: int} has no field 'z'",
+    "source_line": "print(p.z)"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ASSIGN",
+    "file": "tests/check/bad_field.rald",
+    "line": 4,
+    "column": 1,
+    "message": "cannot assign \"nope\" to field 'x' of type int",
+    "expected": "int",
+    "actual": "\"nope\"",
+    "source_line": "p.x = \"nope\""
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ASSIGN",
+    "file": "tests/check/bad_field.rald",
+    "line": 5,
+    "column": 1,
+    "message": "cannot assign {x: 1} to 'q' declared as {x: int, y: int}",
+    "expected": "{x: int, y: int}",
+    "actual": "{x: 1}",
+    "source_line": "q: Point = { x: 1 }"
+  }
+]

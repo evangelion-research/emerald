@@ -1,0 +1,48 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ASSIGN",
+    "file": "tests/check/bad_exhaustive.rald",
+    "line": 17,
+    "column": 1,
+    "message": "cannot assign \"blue\" to 'c' declared as \"red\" | \"green\"",
+    "expected": "\"red\" | \"green\"",
+    "actual": "\"blue\"",
+    "source_line": "c: \"red\" | \"green\" = \"blue\"    # error: not an alternative"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ASSIGN",
+    "file": "tests/check/bad_exhaustive.rald",
+    "line": 18,
+    "column": 1,
+    "message": "cannot assign 5 to 'd' declared as 4",
+    "expected": "4",
+    "actual": "5",
+    "source_line": "d: 4 = 5                       # error: wrong literal"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ASSIGN",
+    "file": "tests/check/bad_exhaustive.rald",
+    "line": 9,
+    "column": 5,
+    "message": "cannot assign {kind: \"tri\", base: int, h: int} to 'impossible' declared as never",
+    "expected": "never",
+    "actual": "{kind: \"tri\", base: int, h: int}",
+    "source_line": "    impossible: never = s      # error: Tri is not handled"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_OPERAND",
+    "file": "tests/check/bad_exhaustive.rald",
+    "line": 14,
+    "column": 14,
+    "message": "unsupported operand types for +: int | None and int",
+    "source_line": "    return x + 1               # error: x may be None"
+  }
+]

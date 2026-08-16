@@ -1,5 +1,29 @@
-tests/check/bad_generics.rald:2: type error: cannot assign int to 'w' declared as str
-tests/check/bad_generics.rald:9: type error: generic type 'Pair' takes 2 type arguments, got 1
-tests/check/bad_generics.rald:10: type error: type 'int' is not generic
-tests/check/bad_generics.rald:11: type error: generic type 'Pair' takes 2 type arguments, got 0
-tests/check/bad_generics.rald:5: type error: returning 5 from a function declared to return T
+error[E_TYPE_ASSIGN]: cannot assign int to 'w' declared as str
+  --> tests/check/bad_generics.rald:2:1
+    |
+ 2 | w: str = head([1, 2, 3])                  # error: T inferred as int
+   | ^
+   = expected: str
+   = actual:   int
+error[E_TYPE_ARITY]: generic type 'Pair' takes 2 type arguments, got 1
+  --> tests/check/bad_generics.rald:9:6
+    |
+ 9 | bad: Pair[int] = { first: 1, second: 2 }  # error: wrong arity
+   |      ^
+error[E_TYPE_NOT_GENERIC]: type 'int' is not generic
+  --> tests/check/bad_generics.rald:10:9
+     |
+ 10 | notgen: int[3] = 5                        # error: int is not generic
+    |         ^
+error[E_TYPE_ARITY]: generic type 'Pair' takes 2 type arguments, got 0
+  --> tests/check/bad_generics.rald:11:8
+     |
+ 11 | plain: Pair = { first: 1, second: 2 }     # error: missing type arguments
+    |        ^
+error[E_TYPE_RETURN]: returning 5 from a function declared to return T
+  --> tests/check/bad_generics.rald:5:5
+    |
+ 5 |     return 5                              # error: 5 is not T
+   |     ^
+   = expected: T
+   = actual:   5

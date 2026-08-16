@@ -1,0 +1,42 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_MISSING_RETURN",
+    "file": "tests/check/bad_missing_return.rald",
+    "line": 2,
+    "column": 1,
+    "message": "cheat() can finish without returning a value, but is declared to return never",
+    "source_line": "def cheat() -> never { }                    # error"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_MISSING_RETURN",
+    "file": "tests/check/bad_missing_return.rald",
+    "line": 3,
+    "column": 1,
+    "message": "no_ret() can finish without returning a value, but is declared to return int",
+    "source_line": "def no_ret(x: int) -> int { print(x) }      # error"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_MISSING_RETURN",
+    "file": "tests/check/bad_missing_return.rald",
+    "line": 5,
+    "column": 1,
+    "message": "only_one_arm() can finish without returning a value, but is declared to return int",
+    "source_line": "def only_one_arm(x: int) -> int {"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_MISSING_RETURN",
+    "file": "tests/check/bad_missing_return.rald",
+    "line": 19,
+    "column": 1,
+    "message": "breaks_out() can finish without returning a value, but is declared to return int",
+    "source_line": "def breaks_out() -> int { while True { break } }   # error"
+  }
+]

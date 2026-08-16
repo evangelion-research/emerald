@@ -6,6 +6,7 @@
  * `if (p == { x: 1 }) { ... }`. The `no_rec` flag implements this.
  */
 #include "parser.h"
+#include "diag.h"
 #include "lexer.h"
 
 #include <stdarg.h>
@@ -17,6 +18,7 @@ typedef struct {
     Lexer lx;
     Token cur;
     const char *filename;
+    DiagList *diags; /* where syntax diagnostics are collected */
     bool no_rec; /* inside a control-flow header: `{` means block, not record */
 } Parser;
 
@@ -28,20 +30,23 @@ static void *xmalloc(size_t n) {
     return p;
 }
 
-static void perror_at(Parser *p, int line, const char *fmt, ...) {
+static void perror_at(Parser *p, int line, int col, const char *fmt, ...) {
+    char msg[512];
     va_list ap;
     va_start(ap, fmt);
-    fprintf(stderr, "%s:%d: syntax error: ", p->filename, line);
-    vfprintf(stderr, fmt, ap);
-    fputc('\n', stderr);
+    vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
+    diag_add(p->diags, DIA_SYNTAX, "E_SYNTAX", p->filename, line, col,
+             "%s", msg);
+    diag_render(p->diags, stderr);
     exit(1);
 }
 
 static void advance(Parser *p) {
     p->cur = lexer_next(&p->lx);
     if (p->cur.kind == TK_ERROR)
-        perror_at(p, p->cur.line, "unrecognized or unterminated token starting at '%.1s'",
+        perror_at(p, p->cur.line, p->cur.col,
+                  "unrecognized or unterminated token starting at '%.1s'",
                   p->cur.start);
 }
 
@@ -55,7 +60,7 @@ static bool match(Parser *p, TokKind k) {
 
 static Token expect(Parser *p, TokKind k, const char *what) {
     if (!check(p, k))
-        perror_at(p, p->cur.line, "expected %s, got '%.*s'", what,
+        perror_at(p, p->cur.line, p->cur.col, "expected %s, got '%.*s'", what,
                   p->cur.len ? p->cur.len : 5,
                   p->cur.kind == TK_EOF ? "<eof>" : p->cur.start);
     Token t = p->cur;
@@ -88,7 +93,7 @@ static char *unescape_string(Parser *p, Token t) {
             case '"': c = '"'; break;
             case '0': c = '\0'; break;
             default:
-                perror_at(p, t.line, "unknown escape sequence '\\%c'", e);
+                perror_at(p, t.line, t.col, "unknown escape sequence '\\%c'", e);
             }
         }
         out[n++] = c;
@@ -108,27 +113,30 @@ static void vec_push(PtrVec *v, void *item) {
     v->items[v->count++] = item;
 }
 
-static Expr *new_expr(ExprKind k, int line) {
+static Expr *new_expr(ExprKind k, int line, int col) {
     Expr *e = xmalloc(sizeof(Expr));
     memset(e, 0, sizeof(Expr));
     e->kind = k;
     e->line = line;
+    e->col = col;
     return e;
 }
 
-static Stmt *new_stmt(StmtKind k, int line) {
+static Stmt *new_stmt(StmtKind k, int line, int col) {
     Stmt *s = xmalloc(sizeof(Stmt));
     memset(s, 0, sizeof(Stmt));
     s->kind = k;
     s->line = line;
+    s->col = col;
     return s;
 }
 
-static TypeExpr *new_type(TypeExprKind k, int line) {
+static TypeExpr *new_type(TypeExprKind k, int line, int col) {
     TypeExpr *t = xmalloc(sizeof(TypeExpr));
     memset(t, 0, sizeof(TypeExpr));
     t->kind = k;
     t->line = line;
+    t->col = col;
     return t;
 }
 
@@ -143,12 +151,12 @@ static TypeExpr *parse_type(Parser *p);
 static char *unescape_string(Parser *p, Token t);
 
 static TypeExpr *parse_type_atom(Parser *p) {
-    int line = p->cur.line;
+    int line = p->cur.line, col = p->cur.col;
     if (match(p, TK_LPAREN)) {
         if (check(p, TK_RPAREN)) { /* "() -> R": zero-arg function type */
             advance(p);
             expect(p, TK_ARROW, "'->' in function type");
-            TypeExpr *t = new_type(TE_FUNC, line);
+            TypeExpr *t = new_type(TE_FUNC, line, col);
             t->fun.params = NULL;
             t->fun.param_count = 0;
             t->fun.ret = parse_type(p);
@@ -164,7 +172,7 @@ static TypeExpr *parse_type_atom(Parser *p) {
             }
             expect(p, TK_RPAREN, "')' closing function type parameters");
             expect(p, TK_ARROW, "'->' in function type");
-            TypeExpr *t = new_type(TE_FUNC, line);
+            TypeExpr *t = new_type(TE_FUNC, line, col);
             t->fun.params = (TypeExpr **)params.items;
             t->fun.param_count = params.count;
             t->fun.ret = parse_type(p);
@@ -172,7 +180,7 @@ static TypeExpr *parse_type_atom(Parser *p) {
         }
         expect(p, TK_RPAREN, "')' in type");
         if (match(p, TK_ARROW)) { /* "(A) -> R" */
-            TypeExpr *t = new_type(TE_FUNC, line);
+            TypeExpr *t = new_type(TE_FUNC, line, col);
             t->fun.params = xmalloc(sizeof(TypeExpr *));
             t->fun.params[0] = first;
             t->fun.param_count = 1;
@@ -182,39 +190,39 @@ static TypeExpr *parse_type_atom(Parser *p) {
         return first; /* "(T)" grouping */
     }
     if (match(p, TK_NONE)) {
-        TypeExpr *t = new_type(TE_NAME, line);
+        TypeExpr *t = new_type(TE_NAME, line, col);
         t->name = "None";
         return t;
     }
     if (check(p, TK_INT) || check(p, TK_MINUS)) {
         bool neg = match(p, TK_MINUS);
         Token n = expect(p, TK_INT, "integer literal type");
-        TypeExpr *t = new_type(TE_LIT, line);
+        TypeExpr *t = new_type(TE_LIT, line, col);
         t->lit.kind = LIT_INT;
         t->lit.ival = strtoll(tok_text(n), NULL, 10);
         if (neg) t->lit.ival = -t->lit.ival;
         return t;
     }
     if (check(p, TK_STR)) {
-        TypeExpr *t = new_type(TE_LIT, line);
+        TypeExpr *t = new_type(TE_LIT, line, col);
         t->lit.kind = LIT_STR;
         t->lit.sval = unescape_string(p, p->cur);
         advance(p);
         return t;
     }
     if (check(p, TK_TRUE) || check(p, TK_FALSE)) {
-        TypeExpr *t = new_type(TE_LIT, line);
+        TypeExpr *t = new_type(TE_LIT, line, col);
         t->lit.kind = LIT_BOOL;
         t->lit.ival = check(p, TK_TRUE) ? 1 : 0;
         advance(p);
         return t;
     }
     if (check(p, TK_FLOAT))
-        perror_at(p, line, "float literal types are not supported "
+        perror_at(p, line, col, "float literal types are not supported "
                   "(only int, str, and bool literals can be types)");
     if (check(p, TK_LBRACE)) {
         advance(p);
-        TypeExpr *t = new_type(TE_REC, line);
+        TypeExpr *t = new_type(TE_REC, line, col);
         PtrVec names = {0}, types = {0};
         while (!check(p, TK_RBRACE)) {
             Token n = expect(p, TK_IDENT, "field name in record type");
@@ -232,12 +240,12 @@ static TypeExpr *parse_type_atom(Parser *p) {
     Token n = expect(p, TK_IDENT, "type name");
     if (n.len == 4 && memcmp(n.start, "list", 4) == 0 && check(p, TK_LBRACK)) {
         advance(p);
-        TypeExpr *t = new_type(TE_LIST, line);
+        TypeExpr *t = new_type(TE_LIST, line, col);
         t->elem = parse_type(p);
         expect(p, TK_RBRACK, "']' closing list type");
         return t;
     }
-    TypeExpr *t = new_type(TE_NAME, line);
+    TypeExpr *t = new_type(TE_NAME, line, col);
     t->name = tok_text(n);
     if (match(p, TK_LBRACK)) { /* generic application: Pair[int, str] */
         PtrVec args = {0};
@@ -268,9 +276,9 @@ static void parse_type_params(Parser *p, char ***out, size_t *out_count) {
 static TypeExpr *parse_type_inter(Parser *p) {
     TypeExpr *t = parse_type_atom(p);
     while (check(p, TK_AMP)) {
-        int line = p->cur.line;
+        int line = p->cur.line, col = p->cur.col;
         advance(p);
-        TypeExpr *i = new_type(TE_INTER, line);
+        TypeExpr *i = new_type(TE_INTER, line, col);
         i->lhs = t;
         i->rhs = parse_type_atom(p);
         t = i;
@@ -281,9 +289,9 @@ static TypeExpr *parse_type_inter(Parser *p) {
 static TypeExpr *parse_type(Parser *p) {
     TypeExpr *t = parse_type_inter(p);
     while (check(p, TK_PIPE)) {
-        int line = p->cur.line;
+        int line = p->cur.line, col = p->cur.col;
         advance(p);
-        TypeExpr *u = new_type(TE_UNION, line);
+        TypeExpr *u = new_type(TE_UNION, line, col);
         u->lhs = t;
         u->rhs = parse_type_inter(p);
         t = u;
@@ -296,31 +304,31 @@ static TypeExpr *parse_type(Parser *p) {
 static Expr *parse_expr(Parser *p);
 
 static Expr *parse_primary(Parser *p) {
-    int line = p->cur.line;
+    int line = p->cur.line, col = p->cur.col;
     switch (p->cur.kind) {
     case TK_INT: {
-        Expr *e = new_expr(E_INT, line);
+        Expr *e = new_expr(E_INT, line, col);
         e->as.ival = strtoll(tok_text(p->cur), NULL, 10);
         advance(p);
         return e;
     }
     case TK_FLOAT: {
-        Expr *e = new_expr(E_FLOAT, line);
+        Expr *e = new_expr(E_FLOAT, line, col);
         e->as.fval = strtod(tok_text(p->cur), NULL);
         advance(p);
         return e;
     }
     case TK_STR: {
-        Expr *e = new_expr(E_STR, line);
+        Expr *e = new_expr(E_STR, line, col);
         e->as.sval = unescape_string(p, p->cur);
         advance(p);
         return e;
     }
-    case TK_TRUE:  advance(p); return new_expr(E_TRUE, line);
-    case TK_FALSE: advance(p); return new_expr(E_FALSE, line);
-    case TK_NONE:  advance(p); return new_expr(E_NONE, line);
+    case TK_TRUE:  advance(p); return new_expr(E_TRUE, line, col);
+    case TK_FALSE: advance(p); return new_expr(E_FALSE, line, col);
+    case TK_NONE:  advance(p); return new_expr(E_NONE, line, col);
     case TK_IDENT: {
-        Expr *e = new_expr(E_NAME, line);
+        Expr *e = new_expr(E_NAME, line, col);
         e->as.sval = tok_text(p->cur);
         advance(p);
         return e;
@@ -336,7 +344,7 @@ static Expr *parse_primary(Parser *p) {
     }
     case TK_LBRACK: {
         advance(p);
-        Expr *e = new_expr(E_LIST, line);
+        Expr *e = new_expr(E_LIST, line, col);
         PtrVec items = {0};
         bool saved = p->no_rec;
         p->no_rec = false;
@@ -352,10 +360,10 @@ static Expr *parse_primary(Parser *p) {
     }
     case TK_LBRACE: {
         if (p->no_rec)
-            perror_at(p, line, "record literal not allowed here "
+            perror_at(p, line, col, "record literal not allowed here "
                       "(wrap it in parentheses, or did you mean a block?)");
         advance(p);
-        Expr *e = new_expr(E_REC, line);
+        Expr *e = new_expr(E_REC, line, col);
         PtrVec names = {0}, values = {0};
         bool saved = p->no_rec;
         p->no_rec = false;
@@ -374,7 +382,7 @@ static Expr *parse_primary(Parser *p) {
         return e;
     }
     default:
-        perror_at(p, line, "expected an expression, got '%.*s'",
+        perror_at(p, line, col, "expected an expression, got '%.*s'",
                   p->cur.len ? p->cur.len : 5,
                   p->cur.kind == TK_EOF ? "<eof>" : p->cur.start);
         return NULL; /* unreachable */
@@ -384,10 +392,10 @@ static Expr *parse_primary(Parser *p) {
 static Expr *parse_postfix(Parser *p) {
     Expr *e = parse_primary(p);
     for (;;) {
-        int line = p->cur.line;
+        int line = p->cur.line, col = p->cur.col;
         if (check(p, TK_LPAREN)) {
             advance(p);
-            Expr *call = new_expr(E_CALL, line);
+            Expr *call = new_expr(E_CALL, line, col);
             call->as.call.fn = e;
             PtrVec args = {0};
             bool saved = p->no_rec;
@@ -403,7 +411,7 @@ static Expr *parse_postfix(Parser *p) {
             e = call;
         } else if (check(p, TK_LBRACK)) {
             advance(p);
-            Expr *ix = new_expr(E_INDEX, line);
+            Expr *ix = new_expr(E_INDEX, line, col);
             ix->as.index.seq = e;
             bool saved = p->no_rec;
             p->no_rec = false;
@@ -414,7 +422,7 @@ static Expr *parse_postfix(Parser *p) {
         } else if (check(p, TK_DOT)) {
             advance(p);
             Token n = expect(p, TK_IDENT, "field name after '.'");
-            Expr *at = new_expr(E_ATTR, line);
+            Expr *at = new_expr(E_ATTR, line, col);
             at->as.attr.obj = e;
             at->as.attr.name = tok_text(n);
             e = at;
@@ -426,9 +434,9 @@ static Expr *parse_postfix(Parser *p) {
 
 static Expr *parse_unary(Parser *p) {
     if (check(p, TK_MINUS)) {
-        int line = p->cur.line;
+        int line = p->cur.line, col = p->cur.col;
         advance(p);
-        Expr *e = new_expr(E_UNOP, line);
+        Expr *e = new_expr(E_UNOP, line, col);
         e->as.un.op = U_NEG;
         e->as.un.operand = parse_unary(p);
         return e;
@@ -436,9 +444,9 @@ static Expr *parse_unary(Parser *p) {
     return parse_postfix(p);
 }
 
-static Expr *bin(Parser *p, BinOp op, int line, Expr *lhs, Expr *rhs) {
+static Expr *bin(Parser *p, BinOp op, int line, int col, Expr *lhs, Expr *rhs) {
     (void)p;
-    Expr *e = new_expr(E_BINOP, line);
+    Expr *e = new_expr(E_BINOP, line, col);
     e->as.bin.op = op;
     e->as.bin.lhs = lhs;
     e->as.bin.rhs = rhs;
@@ -448,10 +456,10 @@ static Expr *bin(Parser *p, BinOp op, int line, Expr *lhs, Expr *rhs) {
 static Expr *parse_mul(Parser *p) {
     Expr *e = parse_unary(p);
     for (;;) {
-        int line = p->cur.line;
-        if (match(p, TK_STAR))         e = bin(p, B_MUL, line, e, parse_unary(p));
-        else if (match(p, TK_SLASH))   e = bin(p, B_DIV, line, e, parse_unary(p));
-        else if (match(p, TK_PERCENT)) e = bin(p, B_MOD, line, e, parse_unary(p));
+        int line = p->cur.line, col = p->cur.col;
+        if (match(p, TK_STAR))         e = bin(p, B_MUL, line, col, e, parse_unary(p));
+        else if (match(p, TK_SLASH))   e = bin(p, B_DIV, line, col, e, parse_unary(p));
+        else if (match(p, TK_PERCENT)) e = bin(p, B_MOD, line, col, e, parse_unary(p));
         else return e;
     }
 }
@@ -459,9 +467,9 @@ static Expr *parse_mul(Parser *p) {
 static Expr *parse_add(Parser *p) {
     Expr *e = parse_mul(p);
     for (;;) {
-        int line = p->cur.line;
-        if (match(p, TK_PLUS))       e = bin(p, B_ADD, line, e, parse_mul(p));
-        else if (match(p, TK_MINUS)) e = bin(p, B_SUB, line, e, parse_mul(p));
+        int line = p->cur.line, col = p->cur.col;
+        if (match(p, TK_PLUS))       e = bin(p, B_ADD, line, col, e, parse_mul(p));
+        else if (match(p, TK_MINUS)) e = bin(p, B_SUB, line, col, e, parse_mul(p));
         else return e;
     }
 }
@@ -469,7 +477,7 @@ static Expr *parse_add(Parser *p) {
 static Expr *parse_cmp(Parser *p) {
     Expr *e = parse_add(p);
     for (;;) {
-        int line = p->cur.line;
+        int line = p->cur.line, col = p->cur.col;
         BinOp op;
         if (check(p, TK_EQ)) op = B_EQ;
         else if (check(p, TK_NE)) op = B_NE;
@@ -479,15 +487,15 @@ static Expr *parse_cmp(Parser *p) {
         else if (check(p, TK_GE)) op = B_GE;
         else return e;
         advance(p);
-        e = bin(p, op, line, e, parse_add(p));
+        e = bin(p, op, line, col, e, parse_add(p));
     }
 }
 
 static Expr *parse_not(Parser *p) {
     if (check(p, TK_NOT)) {
-        int line = p->cur.line;
+        int line = p->cur.line, col = p->cur.col;
         advance(p);
-        Expr *e = new_expr(E_UNOP, line);
+        Expr *e = new_expr(E_UNOP, line, col);
         e->as.un.op = U_NOT;
         e->as.un.operand = parse_not(p);
         return e;
@@ -498,9 +506,9 @@ static Expr *parse_not(Parser *p) {
 static Expr *parse_and(Parser *p) {
     Expr *e = parse_not(p);
     while (check(p, TK_AND)) {
-        int line = p->cur.line;
+        int line = p->cur.line, col = p->cur.col;
         advance(p);
-        e = bin(p, B_AND, line, e, parse_not(p));
+        e = bin(p, B_AND, line, col, e, parse_not(p));
     }
     return e;
 }
@@ -508,9 +516,9 @@ static Expr *parse_and(Parser *p) {
 static Expr *parse_expr(Parser *p) {
     Expr *e = parse_and(p);
     while (check(p, TK_OR)) {
-        int line = p->cur.line;
+        int line = p->cur.line, col = p->cur.col;
         advance(p);
-        e = bin(p, B_OR, line, e, parse_and(p));
+        e = bin(p, B_OR, line, col, e, parse_and(p));
     }
     return e;
 }
@@ -541,10 +549,10 @@ static Block parse_block(Parser *p) {
 }
 
 static Stmt *parse_func(Parser *p) {
-    int line = p->cur.line;
+    int line = p->cur.line, col = p->cur.col;
     advance(p); /* def */
     Token name = expect(p, TK_IDENT, "function name after 'def'");
-    Stmt *s = new_stmt(S_FUNC, line);
+    Stmt *s = new_stmt(S_FUNC, line, col);
     s->as.func.name = tok_text(name);
     parse_type_params(p, &s->as.func.tparams, &s->as.func.tparam_count);
     expect(p, TK_LPAREN, "'(' after function name");
@@ -565,9 +573,9 @@ static Stmt *parse_func(Parser *p) {
 }
 
 static Stmt *parse_if(Parser *p) {
-    int line = p->cur.line;
+    int line = p->cur.line, col = p->cur.col;
     advance(p); /* if */
-    Stmt *s = new_stmt(S_IF, line);
+    Stmt *s = new_stmt(S_IF, line, col);
     PtrVec conds = {0};
     Block *blocks = NULL;
     size_t nblocks = 0, capblocks = 0;
@@ -603,14 +611,14 @@ static bool valid_target(const Expr *e) {
 }
 
 static Stmt *parse_stmt(Parser *p) {
-    int line = p->cur.line;
+    int line = p->cur.line, col = p->cur.col;
 
     switch (p->cur.kind) {
     case TK_DEF:   return parse_func(p);
     case TK_IF:    return parse_if(p);
     case TK_WHILE: {
         advance(p);
-        Stmt *s = new_stmt(S_WHILE, line);
+        Stmt *s = new_stmt(S_WHILE, line, col);
         s->as.wh.cond = parse_header_expr(p);
         s->as.wh.body = parse_block(p);
         return s;
@@ -619,7 +627,7 @@ static Stmt *parse_stmt(Parser *p) {
         advance(p);
         Token var = expect(p, TK_IDENT, "loop variable after 'for'");
         expect(p, TK_IN, "'in' in for statement");
-        Stmt *s = new_stmt(S_FOR, line);
+        Stmt *s = new_stmt(S_FOR, line, col);
         s->as.fr.var = tok_text(var);
         s->as.fr.seq = parse_header_expr(p);
         s->as.fr.body = parse_block(p);
@@ -627,7 +635,7 @@ static Stmt *parse_stmt(Parser *p) {
     }
     case TK_RETURN: {
         advance(p);
-        Stmt *s = new_stmt(S_RETURN, line);
+        Stmt *s = new_stmt(S_RETURN, line, col);
         /* `return` with no value: next token can't start an expression */
         switch (p->cur.kind) {
         case TK_RBRACE: case TK_EOF: case TK_SEMI:
@@ -640,13 +648,13 @@ static Stmt *parse_stmt(Parser *p) {
         }
         return s;
     }
-    case TK_BREAK:    advance(p); return new_stmt(S_BREAK, line);
-    case TK_CONTINUE: advance(p); return new_stmt(S_CONTINUE, line);
-    case TK_PASS:     advance(p); return new_stmt(S_PASS, line);
+    case TK_BREAK:    advance(p); return new_stmt(S_BREAK, line, col);
+    case TK_CONTINUE: advance(p); return new_stmt(S_CONTINUE, line, col);
+    case TK_PASS:     advance(p); return new_stmt(S_PASS, line, col);
     case TK_TYPE: {
         advance(p);
         Token name = expect(p, TK_IDENT, "type alias name after 'type'");
-        Stmt *s = new_stmt(S_TYPEDEF, line);
+        Stmt *s = new_stmt(S_TYPEDEF, line, col);
         s->as.tdef.name = tok_text(name);
         parse_type_params(p, &s->as.tdef.params, &s->as.tdef.param_count);
         expect(p, TK_ASSIGN, "'=' in type alias");
@@ -654,7 +662,7 @@ static Stmt *parse_stmt(Parser *p) {
         return s;
     }
     case TK_LBRACE: { /* a bare block just groups statements */
-        Stmt *s = new_stmt(S_BLOCK, line);
+        Stmt *s = new_stmt(S_BLOCK, line, col);
         s->as.block = parse_block(p);
         return s;
     }
@@ -662,11 +670,11 @@ static Stmt *parse_stmt(Parser *p) {
         Expr *e = parse_expr(p);
         if (check(p, TK_COLON)) { /* `x: T = v` */
             if (e->kind != E_NAME)
-                perror_at(p, line, "type annotations are only allowed on simple names");
+                perror_at(p, line, col, "type annotations are only allowed on simple names");
             advance(p);
             TypeExpr *ann = parse_type(p);
             expect(p, TK_ASSIGN, "'=' after annotated variable");
-            Stmt *s = new_stmt(S_ASSIGN, line);
+            Stmt *s = new_stmt(S_ASSIGN, line, col);
             s->as.assign.target = e;
             s->as.assign.ann = ann;
             s->as.assign.value = parse_expr(p);
@@ -674,24 +682,25 @@ static Stmt *parse_stmt(Parser *p) {
         }
         if (match(p, TK_ASSIGN)) {
             if (!valid_target(e))
-                perror_at(p, line, "invalid assignment target "
+                perror_at(p, line, col, "invalid assignment target "
                           "(expected a name, index, or field)");
-            Stmt *s = new_stmt(S_ASSIGN, line);
+            Stmt *s = new_stmt(S_ASSIGN, line, col);
             s->as.assign.target = e;
             s->as.assign.value = parse_expr(p);
             return s;
         }
-        Stmt *s = new_stmt(S_EXPR, line);
+        Stmt *s = new_stmt(S_EXPR, line, col);
         s->as.expr = e;
         return s;
     }
     }
 }
 
-Program *parse_program(const char *src, const char *filename) {
+Program *parse_program(const char *src, const char *filename, DiagList *diags) {
     Parser p;
     lexer_init(&p.lx, src);
     p.filename = filename;
+    p.diags = diags;
     p.no_rec = false;
     advance(&p);
 

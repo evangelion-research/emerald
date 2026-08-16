@@ -96,6 +96,10 @@ void rt_init(void);
 void rt_gc_collect(void);
 void rt_fatal(const char *fmt, ...);
 
+/* source location of the statement currently executing, for runtime errors */
+extern const char *rt_cur_file;
+extern int rt_cur_line;
+
 Value em_str_new(const char *cstr);          /* copy of a C string */
 Value em_list_litn(size_t n, ...);           /* n Values, already rooted by caller */
 Value em_rec_litn(size_t n, ...);            /* n * (const char *key, Value val) */

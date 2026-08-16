@@ -1,0 +1,56 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ASSIGN",
+    "file": "tests/check/bad_generics.rald",
+    "line": 2,
+    "column": 1,
+    "message": "cannot assign int to 'w' declared as str",
+    "expected": "str",
+    "actual": "int",
+    "source_line": "w: str = head([1, 2, 3])                  # error: T inferred as int"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARITY",
+    "file": "tests/check/bad_generics.rald",
+    "line": 9,
+    "column": 6,
+    "message": "generic type 'Pair' takes 2 type arguments, got 1",
+    "source_line": "bad: Pair[int] = { first: 1, second: 2 }  # error: wrong arity"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_NOT_GENERIC",
+    "file": "tests/check/bad_generics.rald",
+    "line": 10,
+    "column": 9,
+    "message": "type 'int' is not generic",
+    "source_line": "notgen: int[3] = 5                        # error: int is not generic"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARITY",
+    "file": "tests/check/bad_generics.rald",
+    "line": 11,
+    "column": 8,
+    "message": "generic type 'Pair' takes 2 type arguments, got 0",
+    "source_line": "plain: Pair = { first: 1, second: 2 }     # error: missing type arguments"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_RETURN",
+    "file": "tests/check/bad_generics.rald",
+    "line": 5,
+    "column": 5,
+    "message": "returning 5 from a function declared to return T",
+    "expected": "T",
+    "actual": "5",
+    "source_line": "    return 5                              # error: 5 is not T"
+  }
+]

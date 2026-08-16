@@ -1,0 +1,44 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARITY",
+    "file": "tests/check/bad_args.rald",
+    "line": 2,
+    "column": 2,
+    "message": "f() takes 2 arguments, got 1",
+    "source_line": "f(1)"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARG",
+    "file": "tests/check/bad_args.rald",
+    "line": 3,
+    "column": 2,
+    "message": "argument 1 of f(): expected int, got \"x\"",
+    "expected": "int",
+    "actual": "\"x\"",
+    "source_line": "f(\"x\", \"y\")"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_UNDEFINED",
+    "file": "tests/check/bad_args.rald",
+    "line": 4,
+    "column": 2,
+    "message": "call to undefined function 'g'",
+    "source_line": "g(1)"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARG",
+    "file": "tests/check/bad_args.rald",
+    "line": 5,
+    "column": 6,
+    "message": "range() argument 1 must be int, got \"no\"",
+    "source_line": "range(\"no\")"
+  }
+]

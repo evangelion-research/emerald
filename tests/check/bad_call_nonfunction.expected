@@ -1,1 +1,5 @@
-tests/check/bad_call_nonfunction.rald:2: type error: value of type int is not callable
+error[E_TYPE_NOT_CALLABLE]: value of type int is not callable
+  --> tests/check/bad_call_nonfunction.rald:2:2
+    |
+ 2 | x(1)
+   |  ^

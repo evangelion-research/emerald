@@ -1,3 +1,19 @@
-tests/check/bad_field.rald:3: type error: type {x: int, y: int} has no field 'z'
-tests/check/bad_field.rald:4: type error: cannot assign "nope" to field 'x' of type int
-tests/check/bad_field.rald:5: type error: cannot assign {x: 1} to 'q' declared as {x: int, y: int}
+error[E_TYPE_FIELD]: type {x: int, y: int} has no field 'z'
+  --> tests/check/bad_field.rald:3:8
+    |
+ 3 | print(p.z)
+   |        ^
+error[E_TYPE_ASSIGN]: cannot assign "nope" to field 'x' of type int
+  --> tests/check/bad_field.rald:4:1
+    |
+ 4 | p.x = "nope"
+   | ^
+   = expected: int
+   = actual:   "nope"
+error[E_TYPE_ASSIGN]: cannot assign {x: 1} to 'q' declared as {x: int, y: int}
+  --> tests/check/bad_field.rald:5:1
+    |
+ 5 | q: Point = { x: 1 }
+   | ^
+   = expected: {x: int, y: int}
+   = actual:   {x: 1}

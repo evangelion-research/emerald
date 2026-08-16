@@ -1902,10 +1902,11 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     free(tenv.types);
 }
 
-int check_program(const Program *prog, const char *filename) {
+int check_program(const Program *prog, const char *filename, DiagList *diags) {
     Ck ck;
     memset(&ck, 0, sizeof(ck));
     ck.filename = filename;
+    ck.diags = diags;
 
     /* pass 1a: type aliases, in file order (use-before-definition is an error).
      * Generic aliases keep their body unresolved and expand at each use. */

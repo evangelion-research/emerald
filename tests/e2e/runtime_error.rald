@@ -1,0 +1,7 @@
+def crash(x: int) -> int {
+    xs = [1, 2, 3]
+    return xs[x]
+}
+
+print("before")
+print(crash(9))
