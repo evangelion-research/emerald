@@ -1,3 +1,3 @@
 tests/check/bad_field.rald:3: type error: type {x: int, y: int} has no field 'z'
-tests/check/bad_field.rald:4: type error: cannot assign str to field 'x' of type int
-tests/check/bad_field.rald:5: type error: cannot assign {x: int} to 'q' declared as {x: int, y: int}
+tests/check/bad_field.rald:4: type error: cannot assign "nope" to field 'x' of type int
+tests/check/bad_field.rald:5: type error: cannot assign {x: 1} to 'q' declared as {x: int, y: int}

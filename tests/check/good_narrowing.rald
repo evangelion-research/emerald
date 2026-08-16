@@ -1,0 +1,46 @@
+# literal types, unions, flow narrowing, exhaustiveness proofs
+type Color = "red" | "green" | "blue"
+c: Color = "red"
+
+type Circle = { kind: "circle", r: int }
+type Square = { kind: "square", side: int }
+type Shape  = Circle | Square
+
+def area(s: Shape) -> int {
+    if s.kind == "circle" { return s.r * s.r * 3 }
+    if s.kind == "square" { return s.side * s.side }
+    impossible: never = s      # proof that the match is exhaustive
+    return 0
+}
+
+def or_default(x: int | None, d: int) -> int {
+    if x == None { return d }
+    return x + 0               # x: int here
+}
+
+def guard_assign(x: int | None) -> int {
+    if x == None { x = 7 }
+    return x + 1               # int on both paths
+}
+
+def else_returns(x: int | None) -> int {
+    if x != None { pass } else { return 0 }
+    return x * 2               # else terminated, so x: int
+}
+
+def both_facts(x: int | None, y: str | None) -> int {
+    if x != None and y != None { return x + len(y) }
+    return 0
+}
+
+def truthy(x: str | None) -> int {
+    if x { return len(x) }
+    return 0
+}
+
+print(area({ kind: "circle", r: 2 }))
+print(or_default(None, 9))
+print(guard_assign(None))
+print(else_returns(21))
+print(both_facts(1, "ab"))
+print(truthy("hey"))

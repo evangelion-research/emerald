@@ -1,0 +1,11 @@
+def head[T](xs: list[T]) -> T { return xs[0] }
+w: str = head([1, 2, 3])                  # error: T inferred as int
+
+def wrong_body[T](xs: list[T]) -> T {
+    return 5                              # error: 5 is not T
+}
+
+type Pair[A, B] = { first: A, second: B }
+bad: Pair[int] = { first: 1, second: 2 }  # error: wrong arity
+notgen: int[3] = 5                        # error: int is not generic
+plain: Pair = { first: 1, second: 2 }     # error: missing type arguments

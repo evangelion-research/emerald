@@ -135,9 +135,12 @@ static TypeExpr *new_type(TypeExprKind k, int line) {
 /* --- type expressions ---------------------------------------------------
  * type      := inter ("|" inter)*
  * inter     := type_atom ("&" type_atom)*
- * type_atom := IDENT | "None" | "list" "[" type "]" | "{" fields "}" | "(" type ")"
+ * type_atom := IDENT ("[" type ("," type)* "]")?
+ *            | "None" | "{" fields "}" | "(" type ")"
+ *            | INT | "-" INT | STR | "True" | "False"      (literal types)
  */
 static TypeExpr *parse_type(Parser *p);
+static char *unescape_string(Parser *p, Token t);
 
 static TypeExpr *parse_type_atom(Parser *p) {
     int line = p->cur.line;
@@ -151,6 +154,32 @@ static TypeExpr *parse_type_atom(Parser *p) {
         t->name = "None";
         return t;
     }
+    if (check(p, TK_INT) || check(p, TK_MINUS)) {
+        bool neg = match(p, TK_MINUS);
+        Token n = expect(p, TK_INT, "integer literal type");
+        TypeExpr *t = new_type(TE_LIT, line);
+        t->lit.kind = LIT_INT;
+        t->lit.ival = strtoll(tok_text(n), NULL, 10);
+        if (neg) t->lit.ival = -t->lit.ival;
+        return t;
+    }
+    if (check(p, TK_STR)) {
+        TypeExpr *t = new_type(TE_LIT, line);
+        t->lit.kind = LIT_STR;
+        t->lit.sval = unescape_string(p, p->cur);
+        advance(p);
+        return t;
+    }
+    if (check(p, TK_TRUE) || check(p, TK_FALSE)) {
+        TypeExpr *t = new_type(TE_LIT, line);
+        t->lit.kind = LIT_BOOL;
+        t->lit.ival = check(p, TK_TRUE) ? 1 : 0;
+        advance(p);
+        return t;
+    }
+    if (check(p, TK_FLOAT))
+        perror_at(p, line, "float literal types are not supported "
+                  "(only int, str, and bool literals can be types)");
     if (check(p, TK_LBRACE)) {
         advance(p);
         TypeExpr *t = new_type(TE_REC, line);
@@ -178,7 +207,30 @@ static TypeExpr *parse_type_atom(Parser *p) {
     }
     TypeExpr *t = new_type(TE_NAME, line);
     t->name = tok_text(n);
+    if (match(p, TK_LBRACK)) { /* generic application: Pair[int, str] */
+        PtrVec args = {0};
+        do {
+            vec_push(&args, parse_type(p));
+        } while (match(p, TK_COMMA));
+        expect(p, TK_RBRACK, "']' closing type arguments");
+        t->args = (TypeExpr **)args.items;
+        t->arg_count = args.count;
+    }
     return t;
+}
+
+/* `[A, B, C]` after a `def` or `type` name: generic parameter list */
+static void parse_type_params(Parser *p, char ***out, size_t *out_count) {
+    PtrVec params = {0};
+    if (match(p, TK_LBRACK)) {
+        do {
+            Token n = expect(p, TK_IDENT, "type parameter name");
+            vec_push(&params, tok_text(n));
+        } while (match(p, TK_COMMA));
+        expect(p, TK_RBRACK, "']' closing type parameter list");
+    }
+    *out = (char **)params.items;
+    *out_count = params.count;
 }
 
 static TypeExpr *parse_type_inter(Parser *p) {
@@ -464,6 +516,7 @@ static Stmt *parse_func(Parser *p) {
     Token name = expect(p, TK_IDENT, "function name after 'def'");
     Stmt *s = new_stmt(S_FUNC, line);
     s->as.func.name = tok_text(name);
+    parse_type_params(p, &s->as.func.tparams, &s->as.func.tparam_count);
     expect(p, TK_LPAREN, "'(' after function name");
     PtrVec params = {0}, ptypes = {0};
     while (!check(p, TK_RPAREN)) {
@@ -563,9 +616,10 @@ static Stmt *parse_stmt(Parser *p) {
     case TK_TYPE: {
         advance(p);
         Token name = expect(p, TK_IDENT, "type alias name after 'type'");
-        expect(p, TK_ASSIGN, "'=' in type alias");
         Stmt *s = new_stmt(S_TYPEDEF, line);
         s->as.tdef.name = tok_text(name);
+        parse_type_params(p, &s->as.tdef.params, &s->as.tdef.param_count);
+        expect(p, TK_ASSIGN, "'=' in type alias");
         s->as.tdef.value = parse_type(p);
         return s;
     }

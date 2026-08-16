@@ -1,0 +1,19 @@
+# falling off the end returns None, so a stricter return type needs a return
+def cheat() -> never { }                    # error
+def no_ret(x: int) -> int { print(x) }      # error
+
+def only_one_arm(x: int) -> int {
+    if x > 0 { return 1 }                   # error: no else
+}
+
+# these are fine: every path returns, or the function never finishes
+def both_arms(x: int) -> int {
+    if x > 0 { return 1 } else { return 0 }
+}
+def diverges() -> never { while True { pass } }
+def implicit_none(x: int) { print(x) }
+def declared_none(x: int) -> None { print(x) }
+def optional(x: int) -> int | None { if x > 0 { return 1 } }
+
+# a `while True` that can break is not a proof of divergence
+def breaks_out() -> int { while True { break } }   # error

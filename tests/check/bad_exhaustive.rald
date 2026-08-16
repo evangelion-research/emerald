@@ -1,0 +1,18 @@
+type Circle = { kind: "circle", r: int }
+type Square = { kind: "square", side: int }
+type Tri    = { kind: "tri", base: int, h: int }
+type Shape  = Circle | Square | Tri
+
+def area(s: Shape) -> int {
+    if s.kind == "circle" { return s.r * s.r * 3 }
+    if s.kind == "square" { return s.side * s.side }
+    impossible: never = s      # error: Tri is not handled
+    return 0
+}
+
+def unguarded(x: int | None) -> int {
+    return x + 1               # error: x may be None
+}
+
+c: "red" | "green" = "blue"    # error: not an alternative
+d: 4 = 5                       # error: wrong literal

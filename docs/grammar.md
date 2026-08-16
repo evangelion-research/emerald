@@ -39,7 +39,9 @@ statement     := func_def
                | type_def
                | block | simple_stmt
 
-func_def      := "def" IDENT "(" [param ("," param)*] ")" ["->" type] block
+func_def      := "def" IDENT [tparams] "(" [param ("," param)*] ")"
+                 ["->" type] block
+tparams       := "[" IDENT ("," IDENT)* "]"  (* generic type parameters *)
 param         := IDENT [":" type]
 if_stmt       := "if" expr block
                  (("elif" | "else" "if") expr block)*
@@ -47,7 +49,7 @@ if_stmt       := "if" expr block
 while_stmt    := "while" expr block
 for_stmt      := "for" IDENT "in" expr block
 return_stmt   := "return" [expr]
-type_def      := "type" IDENT "=" type
+type_def      := "type" IDENT [tparams] "=" type
 block         := "{" statement* "}"
 simple_stmt   := IDENT ":" type "=" expr     (* annotated declaration *)
                | target "=" expr             (* assignment *)
@@ -60,15 +62,21 @@ target        := IDENT | postfix "[" expr "]" | postfix "." IDENT
 ```
 type      := inter ("|" inter)*              (* union *)
 inter     := type_atom ("&" type_atom)*      (* intersection / "extends" *)
-type_atom := "int" | "float" | "str" | "bool" | "None" | "any"
+type_atom := "int" | "float" | "str" | "bool" | "None" | "any" | "never"
            | "list" "[" type "]"
            | "{" [IDENT ":" type ("," IDENT ":" type)* [","]] "}"
-           | IDENT                           (* a `type` alias *)
+           | IDENT ["[" type ("," type)* "]"]  (* alias, maybe generic *)
+           | int_lit | "-" int_lit | string_lit | "True" | "False"
+                                             (* literal types *)
            | "(" type ")"
 ```
 
 - Type aliases must be declared (at top level) before use.
 - `A & B` requires both sides to be record types; fields merge, right wins.
+- Literal types make a single value a type: `type Dice = 1|2|3|4|5|6`.
+  Float literals are not valid types.
+- A name followed by `[...]` applies a generic alias (`Pair[int, str]`) —
+  except `list[T]`, which is built in.
 
 ## Expression Precedence (low → high)
 

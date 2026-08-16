@@ -1,0 +1,4 @@
+tests/check/bad_exhaustive.rald:17: type error: cannot assign "blue" to 'c' declared as "red" | "green"
+tests/check/bad_exhaustive.rald:18: type error: cannot assign 5 to 'd' declared as 4
+tests/check/bad_exhaustive.rald:9: type error: cannot assign {kind: "tri", base: int, h: int} to 'impossible' declared as never
+tests/check/bad_exhaustive.rald:14: type error: unsupported operand types for +: int | None and int

@@ -5,6 +5,7 @@
 
 static void print_expr(FILE *out, const Expr *e);
 static void print_stmt(FILE *out, const Stmt *s, int indent);
+static void print_str_escaped(FILE *out, const char *s);
 
 static void ind(FILE *out, int n) {
     for (int i = 0; i < n; i++) fputs("  ", out);
@@ -27,6 +28,21 @@ static void print_type(FILE *out, const TypeExpr *t) {
     switch (t->kind) {
     case TE_NAME:
         fputs(t->name, out);
+        if (t->arg_count) {
+            fputs("[", out);
+            for (size_t i = 0; i < t->arg_count; i++) {
+                if (i) fputs(", ", out);
+                print_type(out, t->args[i]);
+            }
+            fputs("]", out);
+        }
+        break;
+    case TE_LIT:
+        switch (t->lit.kind) {
+        case LIT_INT:  fprintf(out, "%lld", (long long)t->lit.ival); break;
+        case LIT_STR:  print_str_escaped(out, t->lit.sval); break;
+        case LIT_BOOL: fputs(t->lit.ival ? "True" : "False", out); break;
+        }
         break;
     case TE_LIST:
         fputs("list[", out);
@@ -215,7 +231,16 @@ static void print_stmt(FILE *out, const Stmt *s, int indent) {
         fputs(")\n", out);
         break;
     case S_FUNC:
-        fprintf(out, "(def %s (", s->as.func.name);
+        fprintf(out, "(def %s ", s->as.func.name);
+        if (s->as.func.tparam_count) {
+            fputs("[", out);
+            for (size_t i = 0; i < s->as.func.tparam_count; i++) {
+                if (i) fputs(" ", out);
+                fputs(s->as.func.tparams[i], out);
+            }
+            fputs("] ", out);
+        }
+        fputs("(", out);
         for (size_t i = 0; i < s->as.func.param_count; i++) {
             if (i) fputs(" ", out);
             fprintf(out, "%s:", s->as.func.params[i]);
@@ -230,6 +255,14 @@ static void print_stmt(FILE *out, const Stmt *s, int indent) {
         break;
     case S_TYPEDEF:
         fprintf(out, "(type %s ", s->as.tdef.name);
+        if (s->as.tdef.param_count) {
+            fputs("[", out);
+            for (size_t i = 0; i < s->as.tdef.param_count; i++) {
+                if (i) fputs(" ", out);
+                fputs(s->as.tdef.params[i], out);
+            }
+            fputs("] ", out);
+        }
         print_type(out, s->as.tdef.value);
         fputs(")\n", out);
         break;

@@ -56,3 +56,11 @@ dkms.conf
 
 .task/
 bin/
+
+# Binaries left behind by `task examples` (and e2e tests, on failure):
+# every .rald compiles to an extensionless executable beside it.
+examples/*
+!examples/*.rald
+tests/e2e/*
+!tests/e2e/*.rald
+!tests/e2e/*.expected

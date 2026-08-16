@@ -1,0 +1,31 @@
+# generic functions and generic type aliases
+def head[T](xs: list[T]) -> T { return xs[0] }
+def last[T](xs: list[T]) -> T { return xs[len(xs) - 1] }
+def repeat[T](x: T, n: int) -> list[T] { return [x] * n }
+
+h: int = head([1, 2, 3])
+s: str = head(["a", "b"])
+r: list[str] = repeat("x", 3)
+
+type Pair[A, B] = { first: A, second: B }
+type Both[T] = { left: T, right: T }
+
+def flip[A, B](p: Pair[A, B]) -> Pair[B, A] {
+    return { first: p.second, second: p.first }
+}
+def sum_both(b: Both[int]) -> int { return b.left + b.right }
+
+p: Pair[int, str] = { first: 1, second: "x" }
+q: Pair[str, int] = flip(p)
+print(q.first)
+print(sum_both({ left: 2, right: 3 }))
+
+# a variable-free alternative absorbs the argument; T stays untouched
+def find[T](xs: list[T], x: T) -> int | None {
+    i = 0
+    while i < len(xs) {
+        i = i + 1
+    }
+    return None
+}
+n: int | None = find([1, 2], 2)

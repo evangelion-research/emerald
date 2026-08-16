@@ -1,0 +1,5 @@
+tests/check/bad_generics.rald:2: type error: cannot assign int to 'w' declared as str
+tests/check/bad_generics.rald:9: type error: generic type 'Pair' takes 2 type arguments, got 1
+tests/check/bad_generics.rald:10: type error: type 'int' is not generic
+tests/check/bad_generics.rald:11: type error: generic type 'Pair' takes 2 type arguments, got 0
+tests/check/bad_generics.rald:5: type error: returning 5 from a function declared to return T

@@ -1,0 +1,4 @@
+tests/check/bad_missing_return.rald:2: type error: cheat() can finish without returning a value, but is declared to return never
+tests/check/bad_missing_return.rald:3: type error: no_ret() can finish without returning a value, but is declared to return int
+tests/check/bad_missing_return.rald:5: type error: only_one_arm() can finish without returning a value, but is declared to return int
+tests/check/bad_missing_return.rald:19: type error: breaks_out() can finish without returning a value, but is declared to return int

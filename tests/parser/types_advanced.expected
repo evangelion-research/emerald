@@ -1,0 +1,17 @@
+(program
+  (type Color (| (| "red" "green") "blue"))
+  (type Dice (| (| 1 2) 3))
+  (type Flags (| True False))
+  (type Neg (| (| -1 0) 1))
+  (type Pair [A B] {first: A, second: B})
+  (type IntPair Pair[int, int])
+  (type Nested Pair[list[int], Pair[str, never]])
+  (def head [T] (xs:list[T]) -> T
+    (return (index xs 0))
+  )
+  (def flip [A B] (p:Pair[A, B]) -> Pair[B, A]
+    (return (record (first (attr p second)) (second (attr p first))))
+  )
+  (assign x : 4 4)
+  (assign c : Color "red")
+)

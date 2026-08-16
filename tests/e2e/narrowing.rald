@@ -1,0 +1,35 @@
+# discriminated unions and narrowing, executed for real
+type Circle = { kind: "circle", r: int }
+type Square = { kind: "square", side: int }
+type Shape  = Circle | Square
+
+def area(s: Shape) -> int {
+    if s.kind == "circle" { return s.r * s.r * 3 }
+    return s.side * s.side
+}
+
+def describe(s: Shape) -> str {
+    if s.kind == "circle" { return "circle r=" + str(s.r) }
+    if s.kind == "square" { return "square side=" + str(s.side) }
+    impossible: never = s
+    return ""
+}
+
+def or_zero(x: int | None) -> int {
+    if x == None { return 0 }
+    return x
+}
+
+def head[T](xs: list[T]) -> T { return xs[0] }
+
+shapes: list[Shape] = [
+    { kind: "circle", r: 2 },
+    { kind: "square", side: 3 },
+]
+for s in shapes {
+    print(describe(s))
+    print(area(s))
+}
+print(or_zero(None))
+print(or_zero(41) + 1)
+print(head(["generic", "works"]))

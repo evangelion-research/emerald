@@ -12,18 +12,23 @@
 /* --- type expressions (surface syntax of type annotations) -------------- */
 
 typedef enum {
-    TE_NAME,   /* int, float, str, bool, None, any, or a `type` alias */
+    TE_NAME,   /* int, float, str, bool, None, any, never, alias, type var */
     TE_LIST,   /* list[T] */
     TE_REC,    /* { x: int, y: int } */
     TE_UNION,  /* A | B */
     TE_INTER,  /* A & B  (structural "inheritance") */
+    TE_LIT,    /* literal type: 42, "red", True */
 } TypeExprKind;
+
+typedef enum { LIT_INT, LIT_STR, LIT_BOOL } LitKind;
 
 typedef struct TypeExpr TypeExpr;
 struct TypeExpr {
     TypeExprKind kind;
     int line;
     char *name;             /* TE_NAME */
+    TypeExpr **args;        /* TE_NAME: generic application `Name[T, ...]` */
+    size_t arg_count;
     TypeExpr *elem;         /* TE_LIST */
     struct {                /* TE_REC */
         char **names;
@@ -31,6 +36,11 @@ struct TypeExpr {
         size_t count;
     } fields;
     TypeExpr *lhs, *rhs;    /* TE_UNION / TE_INTER */
+    struct {                /* TE_LIT */
+        LitKind kind;
+        int64_t ival;       /* LIT_INT, LIT_BOOL (0/1) */
+        char *sval;         /* LIT_STR */
+    } lit;
 };
 
 /* --- expressions -------------------------------------------------------- */
@@ -101,13 +111,20 @@ struct Stmt {
         Block block;                                  /* S_BLOCK */
         struct {                                      /* S_FUNC */
             char *name;
+            char **tparams;         /* generic type parameters `def f[T, U]` */
+            size_t tparam_count;
             char **params;
             TypeExpr **param_types; /* entries may be NULL (=any) */
             size_t param_count;
             TypeExpr *ret_type;     /* NULL = any */
             Block body;
         } func;
-        struct { char *name; TypeExpr *value; } tdef; /* S_TYPEDEF */
+        struct {                                      /* S_TYPEDEF */
+            char *name;
+            char **params;          /* generic parameters `type Pair[A, B]` */
+            size_t param_count;
+            TypeExpr *value;
+        } tdef;
     } as;
 };
 

@@ -1,0 +1,68 @@
+# The type checker as a proof checker.
+#
+# Reading types as propositions (Curry–Howard, structurally):
+#   A | B        A or B          (disjunction)
+#   A & B        A and B         (conjunction, on records)
+#   never        False           (the empty type: no value inhabits it)
+#   assignable   implication     (every A is a B)
+#
+# A function that typechecks is a proof: it shows that from any value of the
+# parameter types you can always construct a value of the return type.
+
+# --- an enumerated domain, one literal type per element -------------------
+type Even = 0 | 2 | 4 | 6 | 8
+type Odd  = 1 | 3 | 5 | 7 | 9
+type Digit = Even | Odd
+
+# Theorem: every digit is even or odd. The checker verifies the claim
+# because `Even | Odd` and `Digit` are the same set of alternatives.
+def digit_is_even_or_odd(d: Digit) -> Even | Odd { return d }
+
+# --- case analysis, checked for exhaustiveness ----------------------------
+type Lit  = { kind: "lit",  value: int }
+type Add  = { kind: "add",  lhs: int, rhs: int }
+type Neg  = { kind: "neg",  operand: int }
+type Expr = Lit | Add | Neg
+
+def eval(e: Expr) -> int {
+    if e.kind == "lit" { return e.value }
+    if e.kind == "add" { return e.lhs + e.rhs }
+    if e.kind == "neg" { return -e.operand }
+    # Proof obligation: the cases above cover every alternative of Expr.
+    # If a new alternative is added to Expr, this line becomes a type error.
+    unreachable: never = e
+    return 0
+}
+
+# --- narrowing eliminates None, verified at compile time ------------------
+def safe_mod(a: int, b: int) -> int | None {
+    if b == 0 { return None }
+    return a % b
+}
+
+def mod_or(a: int, b: int, fallback: int) -> int {
+    q: int | None = safe_mod(a, b)
+    if q == None { return fallback }
+    return q          # q: int here — the None case is provably gone
+}
+
+# --- generic lemmas -------------------------------------------------------
+# "For all T: a list of T yields a T" — parametricity as a universally
+# quantified statement, checked once, valid at every instantiation.
+def head[T](xs: list[T]) -> T { return xs[0] }
+
+type Pair[A, B] = { first: A, second: B }
+
+# Commutativity of conjunction: A ∧ B  ⇒  B ∧ A
+def swap[A, B](p: Pair[A, B]) -> Pair[B, A] {
+    return { first: p.second, second: p.first }
+}
+
+# ---------------------------------------------------------------------------
+print(digit_is_even_or_odd(7))
+print(eval({ kind: "add", lhs: 20, rhs: 22 }))
+print(mod_or(10, 3, -1))
+print(mod_or(10, 0, -1))
+print(head([3, 1, 4]))
+p: Pair[str, int] = swap({ first: 9, second: "nine" })
+print(p.first)

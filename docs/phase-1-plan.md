@@ -91,9 +91,13 @@ location baked in at build time.
 
 ## Phase 2 candidates
 
-- **Type narrowing** (`if x == None { ... } else { use x as int }`) — the
-  single biggest ergonomic win; unions are currently awkward without it.
-- Functions as values + closures (needed for self-hosting).
+- ~~**Type narrowing**~~ — done, along with literal types, `never`,
+  exhaustiveness checking, and generics. See
+  [`type-system.md`](type-system.md) and [`proofs.md`](proofs.md).
+- Functions as values + closures (needed for self-hosting, and the missing
+  piece for higher-order proofs).
+- Recursive type aliases — the blocker for inductive data and proofs by
+  induction.
 - Methods-by-convention: `f(rec, ...)` sugar as `rec.f(...)`.
 - Exceptions with tracebacks (runtime errors currently exit with a message).
 - Dict/`str` method library; `//`, chained comparisons, `+=`.
