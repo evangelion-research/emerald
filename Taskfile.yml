@@ -9,7 +9,7 @@ version: '3'
 
 vars:
   CC: '{{default "cc" .CC}}'
-  CFLAGS: -std=c11 -Wall -Wextra -O2 -g
+  CFLAGS: -std=c11 -Wall -Wextra -O2 -g -Iinclude
   SRCDIR:
     sh: echo "$PWD/src"
   COMPILER_SRCS: src/lexer.c src/ast.c src/parser.c src/check.c src/codegen.c src/main.c
@@ -22,7 +22,7 @@ tasks:
     desc: Build the Emerald compiler (bin/emeraldc)
     sources:
       - src/*.c
-      - src/*.h
+      - include/*.h
     generates:
       - bin/emeraldc
     cmds:
@@ -34,7 +34,7 @@ tasks:
   runtime-check:
     desc: Prove the runtime compiles standalone under strict flags
     cmds:
-      - '{{.CC}} {{.CFLAGS}} -c src/runtime.c -o /dev/null'
+      - '{{.CC}} {{.CFLAGS}} -c src/runtime.c -o /dev/null -Iinclude'
 
   test:
     desc: Run all stage test suites (lexer, parser, check, e2e)

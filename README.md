@@ -43,7 +43,8 @@ Every stage has a driver flag (`--emit-tokens`, `--emit-ast`, `--check`,
 
 | Path            | What                                                    |
 |-----------------|---------------------------------------------------------|
-| `src/`          | compiler (`lexer` → `parser` → `check` → `codegen` → `main`) and `runtime.c` (Value model + GC, compiled into every program) |
+| `include/`      | compiler headers (`.h` files)                           |
+| `src/`          | compiler implementation (`.c` files: `lexer` → `parser` → `check` → `codegen` → `main`) and `runtime.c` (Value model + GC, compiled into every program) |
 | `docs/`         | grammar, plan, `type-system.md`, `gc.md`                |
 | `tests/`        | golden tests per stage + `run_tests.sh`                 |
 | `examples/`     | runnable programs (`shapes.rald` shows structural typing, `gc_stress.rald` the collector) |

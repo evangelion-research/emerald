@@ -140,11 +140,14 @@ int main(int argc, char **argv) {
     const char *cc = getenv("CC");
     if (!cc || !*cc) cc = "cc";
 
-    size_t cmdlen = strlen(cc) + strlen(cfile) + strlen(out) + 2 * strlen(srcdir) + 128;
+    size_t cmdlen = strlen(cc) + strlen(cfile) + strlen(out) + 3 * strlen(srcdir) + 256;
     char *cmd = malloc(cmdlen);
+    char *srcroot = strdup(srcdir);
+    char *lastslash = strrchr(srcroot, '/');
+    if (lastslash && !strcmp(lastslash, "/src")) *lastslash = '\0';
     snprintf(cmd, cmdlen,
-             "%s -std=c11 -O2 -I '%s' -o '%s' '%s' '%s/runtime.c'",
-             cc, srcdir, out, cfile, srcdir);
+             "%s -std=c11 -O2 -I '%s' -I '%s/include' -o '%s' '%s' '%s/runtime.c'",
+             cc, srcdir, srcroot, out, cfile, srcdir);
     int rc = system(cmd);
     if (rc != 0) {
         fprintf(stderr, "emeraldc: C compilation failed (%s)\n", cmd);
