@@ -1,0 +1,4 @@
+write_file("/tmp/emerald_io_test.txt", "abc123")
+content = read_file("/tmp/emerald_io_test.txt")
+print(content, len(content))
+print(run("true") == 0, run("false") != 0)

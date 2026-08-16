@@ -1,0 +1,18 @@
+# First-class functions: arrow types, function values, indirect calls, and
+# nested `def`s (closures) capturing enclosing locals.
+def apply(f: (int) -> int, x: int) -> int { return f(x) }
+
+def make_adder(n: int) -> (int) -> int {
+    def add(x: int) -> int { return x + n }
+    return add
+}
+
+def outer() -> (int) -> int {
+    base = 10
+    def inner(y: int) -> int { return base + y }
+    return inner
+}
+
+g = make_adder(5)
+h = outer()
+print(apply(g, 1), h(2))

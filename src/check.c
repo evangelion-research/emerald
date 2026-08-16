@@ -25,10 +25,11 @@
 
 typedef enum {
     TY_ANY, TY_NEVER, TY_NONE, TY_BOOL, TY_INT, TY_FLOAT, TY_STR,
-    TY_LIT, TY_LIST, TY_REC, TY_UNION, TY_VAR,
+    TY_LIT, TY_LIST, TY_REC, TY_UNION, TY_VAR, TY_ALIAS, TY_FUNC,
 } TyKind;
 
 typedef struct Type Type;
+struct Alias;
 struct Type {
     TyKind k;
     bool fresh; /* literal born from a literal expression: widens on binding */
@@ -37,7 +38,30 @@ struct Type {
     struct { Type **alts; size_t count; } uni;              /* TY_UNION */
     struct { TyKind base; int64_t ival; char *sval; } lit;  /* TY_LIT */
     char *var;                                              /* TY_VAR */
+    struct { Type **params; Type *ret; size_t count; } fun; /* TY_FUNC */
+    /* TY_ALIAS: a reference to a named alias. A self-reference encountered
+     * while an alias body is being resolved becomes this node (see resolve_name). */
+    struct { const struct Alias *al; Type **args; size_t argc; } ref;
 };
+
+/* A named type alias. Non-generic aliases resolve eagerly; a self-reference
+ * encountered while resolving becomes a TY_ALIAS node instead. */
+typedef struct Alias {
+    char *name;
+    Type *type;                 /* resolved eagerly for non-generic aliases */
+    char **params;              /* generic parameters, NULL when non-generic */
+    size_t param_count;
+    const TypeExpr *body;       /* unresolved body for generic aliases */
+    bool resolving;             /* guard: currently resolving this alias's body */
+} Alias;
+
+/* Expand alias references to their underlying type (an alias may name another
+ * alias; iterate with a bound to guard pathological cycles). */
+static Type *ty_resolve(const Type *t) {
+    for (int i = 0; i < 128 && t->k == TY_ALIAS; i++)
+        t = ((const Alias *)t->ref.al)->type;
+    return (Type *)t;
+}
 
 static Type t_any = {.k = TY_ANY}, t_never = {.k = TY_NEVER},
             t_none = {.k = TY_NONE}, t_bool = {.k = TY_BOOL},
@@ -60,6 +84,14 @@ static Type *ty_new(TyKind k) {
 static Type *ty_list(Type *elem) {
     Type *t = ty_new(TY_LIST);
     t->elem = elem;
+    return t;
+}
+
+static Type *ty_func(Type **params, size_t count, Type *ret) {
+    Type *t = ty_new(TY_FUNC);
+    t->fun.params = params;
+    t->fun.count = count;
+    t->fun.ret = ret;
     return t;
 }
 
@@ -110,12 +142,29 @@ static Type *gc_stats_type(void) {
 
 /* --- type equality / assignability -------------------------------------- */
 
-static bool type_eq(const Type *a, const Type *b) {
+/* Cycle-safe type comparison: resolve alias references, then recurse with a
+ * memoized set of in-progress pairs (coinductive equality). */
+typedef struct {
+    const Type *a[256], *b[256];
+    size_t count;
+} EqVis;
+
+static bool eq_seen_sym(const EqVis *v, const Type *a, const Type *b) {
+    for (size_t i = 0; i < v->count; i++)
+        if ((v->a[i] == a && v->b[i] == b) || (v->a[i] == b && v->b[i] == a))
+            return true;
+    return false;
+}
+
+static bool type_eq_rec(const Type *a0, const Type *b0, EqVis *v) {
+    const Type *a = ty_resolve(a0), *b = ty_resolve(b0);
     if (a == b) return true;
     if (a->k != b->k) return false;
+    if (eq_seen_sym(v, a, b)) return true;
+    if (v->count < 256) { v->a[v->count] = a; v->b[v->count] = b; v->count++; }
     switch (a->k) {
     case TY_LIST:
-        return type_eq(a->elem, b->elem);
+        return type_eq_rec(a->elem, b->elem, v);
     case TY_LIT:
         if (a->lit.base != b->lit.base) return false;
         if (a->lit.base == TY_STR) return strcmp(a->lit.sval, b->lit.sval) == 0;
@@ -128,7 +177,8 @@ static bool type_eq(const Type *a, const Type *b) {
             bool found = false;
             for (size_t j = 0; j < b->rec.count; j++)
                 if (strcmp(a->rec.names[i], b->rec.names[j]) == 0) {
-                    if (!type_eq(a->rec.types[i], b->rec.types[j])) return false;
+                    if (!type_eq_rec(a->rec.types[i], b->rec.types[j], v))
+                        return false;
                     found = true;
                     break;
                 }
@@ -141,28 +191,52 @@ static bool type_eq(const Type *a, const Type *b) {
         for (size_t i = 0; i < a->uni.count; i++) {
             bool found = false;
             for (size_t j = 0; j < b->uni.count; j++)
-                if (type_eq(a->uni.alts[i], b->uni.alts[j])) { found = true; break; }
+                if (type_eq_rec(a->uni.alts[i], b->uni.alts[j], v)) {
+                    found = true;
+                    break;
+                }
             if (!found) return false;
         }
         return true;
+    }
+    case TY_FUNC: {
+        if (a->fun.count != b->fun.count) return false;
+        for (size_t i = 0; i < a->fun.count; i++)
+            if (!type_eq_rec(a->fun.params[i], b->fun.params[i], v)) return false;
+        return type_eq_rec(a->fun.ret, b->fun.ret, v);
     }
     default:
         return true;
     }
 }
 
-static bool assignable(const Type *dst, const Type *src) {
+static bool type_eq(const Type *a, const Type *b) {
+    EqVis v = {0};
+    return type_eq_rec(a, b, &v);
+}
+
+static bool eq_seen_dir(const EqVis *v, const Type *a, const Type *b) {
+    for (size_t i = 0; i < v->count; i++)
+        if (v->a[i] == a && v->b[i] == b) return true;
+    return false;
+}
+
+static bool assignable_rec(const Type *dst0, const Type *src0, EqVis *v) {
+    const Type *dst = ty_resolve(dst0), *src = ty_resolve(src0);
+    if (dst == src) return true;
     if (dst->k == TY_ANY || src->k == TY_ANY) return true;
     if (src->k == TY_NEVER) return true;  /* ⊥ is a subtype of everything */
     if (dst->k == TY_NEVER) return false; /* ...and nothing else fits it */
+    if (eq_seen_dir(v, dst, src)) return true; /* coinductive: assume on cycle */
+    if (v->count < 256) { v->a[v->count] = dst; v->b[v->count] = src; v->count++; }
     if (src->k == TY_UNION) { /* every alternative must fit */
         for (size_t i = 0; i < src->uni.count; i++)
-            if (!assignable(dst, src->uni.alts[i])) return false;
+            if (!assignable_rec(dst, src->uni.alts[i], v)) return false;
         return true;
     }
     if (dst->k == TY_UNION) { /* some alternative must accept it */
         for (size_t i = 0; i < dst->uni.count; i++)
-            if (assignable(dst->uni.alts[i], src)) return true;
+            if (assignable_rec(dst->uni.alts[i], src, v)) return true;
         return false;
     }
     if (dst->k == TY_LIT) /* only the identical literal inhabits a literal */
@@ -173,14 +247,14 @@ static bool assignable(const Type *dst, const Type *src) {
     switch (dst->k) {
     case TY_INT:   return sk == TY_INT || sk == TY_BOOL;
     case TY_FLOAT: return sk == TY_FLOAT || sk == TY_INT || sk == TY_BOOL;
-    case TY_LIST:  return src->k == TY_LIST && assignable(dst->elem, src->elem);
+    case TY_LIST:  return src->k == TY_LIST && assignable_rec(dst->elem, src->elem, v);
     case TY_REC:   /* structural width subtyping */
         if (src->k != TY_REC) return false;
         for (size_t i = 0; i < dst->rec.count; i++) {
             bool found = false;
             for (size_t j = 0; j < src->rec.count; j++)
                 if (strcmp(dst->rec.names[i], src->rec.names[j]) == 0) {
-                    if (!assignable(dst->rec.types[i], src->rec.types[j]))
+                    if (!assignable_rec(dst->rec.types[i], src->rec.types[j], v))
                         return false;
                     found = true;
                     break;
@@ -188,9 +262,19 @@ static bool assignable(const Type *dst, const Type *src) {
             if (!found) return false;
         }
         return true;
+    case TY_FUNC: /* invariant params, covariant return */
+        if (src->k != TY_FUNC || src->fun.count != dst->fun.count) return false;
+        for (size_t i = 0; i < dst->fun.count; i++)
+            if (!type_eq(dst->fun.params[i], src->fun.params[i])) return false;
+        return assignable_rec(dst->fun.ret, src->fun.ret, v);
     default:
         return dst->k == sk;
     }
+}
+
+static bool assignable(const Type *dst, const Type *src) {
+    EqVis v = {0};
+    return assignable_rec(dst, src, &v);
 }
 
 /* union of two types, flattened and deduplicated */
@@ -242,6 +326,7 @@ static Type *lit_base(const Type *t) {
 /* collapse literal types to their base for operators: "a" -> str, 1|2 -> int.
  * Applies regardless of freshness (a Dice = 1|..|6 still adds like an int). */
 static Type *ty_base(Type *t) {
+    if (t->k == TY_ALIAS) return ty_base(ty_resolve(t));
     if (t->k == TY_LIT) return lit_base(t);
     if (t->k == TY_UNION) {
         bool has_lit = false;
@@ -314,6 +399,16 @@ static void type_write(char *buf, size_t cap, const Type *t) {
     case TY_FLOAT: tw_append(buf, cap, "float"); break;
     case TY_STR:   tw_append(buf, cap, "str"); break;
     case TY_VAR:   tw_append(buf, cap, t->var); break;
+    case TY_ALIAS: tw_append(buf, cap, ((const Alias *)t->ref.al)->name); break;
+    case TY_FUNC:
+        tw_append(buf, cap, "(");
+        for (size_t i = 0; i < t->fun.count; i++) {
+            if (i) tw_append(buf, cap, ", ");
+            type_write(buf, cap, t->fun.params[i]);
+        }
+        tw_append(buf, cap, ") -> ");
+        type_write(buf, cap, t->fun.ret);
+        break;
     case TY_LIT:
         switch (t->lit.base) {
         case TY_INT:
@@ -387,16 +482,19 @@ typedef struct {
     const Stmt *node;
 } FuncSig;
 
-typedef struct {
-    char *name;
-    Type *type;          /* resolved eagerly for non-generic aliases */
-    char **params;       /* generic parameters, NULL when non-generic */
-    size_t param_count;
-    const TypeExpr *body; /* unresolved body for generic aliases */
-} Alias;
-
 /* type-variable environment used while resolving type expressions */
 typedef struct { char **names; Type **types; size_t count; } TyEnv;
+
+/* A lexical scope for one function body: its locals plus the nested `def`s
+ * registered directly within it. Scopes chain to the enclosing function, so a
+ * nested function can read (capture) enclosing locals and call sibling
+ * functions by name. */
+typedef struct Scope {
+    VarEnv locals;
+    FuncSig *funcs;        /* nested `def`s registered in this scope */
+    size_t func_count, func_cap;
+    struct Scope *parent;  /* enclosing function scope; NULL for a top def */
+} Scope;
 
 typedef struct {
     const char *filename;
@@ -404,10 +502,10 @@ typedef struct {
     Alias *aliases;
     size_t alias_count, alias_cap;
     int alias_depth;  /* guards recursive generic alias expansion */
-    FuncSig *funcs;
+    FuncSig *funcs;   /* top-level function signatures */
     size_t func_count;
     VarEnv globals;
-    VarEnv *locals;   /* NULL at top level */
+    Scope *scope;     /* current function scope; NULL at top level */
     Type *cur_ret;    /* declared return type of the current function */
     int loop_depth;
 } Ck;
@@ -445,18 +543,25 @@ static Var *env_add(VarEnv *env, const char *name, Type *t, bool annotated) {
 }
 
 static Var *lookup_var(Ck *ck, const char *name) {
-    Var *v = ck->locals ? env_find(ck->locals, name) : NULL;
-    if (!v) v = env_find(&ck->globals, name);
-    return v;
+    for (Scope *sc = ck->scope; sc; sc = sc->parent) {
+        Var *v = env_find(&sc->locals, name);
+        if (v) return v;
+    }
+    return env_find(&ck->globals, name);
 }
 
 static bool is_builtin(const char *name) {
     return strcmp(name, "print") == 0 || strcmp(name, "len") == 0 ||
            strcmp(name, "range") == 0 || strcmp(name, "str") == 0 ||
-           strcmp(name, "int") == 0 || strcmp(name, "gc_stats") == 0;
+           strcmp(name, "int") == 0 || strcmp(name, "gc_stats") == 0 ||
+           strcmp(name, "read_file") == 0 || strcmp(name, "write_file") == 0 ||
+           strcmp(name, "run") == 0;
 }
 
 static FuncSig *find_func(Ck *ck, const char *name) {
+    for (Scope *sc = ck->scope; sc; sc = sc->parent)
+        for (size_t i = 0; i < sc->func_count; i++)
+            if (strcmp(sc->funcs[i].name, name) == 0) return &sc->funcs[i];
     for (size_t i = 0; i < ck->func_count; i++)
         if (strcmp(ck->funcs[i].name, name) == 0) return &ck->funcs[i];
     return NULL;
@@ -500,6 +605,13 @@ static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
             if (te->arg_count) {
                 ck_error(ck, te->line, "type '%s' is not generic", te->name);
                 return &t_any;
+            }
+            if (al->resolving) { /* recursive self-reference */
+                Type *r = ty_new(TY_ALIAS);
+                r->ref.al = al;
+                r->ref.args = NULL;
+                r->ref.argc = 0;
+                return r;
             }
             return al->type;
         }
@@ -556,6 +668,12 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
     }
     case TE_UNION:
         return ty_join(resolve_type(ck, te->lhs, env), resolve_type(ck, te->rhs, env));
+    case TE_FUNC: {
+        Type **params = xmalloc(sizeof(Type *) * (te->fun.param_count ? te->fun.param_count : 1));
+        for (size_t i = 0; i < te->fun.param_count; i++)
+            params[i] = resolve_type(ck, te->fun.params[i], env);
+        return ty_func(params, te->fun.param_count, resolve_type(ck, te->fun.ret, env));
+    }
     case TE_INTER: {
         Type *a = resolve_type(ck, te->lhs, env);
         Type *b = resolve_type(ck, te->rhs, env);
@@ -616,6 +734,10 @@ static bool contains_var(const Type *t) {
         for (size_t i = 0; i < t->uni.count; i++)
             if (contains_var(t->uni.alts[i])) return true;
         return false;
+    case TY_FUNC:
+        for (size_t i = 0; i < t->fun.count; i++)
+            if (contains_var(t->fun.params[i])) return true;
+        return contains_var(t->fun.ret);
     default:
         return false;
     }
@@ -649,6 +771,16 @@ static Type *ty_subst(Type *t, Subst *sub) {
             r = ty_join(r, ty_subst(t->uni.alts[i], sub));
         return r;
     }
+    case TY_FUNC: {
+        if (!contains_var(t)) return t;
+        Type *r = ty_new(TY_FUNC);
+        r->fun.count = t->fun.count;
+        r->fun.params = xmalloc(sizeof(Type *) * (t->fun.count ? t->fun.count : 1));
+        for (size_t i = 0; i < t->fun.count; i++)
+            r->fun.params[i] = ty_subst(t->fun.params[i], sub);
+        r->fun.ret = ty_subst(t->fun.ret, sub);
+        return r;
+    }
     default:
         return t;
     }
@@ -657,6 +789,8 @@ static Type *ty_subst(Type *t, Subst *sub) {
 /* structurally match `arg` against `param`, binding type variables in `sub`.
  * Mismatches bind nothing; the caller re-checks assignability afterwards. */
 static void unify(Type *param, Type *arg, Subst *sub) {
+    param = ty_resolve(param);
+    arg = ty_resolve(arg);
     if (arg->k == TY_ANY || arg->k == TY_NEVER) return;
     switch (param->k) {
     case TY_VAR: {
@@ -768,87 +902,129 @@ static Type *infer_binop(Ck *ck, const Expr *e) {
 }
 
 static Type *infer_call(Ck *ck, const Expr *e) {
-    const char *name = e->as.call.fn->as.sval;
+    const Expr *fn = e->as.call.fn;
     size_t argc = e->as.call.count;
     Type **argt = xmalloc(sizeof(Type *) * (argc ? argc : 1));
     for (size_t i = 0; i < argc; i++)
         argt[i] = infer(ck, e->as.call.args[i]);
 
-    if (strcmp(name, "print") == 0) return &t_none;
-    if (strcmp(name, "len") == 0) {
-        if (argc != 1)
-            ck_error(ck, e->line, "len() takes 1 argument, got %zu", argc);
-        else {
-            Type *a = ty_base(argt[0]);
-            if (a->k != TY_ANY && a->k != TY_STR && a->k != TY_LIST &&
-                a->k != TY_REC && a->k != TY_UNION && a->k != TY_NEVER)
-                ck_error(ck, e->line, "%s has no len()", type_str(argt[0]));
+    if (fn->kind == E_NAME) {
+        const char *name = fn->as.sval;
+        if (strcmp(name, "print") == 0) return &t_none;
+        if (strcmp(name, "len") == 0) {
+            if (argc != 1)
+                ck_error(ck, e->line, "len() takes 1 argument, got %zu", argc);
+            else {
+                Type *a = ty_base(argt[0]);
+                if (a->k != TY_ANY && a->k != TY_STR && a->k != TY_LIST &&
+                    a->k != TY_REC && a->k != TY_UNION && a->k != TY_NEVER)
+                    ck_error(ck, e->line, "%s has no len()", type_str(argt[0]));
+            }
+            return &t_int;
         }
-        return &t_int;
-    }
-    if (strcmp(name, "range") == 0) {
-        if (argc != 1 && argc != 2)
-            ck_error(ck, e->line, "range() takes 1 or 2 arguments, got %zu", argc);
-        for (size_t i = 0; i < argc; i++)
-            if (!assignable(&t_int, argt[i]))
-                ck_error(ck, e->line, "range() argument %zu must be int, got %s",
-                         i + 1, type_str(argt[i]));
-        return ty_list(&t_int);
-    }
-    if (strcmp(name, "str") == 0) {
-        if (argc != 1)
-            ck_error(ck, e->line, "str() takes 1 argument, got %zu", argc);
-        return &t_str;
-    }
-    if (strcmp(name, "int") == 0) {
-        if (argc != 1)
-            ck_error(ck, e->line, "int() takes 1 argument, got %zu", argc);
-        return &t_int;
-    }
-    if (strcmp(name, "gc_stats") == 0) {
-        if (argc != 0)
-            ck_error(ck, e->line, "gc_stats() takes 0 arguments, got %zu", argc);
-        return gc_stats_type();
+        if (strcmp(name, "range") == 0) {
+            if (argc != 1 && argc != 2)
+                ck_error(ck, e->line, "range() takes 1 or 2 arguments, got %zu", argc);
+            for (size_t i = 0; i < argc; i++)
+                if (!assignable(&t_int, argt[i]))
+                    ck_error(ck, e->line, "range() argument %zu must be int, got %s",
+                             i + 1, type_str(argt[i]));
+            return ty_list(&t_int);
+        }
+        if (strcmp(name, "str") == 0) {
+            if (argc != 1)
+                ck_error(ck, e->line, "str() takes 1 argument, got %zu", argc);
+            return &t_str;
+        }
+        if (strcmp(name, "int") == 0) {
+            if (argc != 1)
+                ck_error(ck, e->line, "int() takes 1 argument, got %zu", argc);
+            return &t_int;
+        }
+        if (strcmp(name, "gc_stats") == 0) {
+            if (argc != 0)
+                ck_error(ck, e->line, "gc_stats() takes 0 arguments, got %zu", argc);
+            return gc_stats_type();
+        }
+        if (strcmp(name, "read_file") == 0) {
+            if (argc != 1)
+                ck_error(ck, e->line, "read_file() takes 1 argument, got %zu", argc);
+            else if (!assignable(&t_str, argt[0]))
+                ck_error(ck, e->line, "read_file() path must be str, got %s", type_str(argt[0]));
+            return &t_str;
+        }
+        if (strcmp(name, "write_file") == 0) {
+            if (argc != 2)
+                ck_error(ck, e->line, "write_file() takes 2 arguments, got %zu", argc);
+            return &t_none;
+        }
+        if (strcmp(name, "run") == 0) {
+            if (argc != 1)
+                ck_error(ck, e->line, "run() takes 1 argument, got %zu", argc);
+            else if (!assignable(&t_str, argt[0]))
+                ck_error(ck, e->line, "run() command must be str, got %s", type_str(argt[0]));
+            return &t_int;
+        }
+
+        FuncSig *f = find_func(ck, name);
+        if (f) {
+            if (argc != f->param_count) {
+                ck_error(ck, e->line, "%s() takes %zu argument%s, got %zu", name,
+                         f->param_count, f->param_count == 1 ? "" : "s", argc);
+                return f->tparam_count ? &t_any : f->ret;
+            }
+            if (f->tparam_count == 0) {
+                for (size_t i = 0; i < argc; i++)
+                    if (!assignable(f->params[i], argt[i]))
+                        ck_error(ck, e->line,
+                                 "argument %zu of %s(): expected %s, got %s",
+                                 i + 1, name, type_str(f->params[i]), type_str(argt[i]));
+                return f->ret;
+            }
+            /* generic call: infer type arguments by unification, then re-check */
+            Subst sub;
+            sub.names = f->tparams;
+            sub.count = f->tparam_count;
+            sub.types = xmalloc(sizeof(Type *) * f->tparam_count);
+            memset(sub.types, 0, sizeof(Type *) * f->tparam_count);
+            for (size_t i = 0; i < argc; i++)
+                unify(f->params[i], argt[i], &sub);
+            for (size_t j = 0; j < f->tparam_count; j++)
+                if (!sub.types[j]) sub.types[j] = &t_any;
+            for (size_t i = 0; i < argc; i++) {
+                Type *pi = ty_subst(f->params[i], &sub);
+                if (!assignable(pi, argt[i]))
+                    ck_error(ck, e->line,
+                             "argument %zu of %s(): expected %s, got %s",
+                             i + 1, name, type_str(pi), type_str(argt[i]));
+            }
+            Type *ret = ty_subst(f->ret, &sub);
+            free(sub.types);
+            return ret;
+        }
+        /* an undefined name being called is its own error */
+        if (!lookup_var(ck, name)) {
+            ck_error(ck, e->line, "call to undefined function '%s'", name);
+            return &t_any;
+        }
+        /* otherwise a function value held in a variable: indirect call */
     }
 
-    FuncSig *f = find_func(ck, name);
-    if (!f) {
-        ck_error(ck, e->line, "call to undefined function '%s'", name);
+    Type *ft = ty_resolve(infer(ck, fn));
+    if (ft->k != TY_FUNC) {
+        ck_error(ck, e->line, "value of type %s is not callable", type_str(ft));
         return &t_any;
     }
-    if (argc != f->param_count) {
-        ck_error(ck, e->line, "%s() takes %zu argument%s, got %zu", name,
-                 f->param_count, f->param_count == 1 ? "" : "s", argc);
-        return f->tparam_count ? &t_any : f->ret;
+    if (argc != ft->fun.count) {
+        ck_error(ck, e->line, "function takes %zu argument%s, got %zu",
+                 ft->fun.count, ft->fun.count == 1 ? "" : "s", argc);
+        return ft->fun.ret;
     }
-    if (f->tparam_count == 0) {
-        for (size_t i = 0; i < argc; i++)
-            if (!assignable(f->params[i], argt[i]))
-                ck_error(ck, e->line,
-                         "argument %zu of %s(): expected %s, got %s",
-                         i + 1, name, type_str(f->params[i]), type_str(argt[i]));
-        return f->ret;
-    }
-    /* generic call: infer type arguments by unification, then re-check */
-    Subst sub;
-    sub.names = f->tparams;
-    sub.count = f->tparam_count;
-    sub.types = xmalloc(sizeof(Type *) * f->tparam_count);
-    memset(sub.types, 0, sizeof(Type *) * f->tparam_count);
     for (size_t i = 0; i < argc; i++)
-        unify(f->params[i], argt[i], &sub);
-    for (size_t j = 0; j < f->tparam_count; j++)
-        if (!sub.types[j]) sub.types[j] = &t_any;
-    for (size_t i = 0; i < argc; i++) {
-        Type *pi = ty_subst(f->params[i], &sub);
-        if (!assignable(pi, argt[i]))
-            ck_error(ck, e->line,
-                     "argument %zu of %s(): expected %s, got %s",
-                     i + 1, name, type_str(pi), type_str(argt[i]));
-    }
-    Type *ret = ty_subst(f->ret, &sub);
-    free(sub.types);
-    return ret;
+        if (!assignable(ft->fun.params[i], argt[i]))
+            ck_error(ck, e->line, "argument %zu: expected %s, got %s",
+                     i + 1, type_str(ft->fun.params[i]), type_str(argt[i]));
+    return ft->fun.ret;
 }
 
 static Type *infer(Ck *ck, const Expr *e) {
@@ -872,10 +1048,24 @@ static Type *infer(Ck *ck, const Expr *e) {
     case E_NONE:  return &t_none;
     case E_NAME: {
         Var *v = lookup_var(ck, e->as.sval);
-        if (v) return v->type;
-        if (find_func(ck, e->as.sval) || is_builtin(e->as.sval)) {
-            ck_error(ck, e->line,
-                     "'%s' is a function; functions are not values in Emerald",
+        if (v) {
+            /* a variable captured from an enclosing function reads its stable
+             * declared type (flow narrowing does not cross a closure boundary) */
+            bool captured =
+                ck->scope != NULL &&
+                env_find(&ck->scope->locals, e->as.sval) == NULL &&
+                env_find(&ck->globals, e->as.sval) == NULL;
+            return captured ? v->decl : v->type;
+        }
+        FuncSig *f = find_func(ck, e->as.sval);
+        if (f) {
+            if (f->tparam_count) return &t_any; /* generics aren't first-class */
+            Type **params = xmalloc(sizeof(Type *) * (f->param_count ? f->param_count : 1));
+            for (size_t i = 0; i < f->param_count; i++) params[i] = f->params[i];
+            return ty_func(params, f->param_count, f->ret);
+        }
+        if (is_builtin(e->as.sval)) {
+            ck_error(ck, e->line, "'%s' is a builtin; builtins are not values",
                      e->as.sval);
             return &t_any;
         }
@@ -926,7 +1116,7 @@ static Type *infer(Ck *ck, const Expr *e) {
         return &t_any;
     }
     case E_ATTR: {
-        Type *obj = infer(ck, e->as.attr.obj);
+        Type *obj = ty_resolve(infer(ck, e->as.attr.obj));
         if (obj->k == TY_ANY) return &t_any;
         if (obj->k == TY_NEVER) return &t_never;
         if (obj->k == TY_REC) {
@@ -1015,6 +1205,7 @@ static Type *lit_of_expr(const Expr *e) {
 
 /* `x == lit`: if the value equals the literal, its type IS the literal */
 static Type *narrow_eq(Type *t, Type *lit) {
+    t = ty_resolve(t);
     Type **alts = t->k == TY_UNION ? t->uni.alts : &t;
     size_t n = t->k == TY_UNION ? t->uni.count : 1;
     for (size_t i = 0; i < n; i++) {
@@ -1027,6 +1218,7 @@ static Type *narrow_eq(Type *t, Type *lit) {
 
 /* `x != lit`: drop alternatives that are exactly that literal */
 static Type *narrow_ne(Type *t, Type *lit) {
+    t = ty_resolve(t);
     Type **alts = t->k == TY_UNION ? t->uni.alts : &t;
     size_t n = t->k == TY_UNION ? t->uni.count : 1;
     Type **keep = xmalloc(sizeof(Type *) * (n ? n : 1));
@@ -1048,6 +1240,7 @@ static Type *narrow_ne(Type *t, Type *lit) {
 /* `x.field == lit` (discriminated unions): keep alternatives whose field
  * could hold the literal; for != drop those whose field IS the literal */
 static Type *narrow_field(Type *t, const char *fname, Type *lit, bool eq) {
+    t = ty_resolve(t);
     Type **alts = t->k == TY_UNION ? t->uni.alts : &t;
     size_t n = t->k == TY_UNION ? t->uni.count : 1;
     Type **keep = xmalloc(sizeof(Type *) * (n ? n : 1));
@@ -1077,6 +1270,7 @@ static Type *narrow_field(Type *t, const char *fname, Type *lit, bool eq) {
 
 /* truthiness of a bare `if x`: drop alternatives ruled out by the branch */
 static Type *narrow_truthy(Type *t, bool sense) {
+    t = ty_resolve(t);
     Type **alts = t->k == TY_UNION ? t->uni.alts : &t;
     size_t n = t->k == TY_UNION ? t->uni.count : 1;
     Type **keep = xmalloc(sizeof(Type *) * (n ? n : 1));
@@ -1247,6 +1441,7 @@ static bool block_returns(const Block *b) {
 /* --- statements ---------------------------------------------------------- */
 
 static void check_block(Ck *ck, const Block *b);
+static void check_func(Ck *ck, Scope *parent, const Stmt *s);
 
 /* record a successful assignment: reads after this see the value's (widened)
  * type when it is more precise than the declared one (assignment narrowing) */
@@ -1286,9 +1481,9 @@ static void check_assign(Ck *ck, const Stmt *s) {
             ck_error(ck, s->line, "cannot assign to function name '%s'", name);
             return;
         }
-        VarEnv *env = ck->locals ? ck->locals : &ck->globals;
+        VarEnv *env = ck->scope ? &ck->scope->locals : &ck->globals;
         Var *v = env_find(env, name);
-        if (!v && ck->locals) v = env_find(&ck->globals, name); /* docs rule */
+        if (!v && ck->scope) v = env_find(&ck->globals, name); /* docs rule */
         if (s->as.assign.ann) {
             Type *ann = resolve_type(ck, s->as.assign.ann, NULL);
             if (!assignable(ann, val))
@@ -1345,7 +1540,7 @@ static void check_assign(Ck *ck, const Stmt *s) {
     }
 
     /* E_ATTR */
-    Type *obj = infer(ck, target->as.attr.obj);
+    Type *obj = ty_resolve(infer(ck, target->as.attr.obj));
     if (obj->k == TY_ANY || obj->k == TY_NEVER) return;
     if (obj->k != TY_REC) {
         ck_error(ck, s->line, "type %s has no fields (assigning '%s')",
@@ -1446,9 +1641,9 @@ static void check_stmt(Ck *ck, const Stmt *s) {
         else if (seq->k == TY_STR) elem = &t_str;
         else if (seq->k != TY_ANY && seq->k != TY_UNION && seq->k != TY_NEVER)
             ck_error(ck, s->line, "%s is not iterable", type_str(seq));
-        VarEnv *env = ck->locals ? ck->locals : &ck->globals;
+        VarEnv *env = ck->scope ? &ck->scope->locals : &ck->globals;
         Var *v = env_find(env, s->as.fr.var);
-        if (!v && ck->locals) v = env_find(&ck->globals, s->as.fr.var);
+        if (!v && ck->scope) v = env_find(&ck->globals, s->as.fr.var);
         if (!v) v = env_add(env, s->as.fr.var, elem, false);
         else if (!v->annotated) v->decl = v->bound ? ty_join(v->decl, elem) : elem;
         else if (!assignable(v->decl, elem))
@@ -1461,7 +1656,7 @@ static void check_stmt(Ck *ck, const Stmt *s) {
         break;
     }
     case S_RETURN: {
-        if (!ck->locals) {
+        if (!ck->scope) {
             ck_error(ck, s->line, "'return' outside of a function");
             break;
         }
@@ -1485,9 +1680,9 @@ static void check_stmt(Ck *ck, const Stmt *s) {
         check_block(ck, &s->as.block);
         break;
     case S_FUNC:
-        if (ck->locals)
-            ck_error(ck, s->line, "nested functions are not supported yet");
-        /* bodies are checked in a dedicated pass; nothing to do here */
+        if (ck->scope)
+            check_func(ck, ck->scope, s); /* nested def: check its body now */
+        /* top-level bodies are checked in a dedicated pass */
         break;
     case S_TYPEDEF:
         /* resolved during the signature pass */
@@ -1524,21 +1719,100 @@ static TyEnv func_tyenv(const Stmt *s) {
     return env;
 }
 
-static void check_func_body(Ck *ck, const Stmt *s) {
+/* register a function signature into `scope` (nested) or ck->funcs (top). */
+static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
+    if (is_builtin(s->as.func.name)) {
+        ck_error(ck, s->line, "cannot redefine builtin '%s'", s->as.func.name);
+        return;
+    }
+    FuncSig *f;
+    if (scope) {
+        for (size_t i = 0; i < scope->func_count; i++)
+            if (strcmp(scope->funcs[i].name, s->as.func.name) == 0) {
+                ck_error(ck, s->line, "function '%s' is already defined",
+                         s->as.func.name);
+                return;
+            }
+        if (scope->func_count == scope->func_cap) {
+            scope->func_cap = scope->func_cap ? scope->func_cap * 2 : 4;
+            scope->funcs = realloc(scope->funcs, sizeof(FuncSig) * scope->func_cap);
+            if (!scope->funcs) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        }
+        f = &scope->funcs[scope->func_count++];
+    } else {
+        for (size_t i = 0; i < ck->func_count; i++)
+            if (strcmp(ck->funcs[i].name, s->as.func.name) == 0) {
+                ck_error(ck, s->line, "function '%s' is already defined",
+                         s->as.func.name);
+                return;
+            }
+        f = &ck->funcs[ck->func_count++];
+    }
     TyEnv tenv = func_tyenv(s);
     TyEnv *te = tenv.count ? &tenv : NULL;
-    VarEnv locals = {0};
+    f->name = s->as.func.name;
+    f->tparams = s->as.func.tparams;
+    f->tparam_count = s->as.func.tparam_count;
+    f->param_count = s->as.func.param_count;
+    f->params = xmalloc(sizeof(Type *) * (f->param_count ? f->param_count : 1));
+    for (size_t j = 0; j < f->param_count; j++)
+        f->params[j] = resolve_type(ck, s->as.func.param_types[j], te);
+    f->ret = resolve_type(ck, s->as.func.ret_type, te);
+    f->node = s;
+    free(tenv.types);
+}
+
+/* pre-register every nested `def` in a block (function-level scoping), so
+ * sibling functions can be referenced before their definition appears. */
+static void register_nested(Ck *ck, Scope *scope, const Block *b) {
+    for (size_t i = 0; i < b->count; i++) {
+        const Stmt *s = b->items[i];
+        switch (s->kind) {
+        case S_FUNC:
+            register_func(ck, scope, s);
+            break;
+        case S_IF:
+            for (size_t j = 0; j < s->as.ifs.count; j++)
+                register_nested(ck, scope, &s->as.ifs.blocks[j]);
+            if (s->as.ifs.has_else)
+                register_nested(ck, scope, &s->as.ifs.else_block);
+            break;
+        case S_WHILE:
+            register_nested(ck, scope, &s->as.wh.body);
+            break;
+        case S_FOR:
+            register_nested(ck, scope, &s->as.fr.body);
+            break;
+        case S_BLOCK:
+            register_nested(ck, scope, &s->as.block);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
+    TyEnv tenv = func_tyenv(s);
+    TyEnv *te = tenv.count ? &tenv : NULL;
+
+    Scope sc;
+    memset(&sc, 0, sizeof(sc));
+    sc.parent = parent;
     for (size_t i = 0; i < s->as.func.param_count; i++) {
         Type *pt = resolve_type(ck, s->as.func.param_types[i], te);
-        Var *v = env_add(&locals, s->as.func.params[i], pt,
+        Var *v = env_add(&sc.locals, s->as.func.params[i], pt,
                          s->as.func.param_types[i] != NULL);
         v->bound = true;
     }
     /* pre-declare every assigned-in-body name that isn't a global */
-    DeclCtx dc = { ck, &locals, "function" };
+    DeclCtx dc = { ck, &sc.locals, "function" };
     ast_collect_assigned(&s->as.func.body, declare_local, &dc);
+    register_nested(ck, &sc, &s->as.func.body);
 
-    ck->locals = &locals;
+    Scope *saved_scope = ck->scope;
+    Type *saved_ret = ck->cur_ret;
+    ck->scope = &sc;
     ck->cur_ret = resolve_type(ck, s->as.func.ret_type, te);
     /* falling off the end returns None, so a stricter return type demands
      * that every path return explicitly */
@@ -1547,9 +1821,11 @@ static void check_func_body(Ck *ck, const Stmt *s) {
                  "%s() can finish without returning a value, but is declared "
                  "to return %s", s->as.func.name, type_str(ck->cur_ret));
     check_block(ck, &s->as.func.body);
-    ck->locals = NULL;
-    ck->cur_ret = NULL;
-    free(locals.items);
+    ck->scope = saved_scope;
+    ck->cur_ret = saved_ret;
+
+    free(sc.locals.items);
+    free(sc.funcs);
     free(tenv.types);
 }
 
@@ -1573,36 +1849,18 @@ int check_program(const Program *prog, const char *filename) {
         al->params = s->as.tdef.params;
         al->param_count = s->as.tdef.param_count;
         al->body = s->as.tdef.value;
+        al->resolving = true;
         al->type = al->param_count ? NULL
                                    : resolve_type(&ck, s->as.tdef.value, NULL);
+        al->resolving = false;
     }
 
-    /* pass 1b: function signatures */
+    /* pass 1b: top-level function signatures */
     ck.funcs = xmalloc(sizeof(FuncSig) * (prog->body.count ? prog->body.count : 1));
     for (size_t i = 0; i < prog->body.count; i++) {
         const Stmt *s = prog->body.items[i];
         if (s->kind != S_FUNC) continue;
-        if (is_builtin(s->as.func.name)) {
-            ck_error(&ck, s->line, "cannot redefine builtin '%s'", s->as.func.name);
-            continue;
-        }
-        if (find_func(&ck, s->as.func.name)) {
-            ck_error(&ck, s->line, "function '%s' is already defined", s->as.func.name);
-            continue;
-        }
-        TyEnv tenv = func_tyenv(s);
-        TyEnv *te = tenv.count ? &tenv : NULL;
-        FuncSig *f = &ck.funcs[ck.func_count++];
-        f->name = s->as.func.name;
-        f->tparams = s->as.func.tparams;
-        f->tparam_count = s->as.func.tparam_count;
-        f->param_count = s->as.func.param_count;
-        f->params = xmalloc(sizeof(Type *) * (f->param_count ? f->param_count : 1));
-        for (size_t j = 0; j < f->param_count; j++)
-            f->params[j] = resolve_type(&ck, s->as.func.param_types[j], te);
-        f->ret = resolve_type(&ck, s->as.func.ret_type, te);
-        f->node = s;
-        free(tenv.types);
+        register_func(&ck, NULL, s);
     }
 
     /* pass 2a: top-level statements (this populates global variable types) */
@@ -1610,7 +1868,7 @@ int check_program(const Program *prog, const char *filename) {
 
     /* pass 2b: function bodies, with all globals known */
     for (size_t i = 0; i < ck.func_count; i++)
-        check_func_body(&ck, ck.funcs[i].node);
+        check_func(&ck, NULL, ck.funcs[i].node);
 
     return ck.errors;
 }

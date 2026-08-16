@@ -1,0 +1,51 @@
+def make_adder(n: int) -> (int) -> int {
+    def add(x: int) -> int { return x + n }
+    return add
+}
+
+f = make_adder(10)
+g = make_adder(100)
+print(f(5), g(5), f(1))
+
+# mutable capture via a shared list cell
+def make_counter() -> (int) -> int {
+    state = [0]
+    def inc(d: int) -> int {
+        state[0] = state[0] + d
+        return state[0]
+    }
+    return inc
+}
+c = make_counter()
+print(c(1), c(2), c(3))
+
+# recursion through a nested function
+def make_fact() -> (int) -> int {
+    def fact(n: int) -> int {
+        if n <= 1 { return 1 }
+        return n * fact(n - 1)
+    }
+    return fact
+}
+print(make_fact()(5))
+
+# deep capture through an intermediate scope
+def outer() -> (int) -> int {
+    x = 7
+    def mid() -> (int) -> int {
+        def inner(y: int) -> int { return x + y }
+        return inner
+    }
+    return mid()
+}
+print(outer()(3))
+
+# sibling functions referencing each other
+def ops() -> (int) -> int {
+    base = 10
+    def double(v: int) -> int { return v * 2 }
+    def triple(v: int) -> int { return v * 3 }
+    def both(v: int) -> int { return double(v) + triple(v) + base }
+    return both
+}
+print(ops()(2))

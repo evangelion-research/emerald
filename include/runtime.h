@@ -22,7 +22,7 @@
 #include <stdint.h>
 
 typedef enum { V_NONE, V_BOOL, V_INT, V_FLOAT, V_OBJ, V_STR } VTag;
-typedef enum { O_STR, O_LIST, O_REC } OTag;
+typedef enum { O_STR, O_LIST, O_REC, O_FUNC, O_CELL } OTag;
 
 typedef struct Obj Obj;
 
@@ -50,6 +50,18 @@ struct Obj {
         struct { size_t len; char *data; } str;              /* NUL-terminated */
         struct { size_t len, cap; Value *items; } list;
         struct { size_t len, cap; const char **keys; Value *vals; } rec;
+        /* O_FUNC: a first-class function. `fn` takes the captured env and a
+         * packed array of `arity` arguments; `env` is NULL for top-level
+         * functions with no captures. Captured variables are stored in O_CELL
+         * boxes so that both the defining scope and every closure that
+         * captures them share one mutable cell. */
+        struct {
+            Value (*fn)(Value *env, Value *args);
+            Value *env;
+            size_t env_count;
+            size_t arity;
+        } func;
+        struct { Value val; } cell;   /* O_CELL: a mutable captured variable */
     } as;
 };
 
@@ -119,5 +131,16 @@ Value em_range(Value lo, Value hi);
 Value em_str(Value v);
 Value em_int_of(Value v);
 Value em_gc_stats(void); /* record of GC counters for observability */
+Value em_read_file(Value path);   /* contents of a file as a string */
+void  em_write_file(Value path, Value content); /* write a string to a file */
+Value em_run(Value cmd);          /* run a shell command; returns exit status */
+
+/* first-class functions & closures */
+Value em_mkclosure(Value (*fn)(Value *env, Value *args), size_t arity,
+                   Value *env, size_t env_count);
+Value em_call(Value fn, size_t argc, ...);
+Value em_cell(Value v);        /* heap-box a value (mutable capture cell) */
+Value em_cell_get(Value cell);
+void  em_cell_set(Value cell, Value v);
 
 #endif

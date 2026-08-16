@@ -72,6 +72,16 @@ static void print_type(FILE *out, const TypeExpr *t) {
         print_type(out, t->rhs);
         fputs(")", out);
         break;
+    case TE_FUNC:
+        fputs("(-> (", out);
+        for (size_t i = 0; i < t->fun.param_count; i++) {
+            if (i) fputs(" ", out);
+            print_type(out, t->fun.params[i]);
+        }
+        fputs(") ", out);
+        print_type(out, t->fun.ret);
+        fputs(")", out);
+        break;
     }
 }
 

@@ -94,10 +94,12 @@ location baked in at build time.
 - ~~**Type narrowing**~~ — done, along with literal types, `never`,
   exhaustiveness checking, and generics. See
   [`type-system.md`](type-system.md) and [`proofs.md`](proofs.md).
-- Functions as values + closures (needed for self-hosting, and the missing
-  piece for higher-order proofs).
-- Recursive type aliases — the blocker for inductive data and proofs by
-  induction.
+- ~~**Functions as values + closures**~~ — done: arrow types `(A, B) -> C`,
+  first-class function values, indirect calls, and nested `def`s that
+  capture enclosing locals by shared mutable cell.
+- ~~**Recursive type aliases**~~ — done (non-generic aliases may reference
+  themselves).
+- ~~**File/process I/O**~~ — done (`read_file`, `write_file`, `run`).
 - Methods-by-convention: `f(rec, ...)` sugar as `rec.f(...)`.
 - Exceptions with tracebacks (runtime errors currently exit with a message).
 - Dict/`str` method library; `//`, chained comparisons, `+=`.

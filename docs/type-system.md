@@ -51,6 +51,10 @@ Assignability rules (`dst <- src`):
   unsound in exactly the way TypeScript arrays are. A `list[int]` passed as
   `list[int | None]` can be mutated to smuggle a `None` back; the runtime's
   tagged values keep this from ever being memory-unsafe.
+- A function type `(A, B) -> C` fits `(A', B') -> C'` when its parameters are
+  invariant (`A == A'`, `B == B'`) and its return is covariant (`C` fits
+  `C'`). A top-level `def` name reads as a function value of its declared
+  type; a nested `def` likewise, and it captures enclosing locals.
 
 ## Literal types
 
@@ -132,7 +136,9 @@ branch:
 
 Narrowing applies to plain variables (locals, parameters, globals). Field and
 index expressions are narrowed *through* their base variable, so
-`if s.kind == "circle"` refines `s`, not `s.kind` alone.
+`if s.kind == "circle"` refines `s`, not `s.kind` alone. A variable captured
+by a nested function reads its stable declared type inside that function
+(narrowing does not cross a closure boundary).
 
 ## Exhaustiveness proofs with `never`
 
@@ -244,10 +250,9 @@ are checked in a later pass once global types are known.)
 
 ## Deliberate omissions
 
-- **No function types**: functions are not values, so there are no arrows and
-  no higher-order proofs.
-- **No recursive types**: a generic alias cannot mention itself, which rules
-  out lists-as-cons-cells and inductive proofs over them.
+- **Recursive aliases**: a non-generic alias may reference itself (`type Tree =
+  { v: int, kids: list[Tree] }`), enabling lists-as-cons-cells and inductive
+  data. Recursive *generic* aliases are still rejected.
 - **No bounds on type parameters** (`T extends Comparable`), no variance
   annotations, no conditional or mapped types.
 - **No dependent types**: `list[T]` cannot carry a length, so statements

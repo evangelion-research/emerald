@@ -1,0 +1,19 @@
+def inc(x: int) -> int { return x + 1 }
+def dec(x: int) -> int { return x - 1 }
+def apply(f: (int) -> int, x: int) -> int { return f(x) }
+def compose(f: (int) -> int, g: (int) -> int) -> (int) -> int {
+    def h(x: int) -> int { return f(g(x)) }
+    return h
+}
+
+g = inc
+print(g(41))
+print(apply(dec, 10))
+print(apply(g, 10))
+
+fs = [inc, dec, inc]
+print(fs[0](5), fs[1](5), fs[2](5))
+
+chain = compose(inc, dec)
+print(chain(5))
+print(apply(compose(dec, inc), 9))

@@ -1,0 +1,18 @@
+# Recursive type aliases: a type may reference itself inside its own body.
+type Expr = { kind: "int", ival: int } | { kind: "add", l: Expr, r: Expr }
+type IntList = None | { head: int, tail: IntList }
+
+def eval(e: Expr) -> int {
+    if e.kind == "int" { return e.ival }
+    return eval(e.l) + eval(e.r)
+}
+
+def sum_list(xs: IntList) -> int {
+    if xs == None { return 0 }
+    return xs.head + sum_list(xs.tail)
+}
+
+e: Expr = { kind: "add", l: { kind: "int", ival: 1 },
+            r: { kind: "int", ival: 2 } }
+lst: IntList = { head: 1, tail: None }
+print(eval(e), sum_list(lst))

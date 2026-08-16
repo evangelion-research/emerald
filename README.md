@@ -40,6 +40,29 @@ def head[T](xs: list[T]) -> T { return xs[0] }   # generics
 type Pair[A, B] = { first: A, second: B }
 ```
 
+## Functions are values, closures included
+
+Function types are written `(A, B) -> C`. Pass functions around, call them
+indirectly, and nest `def`s — a nested function captures enclosing locals by
+shared, mutable cell:
+
+```
+def make_adder(n: int) -> (int) -> int {
+    def add(x: int) -> int { return x + n }
+    return add
+}
+
+add5  = make_adder(5)
+add10 = make_adder(10)
+print(add5(1), add10(1))            # 6 11
+
+counter_state = [0]
+def make_counter() -> (int) -> int {
+    def inc(d: int) -> int { counter_state[0] = counter_state[0] + d return counter_state[0] }
+    return inc
+}
+```
+
 Read [`docs/type-system.md`](docs/type-system.md) for the full reference and
 [`docs/proofs.md`](docs/proofs.md) for using the checker to state and verify
 mathematical arguments — with an honest account of where it stops.

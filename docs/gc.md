@@ -11,9 +11,12 @@ conservative C-stack scanning, no ref-counting, no leaks-until-exit arena.
 - **Small-string optimization**: strings of 7 bytes or fewer are stored inline
   in the `Value` itself (`V_STR`), so the most common short strings never
   allocate an `Obj` or participate in collection at all.
-- Heap kinds: `O_STR` (strings longer than 7 bytes), `O_LIST`, `O_REC`. Every
-  `Obj` sits on one intrusive `gc_next` list for its generation and has
-  `mark`, `gen`, and `remembered` bits.
+- Heap kinds: `O_STR` (strings longer than 7 bytes), `O_LIST`, `O_REC`,
+  `O_FUNC` (a first-class function: a C entry point plus its captured env),
+  and `O_CELL` (a mutable box for a captured variable). Every `Obj` sits on
+  one intrusive `gc_next` list for its generation and has `mark`, `gen`, and
+  `remembered` bits. A closure's env is an array of cells; each cell points
+  back at the value it holds, so marking a closure marks its captures.
 - Backing arrays (list items, record fields, string bytes) are plain
   `malloc` memory owned by their `Obj` and freed at sweep. Growing them can
   never trigger a collection — only `rt_obj_new()` can.
@@ -23,7 +26,7 @@ conservative C-stack scanning, no ref-counting, no leaks-until-exit arena.
 Generated code gives every function one slot array and registers it:
 
 ```c
-static Value emf_fib(Value __p0) {
+static Value emf_fib(Value *__env, Value __p0) {
     Value F[5];                    /* all locals + expression temporaries */
     RootFrame __fr;
     for (int __i = 0; __i < 5; __i++) F[__i] = em_none();

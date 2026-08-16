@@ -76,6 +76,13 @@ static void gc_mark_obj(Obj *o, bool minor) {
         for (size_t i = 0; i < o->as.rec.len; i++)
             gc_mark_value(o->as.rec.vals[i], minor);
         break;
+    case O_FUNC:
+        for (size_t i = 0; i < o->as.func.env_count; i++)
+            gc_mark_value(o->as.func.env[i], minor);
+        break;
+    case O_CELL:
+        gc_mark_value(o->as.cell.val, minor);
+        break;
     }
 }
 
@@ -94,6 +101,8 @@ static void gc_free_obj(Obj *o) {
     case O_STR:  free(o->as.str.data); break;
     case O_LIST: free(o->as.list.items); break;
     case O_REC:  free(o->as.rec.keys); free(o->as.rec.vals); break;
+    case O_FUNC: free(o->as.func.env); break;
+    case O_CELL: break;
     }
     free(o);
 }
@@ -280,6 +289,8 @@ static const char *type_name(Value v) {
         case O_STR:  return "str";
         case O_LIST: return "list";
         case O_REC:  return "record";
+        case O_FUNC: return "function";
+        case O_CELL: return "cell";
         }
     }
     return "?";
@@ -379,6 +390,12 @@ static void write_value(SB *sb, Value v, bool repr) {
                 write_value(sb, v.as.o->as.rec.vals[i], true);
             }
             sb_puts(sb, "}");
+            break;
+        case O_FUNC:
+            sb_puts(sb, "<function>");
+            break;
+        case O_CELL: /* cells are internal; print their contents */
+            write_value(sb, v.as.o->as.cell.val, repr);
             break;
         }
         break;
@@ -513,6 +530,8 @@ static bool value_eq(Value a, Value b) {
     Obj *x = a.as.o, *y = b.as.o;
     switch (x->tag) {
     case O_STR:  break; /* unreachable: both-strings handled above */
+    case O_FUNC: return x == y; /* functions compare by identity */
+    case O_CELL: return value_eq(x->as.cell.val, y->as.cell.val);
     case O_LIST:
         if (x->as.list.len != y->as.list.len) return false;
         for (size_t i = 0; i < x->as.list.len; i++)
@@ -580,6 +599,8 @@ bool em_truthy(Value v) {
         case O_STR:  return str_len(&v) != 0;
         case O_LIST: return v.as.o->as.list.len != 0;
         case O_REC:  return true; /* records are always truthy, like objects */
+        case O_FUNC: return true; /* functions are always truthy */
+        case O_CELL: return em_truthy(v.as.o->as.cell.val);
         }
     }
     return true;
@@ -739,4 +760,98 @@ Value em_gc_stats(void) {
         "young",       em_int((int64_t)gc_young_count),
         "old",         em_int((int64_t)gc_old_count),
         "threshold",   em_int((int64_t)gc_young_threshold));
+}
+
+/* --- file / process I/O (self-hosting escape hatches) -------------------- */
+
+Value em_read_file(Value path) {
+    if (!is_str(path)) rt_fatal("read_file() path must be str, not %s", type_name(path));
+    const char *p = str_data(&path);
+    FILE *f = fopen(p, "rb");
+    if (!f) rt_fatal("cannot open '%s' for reading", p);
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = xmalloc((size_t)size + 1);
+    if (fread(buf, 1, (size_t)size, f) != (size_t)size)
+        rt_fatal("cannot read '%s'", p);
+    buf[size] = '\0';
+    fclose(f);
+    return str_take(buf, (size_t)size);
+}
+
+void em_write_file(Value path, Value content) {
+    if (!is_str(path)) rt_fatal("write_file() path must be str, not %s", type_name(path));
+    if (!is_str(content)) rt_fatal("write_file() content must be str, not %s", type_name(content));
+    const char *p = str_data(&path);
+    FILE *f = fopen(p, "wb");
+    if (!f) rt_fatal("cannot open '%s' for writing", p);
+    size_t n = str_len(&content);
+    fwrite(str_data(&content), 1, n, f);
+    fclose(f);
+}
+
+Value em_run(Value cmd) {
+    if (!is_str(cmd)) rt_fatal("run() command must be str, not %s", type_name(cmd));
+    return em_int(system(str_data(&cmd)));
+}
+
+/* --- first-class functions ------------------------------------------------ */
+
+Value em_mkclosure(Value (*fn)(Value *env, Value *args), size_t arity,
+                   Value *env, size_t env_count) {
+    RootFrame fr;
+    rt_push_frame(&fr, env, env_count); /* root env while the Obj may allocate */
+    Obj *o = rt_obj_new(O_FUNC);
+    o->as.func.fn = fn;
+    o->as.func.arity = arity;
+    if (env_count) {
+        o->as.func.env = xmalloc(sizeof(Value) * env_count);
+        memcpy(o->as.func.env, env, sizeof(Value) * env_count);
+        o->as.func.env_count = env_count;
+    } else {
+        o->as.func.env = NULL;
+        o->as.func.env_count = 0;
+    }
+    rt_pop_frame();
+    return obj_val(o);
+}
+
+Value em_cell(Value v) {
+    Obj *o = rt_obj_new(O_CELL);
+    o->as.cell.val = v;
+    return obj_val(o);
+}
+
+Value em_cell_get(Value cell) {
+    if (!(cell.tag == V_OBJ && cell.as.o->tag == O_CELL))
+        rt_fatal("internal: em_cell_get on a non-cell");
+    return cell.as.o->as.cell.val;
+}
+
+void em_cell_set(Value cell, Value v) {
+    if (!(cell.tag == V_OBJ && cell.as.o->tag == O_CELL))
+        rt_fatal("internal: em_cell_set on a non-cell");
+    Obj *o = cell.as.o;
+    o->as.cell.val = v;
+    gc_write_barrier(o, v);
+}
+
+Value em_call(Value fn, size_t argc, ...) {
+    if (!(fn.tag == V_OBJ && fn.as.o->tag == O_FUNC))
+        rt_fatal("attempt to call a value of type %s", type_name(fn));
+    Obj *c = fn.as.o;
+    if (c->as.func.arity != argc)
+        rt_fatal("function expects %zu argument(s), got %zu", c->as.func.arity, argc);
+    Value *args = xmalloc(sizeof(Value) * (argc ? argc : 1));
+    va_list ap;
+    va_start(ap, argc);
+    for (size_t i = 0; i < argc; i++) args[i] = va_arg(ap, Value);
+    va_end(ap);
+    RootFrame fr;
+    rt_push_frame(&fr, args, argc); /* root args while the callee may allocate */
+    Value r = c->as.func.fn(c->as.func.env, args);
+    rt_pop_frame();
+    free(args);
+    return r;
 }

@@ -145,9 +145,41 @@ static char *unescape_string(Parser *p, Token t);
 static TypeExpr *parse_type_atom(Parser *p) {
     int line = p->cur.line;
     if (match(p, TK_LPAREN)) {
-        TypeExpr *t = parse_type(p);
+        if (check(p, TK_RPAREN)) { /* "() -> R": zero-arg function type */
+            advance(p);
+            expect(p, TK_ARROW, "'->' in function type");
+            TypeExpr *t = new_type(TE_FUNC, line);
+            t->fun.params = NULL;
+            t->fun.param_count = 0;
+            t->fun.ret = parse_type(p);
+            return t;
+        }
+        TypeExpr *first = parse_type(p);
+        if (match(p, TK_COMMA)) { /* "(A, B, ...) -> R" */
+            PtrVec params = {0};
+            vec_push(&params, first);
+            while (!check(p, TK_RPAREN)) {
+                vec_push(&params, parse_type(p));
+                if (!match(p, TK_COMMA)) break;
+            }
+            expect(p, TK_RPAREN, "')' closing function type parameters");
+            expect(p, TK_ARROW, "'->' in function type");
+            TypeExpr *t = new_type(TE_FUNC, line);
+            t->fun.params = (TypeExpr **)params.items;
+            t->fun.param_count = params.count;
+            t->fun.ret = parse_type(p);
+            return t;
+        }
         expect(p, TK_RPAREN, "')' in type");
-        return t;
+        if (match(p, TK_ARROW)) { /* "(A) -> R" */
+            TypeExpr *t = new_type(TE_FUNC, line);
+            t->fun.params = xmalloc(sizeof(TypeExpr *));
+            t->fun.params[0] = first;
+            t->fun.param_count = 1;
+            t->fun.ret = parse_type(p);
+            return t;
+        }
+        return first; /* "(T)" grouping */
     }
     if (match(p, TK_NONE)) {
         TypeExpr *t = new_type(TE_NAME, line);
@@ -355,8 +387,6 @@ static Expr *parse_postfix(Parser *p) {
         int line = p->cur.line;
         if (check(p, TK_LPAREN)) {
             advance(p);
-            if (e->kind != E_NAME)
-                perror_at(p, line, "only named functions can be called");
             Expr *call = new_expr(E_CALL, line);
             call->as.call.fn = e;
             PtrVec args = {0};

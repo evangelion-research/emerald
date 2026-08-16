@@ -183,15 +183,17 @@ Removing the guard is an error, not a crash at runtime:
 
 These are real limits, not omissions to work around:
 
-- **No induction.** Types cannot be recursive, so there are no inductively
-  defined naturals or lists-as-cons-cells, and no proofs by induction over
-  them. Claims about all lists are limited to what parametricity gives.
+- **Induction is limited.** Non-generic types may be recursive (`type N = ...`),
+  so inductively defined naturals or lists-as-cons-cells can be written, but
+  the checker has no induction principle — claims about all lists are still
+  limited to what parametricity gives.
 - **No dependent types.** A type cannot mention a value, so "this list has
   length `n`", "this index is in bounds", or "this integer is positive" are
   not expressible. Finite enumerations via literal types are the substitute,
   and they do not scale past a handful of values.
-- **No higher-order proofs.** Functions are not values, so you cannot state a
-  proposition about a function or pass a lemma as an argument.
+- **Higher-order proofs are limited.** Functions are values and closures
+  exist, so a lemma can be passed as an argument; there is still no way to
+  state a proposition *about* a function's behavior.
 - **No termination checking.** An intentionally diverging function inhabits
   `never`, so the logic is not consistent the way a proof assistant's is.
   Every terminating path is checked; the infinite loop is the one escape.

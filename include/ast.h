@@ -18,6 +18,7 @@ typedef enum {
     TE_UNION,  /* A | B */
     TE_INTER,  /* A & B  (structural "inheritance") */
     TE_LIT,    /* literal type: 42, "red", True */
+    TE_FUNC,   /* (A, B) -> C  (function type) */
 } TypeExprKind;
 
 typedef enum { LIT_INT, LIT_STR, LIT_BOOL } LitKind;
@@ -36,6 +37,11 @@ struct TypeExpr {
         size_t count;
     } fields;
     TypeExpr *lhs, *rhs;    /* TE_UNION / TE_INTER */
+    struct {                /* TE_FUNC */
+        TypeExpr **params;
+        size_t param_count;
+        TypeExpr *ret;
+    } fun;
     struct {                /* TE_LIT */
         LitKind kind;
         int64_t ival;       /* LIT_INT, LIT_BOOL (0/1) */

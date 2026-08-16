@@ -130,11 +130,16 @@ normally.
 - Comparisons work across int/float/bool; strings and lists compare
   lexicographically; `==` is deep for lists and records.
 - **Builtins**: `print(*args)`, `len(x)`, `range(n)` / `range(a, b)`,
-  `str(x)`, `int(x)`. Builtins cannot be shadowed or redefined.
-- Functions are **not values**: only a defined function name can be called,
-  and a function name cannot be read as a variable.
-- **Known limitations**: no classes/methods, no nested functions, no
-  closures, no exceptions, no type narrowing (an `int | None` must flow
-  through `any` or be restructured to be used as `int`), no `//` floor
+  `str(x)`, `int(x)`, `gc_stats()`, `read_file(path)`, `write_file(path, s)`,
+  `run(cmd)`. Builtins cannot be shadowed or redefined.
+- **Functions are values**. A function type is written `(A, B) -> C`; a
+  top-level function name reads as a closure, can be stored, passed, and
+  called indirectly (`f(x)`). A `def` may be nested inside another `def`; a
+  nested function **captures** enclosing locals (and parameters) by shared,
+  mutable cell, so assignments in the enclosing scope are visible through
+  the closure. Assigning a name inside a nested function still makes it a
+  *local* of that function (as with globals, no `nonlocal`); mutate a
+  captured list/record to share state.
+- **Known limitations**: no classes/methods, no exceptions, no `//` floor
   division, comparison chains associate pairwise (`a < b < c` is
   `(a < b) < c`, unlike Python).
