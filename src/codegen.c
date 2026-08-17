@@ -75,7 +75,8 @@ static bool is_builtin(const char *name) {
            strcmp(name, "str") == 0 || strcmp(name, "int") == 0 ||
            strcmp(name, "range") == 0 || strcmp(name, "gc_stats") == 0 ||
            strcmp(name, "read_file") == 0 || strcmp(name, "write_file") == 0 ||
-           strcmp(name, "run") == 0;
+           strcmp(name, "run") == 0 || strcmp(name, "sqrt") == 0 ||
+           strcmp(name, "tan") == 0 || strcmp(name, "rand") == 0;
 }
 
 /* --- function info (closure conversion) ---------------------------------- */
@@ -315,8 +316,18 @@ static int gen_call(Cg *cg, const Expr *e) {
             emit(cg, "em_write_file(%s, %s);", slotref(args[0], ab),
                  slotref(args[1], bb));
             emit(cg, "%s = em_none();", slotref(t, tb));
+        } else if (strcmp(name, "append_file") == 0) {
+            emit(cg, "em_append_file(%s, %s);", slotref(args[0], ab),
+                 slotref(args[1], bb));
+            emit(cg, "%s = em_none();", slotref(t, tb));
         } else if (strcmp(name, "run") == 0) {
             emit(cg, "%s = em_run(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "sqrt") == 0) {
+            emit(cg, "%s = em_sqrt(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "tan") == 0) {
+            emit(cg, "%s = em_tan(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "rand") == 0) {
+            emit(cg, "%s = em_rand();", slotref(t, tb));
         } else {
             Access kind;
             int slot;

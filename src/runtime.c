@@ -2,15 +2,20 @@
 #include "runtime.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* Strings of SSO_MAX bytes or fewer live inline in the Value (see runtime.h). */
 #define SSO_MAX 7
 
 RootFrame *rt_roots = NULL;
+
+/* xorshift64* PRNG; seeded from the clock at startup */
+static uint64_t rng_state = 88172645463325252ULL;
 
 /* ---------------------------------------------------------------------- */
 /* GC                                                                      */
@@ -37,7 +42,10 @@ static size_t gc_collections = 0;  /* total cycles (minor + major) */
 const char *rt_cur_file = NULL; /* set by generated code; for runtime errors */
 int rt_cur_line = 0;
 
-void rt_init(void) { /* nothing yet; reserved for future config */ }
+void rt_init(void) {
+    uint64_t t = (uint64_t)time(NULL) ^ ((uint64_t)clock() << 32);
+    rng_state = t ? t : 88172645463325252ULL;
+}
 
 void rt_fatal(const char *fmt, ...) {
     va_list ap;
@@ -758,6 +766,32 @@ Value em_int_of(Value v) {
     return em_none();
 }
 
+/* --- math builtins ------------------------------------------------------- */
+
+Value em_sqrt(Value v) {
+    if (!is_num(v)) rt_fatal("sqrt() argument must be a number, got %s",
+                             type_name(v));
+    double x = as_double(v);
+    if (x < 0) rt_fatal("sqrt() of a negative number");
+    return em_float(sqrt(x));
+}
+
+Value em_tan(Value v) {
+    if (!is_num(v)) rt_fatal("tan() argument must be a number, got %s",
+                             type_name(v));
+    return em_float(tan(as_double(v)));
+}
+
+Value em_rand(void) {
+    uint64_t x = rng_state;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    rng_state = x;
+    return em_float((double)((x * 2685821657736338717ULL) >> 11) /
+                    (double)(1ULL << 53));
+}
+
 Value em_gc_stats(void) {
     return em_rec_litn(5,
         "collections", em_int((int64_t)gc_collections),
@@ -791,6 +825,17 @@ void em_write_file(Value path, Value content) {
     const char *p = str_data(&path);
     FILE *f = fopen(p, "wb");
     if (!f) rt_fatal("cannot open '%s' for writing", p);
+    size_t n = str_len(&content);
+    fwrite(str_data(&content), 1, n, f);
+    fclose(f);
+}
+
+void em_append_file(Value path, Value content) {
+    if (!is_str(path)) rt_fatal("append_file() path must be str, not %s", type_name(path));
+    if (!is_str(content)) rt_fatal("append_file() content must be str, not %s", type_name(content));
+    const char *p = str_data(&path);
+    FILE *f = fopen(p, "ab");
+    if (!f) rt_fatal("cannot open '%s' for appending", p);
     size_t n = str_len(&content);
     fwrite(str_data(&content), 1, n, f);
     fclose(f);

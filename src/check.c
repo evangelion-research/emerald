@@ -575,7 +575,9 @@ static bool is_builtin(const char *name) {
            strcmp(name, "range") == 0 || strcmp(name, "str") == 0 ||
            strcmp(name, "int") == 0 || strcmp(name, "gc_stats") == 0 ||
            strcmp(name, "read_file") == 0 || strcmp(name, "write_file") == 0 ||
-           strcmp(name, "run") == 0;
+           strcmp(name, "append_file") == 0 || strcmp(name, "run") == 0 ||
+           strcmp(name, "sqrt") == 0 ||
+           strcmp(name, "tan") == 0 || strcmp(name, "rand") == 0;
 }
 
 static FuncSig *find_func(Ck *ck, const char *name) {
@@ -988,10 +990,10 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                          "read_file() path must be str, got %s", type_str(argt[0]));
             return &t_str;
         }
-        if (strcmp(name, "write_file") == 0) {
+        if (strcmp(name, "write_file") == 0 || strcmp(name, "append_file") == 0) {
             if (argc != 2)
                 ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "write_file() takes 2 arguments, got %zu", argc);
+                         "%s() takes 2 arguments, got %zu", name, argc);
             return &t_none;
         }
         if (strcmp(name, "run") == 0) {
@@ -1002,6 +1004,22 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                 ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                          "run() command must be str, got %s", type_str(argt[0]));
             return &t_int;
+        }
+        if (strcmp(name, "sqrt") == 0 || strcmp(name, "tan") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "%s() takes 1 argument, got %zu", name, argc);
+            else if (!assignable(&t_float, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "%s() argument must be a number, got %s",
+                         name, type_str(argt[0]));
+            return &t_float;
+        }
+        if (strcmp(name, "rand") == 0) {
+            if (argc != 0)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "rand() takes 0 arguments, got %zu", argc);
+            return &t_float;
         }
 
         FuncSig *f = find_func(ck, name);

@@ -134,9 +134,13 @@ Value em_len(Value v);
 Value em_range(Value lo, Value hi);
 Value em_str(Value v);
 Value em_int_of(Value v);
+Value em_sqrt(Value v);  /* square root; fatal on negative input */
+Value em_tan(Value v);   /* tangent (radians) */
+Value em_rand(void);     /* uniform float in [0, 1) */
 Value em_gc_stats(void); /* record of GC counters for observability */
 Value em_read_file(Value path);   /* contents of a file as a string */
 void  em_write_file(Value path, Value content); /* write a string to a file */
+void  em_append_file(Value path, Value content); /* append a string to a file */
 Value em_run(Value cmd);          /* run a shell command; returns exit status */
 
 /* first-class functions & closures */
