@@ -52,6 +52,26 @@ type Pair[A, B] = { first: A, second: B }
 Types are erased at runtime — there is no class, vtable, or nominal tag — so
 structural subtyping costs nothing.
 
+## Totality, purity, proof mode
+
+Three properties separate "well-typed" from "a claim you can defend", and each
+has a switch:
+
+- **Functions are total by default.** Every recursive call must descend
+  structurally — the argument is a projection chain out of a parameter of
+  recursive-alias type (`n.succ`, `xs.tail`). A function whose recursion can't
+  be shown to descend must say `partial`, which marks it as *not* a proof.
+- **`pure`** — `def forward(x: T) -> U pure` promises no `print`, no `rand`,
+  no file or process IO, and no impure callee (a nested `def` inside a pure
+  function must itself be pure). Ten of the sixteen builtins are pure and may
+  be called from pure code.
+- **`--proof`** — `emeraldc --check --proof f.rald` bans `any` and `partial`.
+  Since `any` is assignable in both directions, a proof that mentions it proves
+  nothing, so proof mode rejects every `any` that surfaces: unannotated
+  parameters and returns, explicit annotations, inferred `any`. It is a strict
+  first cut, not a complete soundness guarantee — the element type of an empty
+  `[]` is still `any` underneath.
+
 ## Functions are values, closures included
 
 Function types are written `(A, B) -> C`. Pass functions around, call them
@@ -78,6 +98,15 @@ composition with `>>`, exhaustive `match` on tagged records, thunks
 (10M-deep recursion is fine). See [`examples/functional/`](examples/functional/)
 for a seven-part tour of each feature.
 
+## Builtins
+
+There is no standard library yet — sixteen builtins compile straight into
+runtime calls and are in scope in every module: `print`, `len`, `range`, `str`,
+`int`, `sqrt`, `tan`, `rand`, `map`, `filter`, `reduce`, `read_file`,
+`write_file`, `append_file`, `run`, `gc_stats`. They are not values (`f = print`
+is an error — there is no closure to hand out) and cannot be redefined. See
+[`docs/builtins.md`](docs/builtins.md).
+
 ## Modules
 
 A program can span several files. A `.rald` file is a module, and `import`
@@ -96,12 +125,9 @@ compiler loads the whole import graph and links it into one program, mangling
 each imported module's top-level names to `<module>__<name>`, so two packages
 can both define `parse`.
 
-```
-emeraldc [-I <dir>]... [--json] [-o OUT] <entry>.rald
-```
-
-That command line is the whole contract between `emeraldc` and any package
-manager driving it. See [`docs/modules.md`](docs/modules.md).
+The `-I` / `-o` command line (see [Pipeline](#pipeline)) is the whole contract
+between `emeraldc` and any package manager driving it. See
+[`docs/modules.md`](docs/modules.md).
 
 ## Diagnostics
 
@@ -153,10 +179,15 @@ bin/emeraldc examples/fib.rald && ./examples/fib
 foo.rald ─► lexer ─► parser ─► modules ─► type checker ─► C codegen ─► cc ─► ./foo
 ```
 
-Every stage has a driver flag (`--emit-tokens`, `--emit-ast`, `--check`,
-`--emit-c`, `--keep-c`, `--json`) and its own golden test directory under
-`tests/`. No stage is observable only through the stage after it. See
-[`docs/architecture.md`](docs/architecture.md).
+Every stage has a driver flag and its own golden test directory under `tests/`.
+No stage is observable only through the stage after it.
+
+```
+emeraldc [--emit-tokens|--emit-ast|--check|--emit-c]
+         [--json] [--proof] [--keep-c] [-I DIR]... [-o OUT] file.rald
+```
+
+See [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
@@ -222,5 +253,5 @@ much of that they unblock.
 | `src/` | compiler (`lexer` → `parser` → `module` → `check` → `codegen` → `main`, plus `diag`) and `runtime.c` (Value model + GC, compiled into every program) |
 | `docs/` | **start at [`docs/README.md`](docs/README.md)** — grammar, type system, builtins, modules, diagnostics, architecture, GC, proofs, research directions |
 | `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `e2e`, `imports`) + `run_tests.sh` |
-| `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `functional/` (a seven-tour tour of the functional core), `modules/` (a multi-file program), `ray_tracer/` (the experiment) |
+| `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `functional/` (a seven-part tour of the functional core), `modules/` (a multi-file program), `ray_tracer/` (the experiment) |
 | `Taskfile.yml` | build / test / examples / bless / clean |
