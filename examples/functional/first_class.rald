@@ -1,0 +1,42 @@
+# 1. First-class functions
+#
+# Functions are ordinary values: they can be stored in variables, passed as
+# arguments, returned from other functions, and held in lists and records.
+# A named `def` reads as a function value of its declared type
+# `(int, int) -> int`, exactly like a lambda.
+
+print("")
+print("==== 1. first-class functions ====")
+
+def add(x: int, y: int) -> int { return x + y }
+def mul(x: int, y: int) -> int { return x * y }
+
+# -- stored in a variable ------------------------------------------------
+operation = add                      # no parentheses: the value, not a call
+print("add as value:", operation(2, 3))
+
+# -- passed as an argument ----------------------------------------------
+def apply2(f: (int, int) -> int, a: int, b: int) -> int {
+    return f(a, b)
+}
+print("passed to a function:", apply2(mul, 4, 5))
+
+# -- returned from a function (a factory) --------------------------------
+def make_op(kind: str) -> (int, int) -> int {
+    if kind == "add" { return add }
+    return mul
+}
+print("returned from a function:", make_op("add")(10, 1),
+      make_op("mul")(10, 1))
+
+# -- held in a list ------------------------------------------------------
+ops: list[(int, int) -> int] = [add, mul]
+print("held in a list:", ops[0](7, 2), ops[1](7, 2))
+
+# -- held in a record ----------------------------------------------------
+const bundle = { name: "arithmetic", run: add }
+print("held in a record:", bundle.run(20, 22))
+
+# -- a stored function value is one object (identity comparison) -----------
+const stored = add
+print("same object:        ", stored == stored, stored == mul)

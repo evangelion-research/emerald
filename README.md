@@ -69,6 +69,15 @@ add10 = make_adder(10)
 print(add5(1), add10(1))            # 6 11
 ```
 
+The functional core sits on top of this: `const` immutable bindings, lambdas
+`(x: int) => x * 2` (unannotated parameters are inferred contextually), the
+higher-order builtins `map` / `filter` / `reduce`, pipelines with `|>` and
+composition with `>>`, exhaustive `match` on tagged records, thunks
+`() => expr` for lazy evaluation, and **tail-call optimization** — a direct
+`return f(...)` compiles to a jump, so tail recursion runs in constant stack
+(10M-deep recursion is fine). See [`examples/functional/`](examples/functional/)
+for a seven-part tour of each feature.
+
 ## Modules
 
 A program can span several files. A `.rald` file is a module, and `import`
@@ -132,7 +141,7 @@ Requires a C compiler and [go-task](https://taskfile.dev) (`brew install go-task
 
 ```sh
 task                 # build bin/emeraldc
-task test            # 87 golden tests across 6 stage suites (incl. proof mode)
+task test            # 99 golden tests across 6 stage suites (incl. proof mode)
 task examples        # compile & run every example
 
 bin/emeraldc examples/fib.rald && ./examples/fib
@@ -213,5 +222,5 @@ much of that they unblock.
 | `src/` | compiler (`lexer` → `parser` → `module` → `check` → `codegen` → `main`, plus `diag`) and `runtime.c` (Value model + GC, compiled into every program) |
 | `docs/` | **start at [`docs/README.md`](docs/README.md)** — grammar, type system, builtins, modules, diagnostics, architecture, GC, proofs, research directions |
 | `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `e2e`, `imports`) + `run_tests.sh` |
-| `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `modules/` (a multi-file program), `ray_tracer/` (the experiment) |
+| `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `functional/` (a seven-tour tour of the functional core), `modules/` (a multi-file program), `ray_tracer/` (the experiment) |
 | `Taskfile.yml` | build / test / examples / bless / clean |

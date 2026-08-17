@@ -3,6 +3,7 @@ const inc = (x: int) => x + 1
 print(5 |> double)
 print(double >> inc)
 const total = reduce((a: int, b: int) => a + b, 0, map(double, [1, 2]))
+const thunk = () => 42
 match ({ kind: "c" }) {
     { kind: "c", r } -> { print(r) }
     _ -> { print("other") }

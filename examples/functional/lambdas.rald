@@ -1,0 +1,35 @@
+# 3. Anonymous functions (lambdas)
+#
+# `(params) => body` builds a function value on the spot. Parameters may
+# carry annotations; unannotated parameters are inferred contextually from
+# the call site (map/filter/reduce) or fall back to `any`.
+
+print("")
+print("==== 3. lambdas (anonymous functions) ====")
+
+# -- inline, with full annotations ----------------------------------------
+print("annotated:      ", map((x: int) => x * 2, [1, 2, 3]))
+
+# -- contextual typing: `x` needs no annotation here ----------------------
+print("contextual:     ", map((x) => x * 2, [1, 2, 3]))
+
+# -- multi-parameter lambdas -----------------------------------------------
+print("two params:     ", reduce((a, b) => a + b, 0, [1, 2, 3, 4]))
+
+# -- zero-parameter lambdas (thunks): the body runs only when called -------
+const now = () => 41 + 1
+print("thunk:          ", now())
+
+# -- lambdas compose with everything else ----------------------------------
+print("composed:       ", map((x) => x + 1, filter((x) => x % 2 == 0, [1, 2, 3, 4])))
+
+# -- a lambda that returns a lambda (currying by hand) ----------------------
+def add_c(a: int) -> (int) -> int {
+    return (b: int) => a + b
+}
+add5 = add_c(5)
+print("curried:        ", add5(3), add_c(10)(32))
+
+# -- lambdas capture their environment -------------------------------------
+base = 100
+print("captured:       ", map((x) => x + base, [1, 2, 3]))

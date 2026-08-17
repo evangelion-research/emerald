@@ -4,6 +4,7 @@
   (expr (call print (|> 5 double)))
   (expr (call print (>> double inc)))
   (const total (call reduce (lambda (a:int b:int) -> (+ a b)) 0 (call map double (list 1 2))))
+  (const thunk (lambda () -> 42))
   (match (record (kind "c"))
     (arm {kind: "c", r: r}
       (expr (call print r))

@@ -61,6 +61,9 @@ bin/
 # every .rald compiles to an extensionless executable beside it.
 examples/*
 !examples/*.rald
+!examples/functional/
+!examples/functional/*.rald
+examples/functional/main
 !examples/ray_tracer/
 !examples/ray_tracer/typed/
 !examples/ray_tracer/typed/*.rald

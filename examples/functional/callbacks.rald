@@ -1,0 +1,44 @@
+# 4. Inline callbacks
+#
+# A callback is a function passed *at the call site* to be invoked later —
+# by a loop, by an event, or by another function. Lambdas make callbacks
+# one-liners instead of named defs.
+
+print("")
+print("==== 4. inline callbacks ====")
+
+# -- a mini "event" dispatcher ---------------------------------------------
+def on(name: str, handler: (str) -> str) -> str {
+    return handler(name)                     # invoke the callback now
+}
+print("event:          ", on("click", (e) => "handled " + e))
+print("event:          ", on("hover", (e) => "watched " + e))
+
+# -- callback controlling a fold -------------------------------------------
+# every reduce is a callback that runs once per element
+total = reduce((acc, x) => acc + x, 0, [1, 2, 3, 4, 5])
+print("reduce cb:      ", total)
+
+# -- callbacks that decide (predicates) -------------------------------------
+words = ["apple", "kiwi", "grape", "fig"]
+long_words = filter((w) => len(w) > 3, words)
+print("filter cb:      ", long_words)
+
+# -- callbacks that transform (mappers) -------------------------------------
+tags = map((w) => "<" + w + ">", words)
+print("map cb:         ", tags)
+
+# -- a "later" helper: schedule a zero-arg callback -------------------------
+def later(delay_note: str, thunk: () -> int) -> str {
+    return delay_note + " then " + str(thunk())
+}
+print("later:          ", later("wait", () => 7 * 6))
+
+# -- callbacks stored for later use ------------------------------------------
+handlers: list[(int) -> int] = [
+    (x: int) => x + 1,
+    (x: int) => x * 2,
+    (x: int) => x * x,
+]
+results = map((h) => h(5), handlers)
+print("handler table:  ", results)

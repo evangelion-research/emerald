@@ -1,0 +1,65 @@
+# 7. Lazy evaluation
+#
+# Emerald is strict (eager): arguments are evaluated before a call, and list
+# literals build their elements up front. Laziness is obtained the classic
+# functional way — with *thunks*, zero-argument closures that delay work
+# until someone calls them — plus the built-in short-circuiting operators.
+
+print("")
+print("==== 7. lazy evaluation ====")
+
+# -- a thunk defers computation ----------------------------------------------
+def expensive(x: int) -> int {
+    print("   (expensive(", str(x), ") runs)")
+    return x * x
+}
+const heavy = () => expensive(9)     # nothing runs yet
+print("built a thunk; nothing evaluated")
+print("first call:    ", heavy())    # the work happens here
+print("second call:   ", heavy())    # ...and again (plain thunks don't cache)
+
+# -- memoized thunk: compute once, reuse forever ------------------------------
+# `once` wraps a producer so its result is cached in a cell after first use.
+def once(producer: () -> int) -> () -> int {
+    state = [0, 0]                    # [ready-flag, cached value]
+    def get() -> int {
+        if state[0] == 0 {
+            state[0] = 1
+            state[1] = producer()
+        }
+        return state[1]
+    }
+    return get
+}
+calls = 0
+def count_calls() -> int {
+    calls = calls + 1
+    return calls
+}
+lazy_answer = once(count_calls)
+print("memoized:       ", lazy_answer(), lazy_answer(), lazy_answer())  # 1 1 1
+
+# -- `and` / `or` short-circuit (built-in laziness) ---------------------------
+def boom() -> int { print("boom ran"); return 42 }
+print("short-circuit:  ", False and boom())      # boom never runs
+print("short-circuit:  ", True or boom())        # boom never runs
+print("short-circuit:  ", True and boom())       # boom runs once
+
+# -- lazy default via `or` -----------------------------------------------------
+def env(name: str, fallback: () -> str) -> str {
+    return name or fallback()
+}
+print("or fallback:    ", env("", () => "default"), env("PATH", () => "default"))
+
+# -- conditional branches are lazy by construction ------------------------------
+def choose(flag: bool) -> int {
+    if flag { return expensive(2) }
+    return expensive(3)
+}
+print("choose:         ", choose(True))          # only one branch runs
+
+# -- a lazy list: generate on demand ---------------------------------------------
+def natural(n: int) -> () -> list[int] {
+    return () => range(n)                         # the list is built when called
+}
+print("lazy list:      ", natural(5)())           # [0, 1, 2, 3, 4]

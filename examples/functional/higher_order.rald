@@ -1,0 +1,46 @@
+# 2. Higher-order functions
+#
+# A higher-order function takes a function as an argument, returns one, or
+# both. The built-ins `map`, `filter`, and `reduce` are the workhorses;
+# they are typed with fresh type variables per call site, so they compose.
+
+print("")
+print("==== 2. higher-order functions ====")
+
+xs = [1, 2, 3, 4, 5, 6]
+
+# -- map: transform every element ----------------------------------------
+def square(x: int) -> int { return x * x }
+print("map (named fn):", map(square, xs))
+print("map (lambda):  ", map((x: int) => x * 10, xs))
+
+# -- filter: keep elements that pass a predicate --------------------------
+print("filter (even):  ", filter((x: int) => x % 2 == 0, xs))
+
+# -- reduce: fold the list into one value --------------------------------
+print("reduce (sum):   ", reduce((a: int, b: int) => a + b, 0, xs))
+print("reduce (prod):  ", reduce((a: int, b: int) => a * b, 1, xs))
+
+# -- the three compose naturally ------------------------------------------
+# sum of the squares of the odd elements
+odd_squares = map(square, filter((x: int) => x % 2 == 1, xs))
+print("pipeline result:", reduce((a: int, b: int) => a + b, 0, odd_squares))
+
+# -- writing your own higher-order functions ------------------------------
+def apply_twice(f: (int) -> int, x: int) -> int {
+    return f(f(x))
+}
+print("apply_twice:    ", apply_twice((x: int) => x + 1, 5))
+
+def make_adder(n: int) -> (int) -> int {
+    return (x: int) => x + n
+}
+print("make_adder:     ", apply_twice(make_adder(10), 1))
+
+# a generic-ish "each" loop over a list
+def for_each(items: list[int], visit: (int) -> int) {
+    map(visit, items)          # the result is discarded; visit's side
+    pass                       # effects happen for every element
+}
+for_each([1, 2, 3], (x: int) => x)   # (kept simple: see callbacks.rald)
+print("for_each ran:   ok")

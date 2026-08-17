@@ -146,6 +146,10 @@ primary        := int_lit | float_lit | string_lit
   may carry optional type annotations; unannotated ones are inferred
   contextually from the call site (e.g. inside `map(...)`) or fall back to
   `any`. Lambdas capture their enclosing locals by reference.
+- A zero-parameter lambda `() => body` is a *thunk* — the standard way to get
+  laziness in a strict language: the body is not evaluated until the thunk is
+  called. Lambda bodies are single expressions (a `{` after `=>` is a record
+  literal); for multi-statement bodies use a nested `def`.
 
 `and`/`or` **short-circuit** and return one of their operands, exactly like
 Python (implemented via statement lowering in codegen, so side effects on the

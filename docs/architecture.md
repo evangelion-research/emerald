@@ -4,7 +4,7 @@ How `emeraldc` is built: ~7,000 lines of C11, warning-clean under
 `-Wall -Wextra`, no dependencies beyond libc and a C compiler to shell out to.
 
 Everything described here is implemented and covered by `task test`
-(87 golden tests across six suites).
+(99 golden tests across six suites).
 
 ## The pipeline
 
@@ -101,7 +101,7 @@ language.
 
 ```
 task              # build bin/emeraldc
-task test         # every suite (87 golden tests) + runtime-check
+task test         # every suite (99 golden tests) + runtime-check
 task test:lexer / test:parser / test:check / test:proof / test:e2e / test:imports
 task examples     # compile & run examples/*.rald and examples/*/main.rald
 task bless        # regenerate golden files (review the diff!)

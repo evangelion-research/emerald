@@ -1,0 +1,63 @@
+# 5. Closures
+#
+# A lambda or nested `def` captures the enclosing locals it references, by
+# reference: the closure and its creator share a cell, so mutations are
+# visible on both sides and each closure created in a loop gets its own
+# private state.
+
+print("")
+print("==== 5. closures ====")
+
+# -- a counter: mutable state private to one closure ------------------------
+def make_counter() -> () -> int {
+    count = 0
+    def bump() -> int {
+        count = count + 1
+        return count
+    }
+    return bump
+}
+a = make_counter()
+b = make_counter()
+print("counters:       ", a(), a(), a(), b(), a())   # 1 2 3 1 4
+
+# -- factory: capture the argument -------------------------------------------
+def make_multiplier(factor: int) -> (int) -> int {
+    return (x: int) => x * factor
+}
+double = make_multiplier(2)
+triple = make_multiplier(3)
+print("multipliers:    ", double(21), triple(14))
+
+# -- closures capture by reference, not by value -----------------------------
+def make_pairs() -> list[() -> int] {
+    def helper() -> list[() -> int] {
+        return [() => 1, () => 2]
+    }
+    return helper()
+}
+print("pairs:          ", map((t) => t(), make_pairs()))
+
+# -- deep capture: a closure that reaches two scopes up ----------------------
+def outer() -> () -> int {
+    x = 10
+    def middle() -> () -> int {
+        y = 5
+        def inner() -> int { return x + y }
+        return inner
+    }
+    return middle()
+}
+print("deep capture:   ", outer()())   # call inner: x + y = 15
+
+# -- a closure over a list cell: shared mutable state ------------------------
+def make_bag() -> (int) -> int {
+    items = [0]
+    def add(v: int) -> int {
+        items[0] = items[0] + v
+        return items[0]
+    }
+    return add
+}
+bag = make_bag()
+print("shared cell:    ", bag(10), bag(10), bag(10))

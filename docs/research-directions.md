@@ -517,8 +517,8 @@ What is deliberately still open, in each case a strict first cut:
 - `seq[T]` (sound immutable sequences), induction principles, and the full
   effect-row system (`!{Rand, Mut, IO}`) remain future work.
 - No auto-currying or partial application: `xs |> map(f)` is not (yet)
-  syntax — write `xs |> (ys) => map(f, ys)` or `map(f, xs)`. Zero-argument
-  lambdas `() => ...` are not (yet) syntax.
+  syntax — write `xs |> (ys) => map(f, ys)` or `map(f, xs)`. Lambda bodies
+  are single expressions (multi-statement bodies need a nested `def`).
 - Mutual recursion is not tail-call-optimized (it needs a trampoline), and
   `match` cannot yet guard on list shapes (`[]` / `x :: xs`); list
   destruction is still `if len(xs) == 0` plus indexing.

@@ -1,0 +1,31 @@
+# Emerald's functional core — seven short tours.
+#
+#   task examples        # compiles and runs this file (each tour prints its
+#                        # own banner, in the order imported below)
+#
+# Each tour is also a complete program on its own — compile any of them
+# directly and it prints its banner and demos:
+#
+#   ./bin/emeraldc examples/functional/lambdas.rald
+#
+#   1. first_class.rald   functions are values: stored, passed, returned
+#   2. higher_order.rald  map / filter / reduce, and custom HOFs
+#   3. lambdas.rald       anonymous functions, contextual typing, thunks
+#   4. callbacks.rald     inline callbacks at the call site
+#   5. closures.rald      captures, private state, factories
+#   6. composition.rald   f >> g, x |> f, pipelines, chained calls
+#   7. lazy.rald          thunks, memoization, short-circuiting
+
+print("Emerald functional core — seven tours, in order:")
+print("(each tour is a module imported below; see the files beside this one)")
+
+import first_class
+import higher_order
+import lambdas
+import callbacks
+import closures
+import composition
+import lazy
+
+print("")
+print("All seven tours ran cleanly.")

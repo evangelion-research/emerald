@@ -44,3 +44,9 @@ def sum_to(n: int, acc: int) -> int partial {
     }
 }
 print(sum_to(10000000, 0))                    # 50000005000000
+
+# zero-argument lambdas: thunks defer computation until called
+count = 0
+const next = () => count + 1
+print(next())                                 # 1
+print((() => 7)())                            # 7

@@ -1,0 +1,47 @@
+# 6. Function composition and pipelines
+#
+# `f >> g` builds `x -> g(f(x))` — a new function value, ready to be reused.
+# `x |> f` pipes a value into a unary function so data flows left to right.
+# Both are ordinary expressions, so pipelines compose and can be stored.
+
+print("")
+print("==== 6. composition and pipelines ====")
+
+def double(x: int) -> int { return x * 2 }
+def inc(x: int) -> int { return x + 1 }
+def square(x: int) -> int { return x * x }
+
+# -- composition builds a new function --------------------------------------
+double_inc = double >> inc
+print("double >> inc:  ", double_inc(5))          # (5*2)+1 = 11
+
+# -- composition chains of any length ---------------------------------------
+squared_then_inc = square >> inc
+print("square >> inc:  ", squared_then_inc(4))    # 4^2+1 = 17
+
+# -- a pipeline of three -----------------------------------------------------
+triple_pipeline = double >> inc >> square
+print("d >> i >> s:    ", triple_pipeline(1))     # ((1*2)+1)^2 = 9
+
+# -- pipe: value flows left to right -----------------------------------------
+print("pipe:           ", 5 |> double)            # 10
+print("pipe chain:     ", 5 |> double |> inc)     # 11
+print("pipe into comp: ", 5 |> (double >> square)) # 100
+
+# -- composition as a reusable value in map ----------------------------------
+shifts = map(double >> inc, [1, 2, 3])
+print("composed in map:", shifts)
+
+# -- chained method-style calls (each step returns a list) --------------------
+steps = [1, 2, 3, 4, 5, 6]
+result = reduce(
+    (acc, x) => acc + x,
+    0,
+    map(square, filter((x) => x % 2 == 0, steps)),
+)
+print("chained result: ", result)                 # 2^2+4^2+6^2 = 56
+
+# -- build a pipeline from parts, then reuse it -------------------------------
+const normalize = double >> square
+const score = 3 |> normalize
+print("stored pipeline:", score, score)         # 36 36

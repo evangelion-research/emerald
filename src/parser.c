@@ -325,17 +325,19 @@ static TypeExpr *parse_type(Parser *p) {
 
 static Expr *parse_expr(Parser *p);
 
-/* `(a: int, b) => body`: the caller has already consumed `(`. Returns NULL
- * when the tokens are not a lambda, so the caller can backtrack. */
+/* `(a: int, b) => body` or `() => body`: the caller has already consumed
+ * `(`. Returns NULL when the tokens are not a lambda, so the caller can
+ * backtrack. */
 static Expr *try_parse_lambda(Parser *p, int line, int col) {
     PtrVec params = {0}, ptypes = {0};
-    for (;;) {
-        if (!check(p, TK_IDENT)) return NULL;
-        Token pn = p->cur;
-        advance(p);
-        vec_push(&params, tok_text(pn));
-        vec_push(&ptypes, match(p, TK_COLON) ? parse_type(p) : NULL);
-        if (!match(p, TK_COMMA)) break;
+    if (check(p, TK_IDENT)) {
+        for (;;) {
+            Token pn = p->cur;
+            advance(p);
+            vec_push(&params, tok_text(pn));
+            vec_push(&ptypes, match(p, TK_COLON) ? parse_type(p) : NULL);
+            if (!match(p, TK_COMMA)) break;
+        }
     }
     if (!match(p, TK_RPAREN)) return NULL;
     if (!match(p, TK_FAT_ARROW)) return NULL;
@@ -383,7 +385,7 @@ static Expr *parse_primary(Parser *p) {
          * tentatively parsing a lambda and backtracking if there is no `=>`. */
         PSave save = psave(p);
         advance(p);
-        if (check(p, TK_IDENT)) {
+        if (check(p, TK_IDENT) || check(p, TK_RPAREN)) {
             Expr *lam = try_parse_lambda(p, line, col);
             if (lam) return lam;
         }
