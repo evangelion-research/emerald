@@ -1,0 +1,20 @@
+import math
+
+print(math.floor(2.7), math.floor(-2.5), math.ceil(2.1), math.ceil(-2.9))
+print(math.round(2.5), math.round(-2.5), math.trunc(-2.9))
+print(math.floor_div(7, 2), math.floor_div(-7, 2), math.floor_div(7, -2), 7 % 2, -7 % 2)
+print(math.pow_i(2, 10), math.pow_i(3, 0), math.gcd(48, 18), math.lcm(4, 6))
+print(math.abs_i(-3), math.abs_f(-2.5), math.min_i(3, 4), math.clamp(5.0, 0.0, 1.0))
+
+def close(a: float, b: float) -> bool { return math.abs_f(a - b) < 0.000000001 }
+
+print(close(math.exp(0.0), 1.0), close(math.exp(1.0), math.E), close(math.exp(-3.5), 0.030197383422318501))
+print(close(math.log(1.0), 0.0), close(math.log(math.E), 1.0), close(math.log(1000.0), 6.907755278982137))
+print(close(math.exp(math.log(37.5)), 37.5))
+print(close(math.sin(0.0), 0.0), close(math.sin(math.PI / 6.0), 0.5), close(math.cos(0.0), 1.0))
+print(close(math.sin(1.3) / math.cos(1.3), tan(1.3)))
+print(close(math.pow_f(2.0, 10.0), 1024.0), close(math.pow_f(-2.0, 3.0), -8.0), close(math.pow_f(9.0, 0.5), 3.0))
+print(close(math.log2(1024.0), 10.0), close(math.log10(1000.0), 3.0))
+print(math.INF > 1.0e308, math.NEG_INF < 0.0, math.log(0.0) == math.NEG_INF)
+print(close(math.degrees(math.PI), 180.0), close(math.radians(180.0), math.PI))
+print(math.is_even(4), math.is_odd(4), math.sign_i(-9), math.sign_f(0.0))

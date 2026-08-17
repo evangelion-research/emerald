@@ -1,0 +1,47 @@
+# io — files and streams, with failure as a value.
+#
+# The `read_file` builtin aborts on a missing file. That is right for a script
+# and wrong for a library, so the runtime grew `read_file_opt` beside it and
+# these wrap it into a Result. The aborting spellings stay: a program that
+# genuinely cannot continue without the file should die at the read, loudly,
+# with the runtime's located message.
+#
+# Writes still abort on failure — the runtime has no non-aborting writer yet.
+# Their Result is therefore always `ok` today; the signature is the honest one
+# for when that changes, and callers written against it will not need edits.
+
+import strings
+from result import Result
+
+def read(path: str) -> Result[str] {
+    content = read_file_opt(path)
+    if content == None { return { ok: False, err: "cannot read '" + path + "'" } }
+    return { ok: True, val: content }
+}
+
+def read_lines(path: str) -> Result[list[str]] {
+    content = read_file_opt(path)
+    if content == None { return { ok: False, err: "cannot read '" + path + "'" } }
+    return { ok: True, val: strings.split_lines(content) }
+}
+
+def write(path: str, content: str) -> Result[None] {
+    write_file(path, content)
+    return { ok: True, val: None }
+}
+
+def append_to(path: str, content: str) -> Result[None] {
+    append_file(path, content)
+    return { ok: True, val: None }
+}
+
+def write_lines(path: str, lines: list[str]) -> Result[None] {
+    return write(path, strings.join("\n", lines) + "\n")
+}
+
+def exists(path: str) -> bool { return file_exists(path) }
+
+# stdout / stderr. `print` is variadic and a builtin; these are the single-value
+# spellings a library can pass around and a caller can redirect in their head.
+def say(line: str) -> None { print(line) }
+def warn(line: str) -> None { eprint(line) }

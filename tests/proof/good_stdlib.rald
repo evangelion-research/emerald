@@ -1,0 +1,38 @@
+# Proof mode is whole-program: it checks every linked module, not just the
+# entry. So this passing means the standard library itself is free of `any` and
+# of `partial` — a property worth a regression test, because a single `xs = []`
+# in a stdlib module would silently take proof mode away from every program
+# that imports it.
+
+import math
+import chars
+import strings
+import lists
+import dict
+import sort
+import set
+import path
+import io
+import sys
+import builder
+from result import Result, Option, unwrap_or
+
+def normalized(x: float) -> float pure { return math.clamp(x, 0.0, 1.0) }
+
+def leading_digits(s: str) -> int pure {
+    n = 0
+    while n < len(s) {
+        if chars.is_digit(strings.take(strings.drop(s, n), 1)) == False { return n }
+        n = n + 1
+    }
+    return n
+}
+
+def widths(words: list[str]) -> list[int] {
+    out: list[int] = []
+    for w in words { append(out, len(w)) }
+    return sort.sorted_ints(out)
+}
+
+print(normalized(1.5), leading_digits("42x"), widths(["bbb", "a"]))
+print(unwrap_or(strings.parse_int("7"), 0), path.ext("main.rald"), lists.sum([1, 2]))

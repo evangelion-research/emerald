@@ -474,6 +474,9 @@ typedef struct {
     bool annotated; /* explicit annotations are enforced; inferred ones widen */
     bool bound;     /* false until the first assignment executes */
     bool is_const;  /* declared `const`: reassignment is an error */
+    const char *file; /* for globals: the declaring module. An assignment from
+                       * another module's function body makes a local, not a
+                       * clobber — see updatable_global() */
     int gen;        /* bumped on assignment; invalidates stale narrowings */
 } Var;
 
@@ -522,6 +525,9 @@ typedef struct {
     bool cur_pure;    /* purity of the function whose body is being checked */
     bool proof;       /* --proof: `any` and `partial` are banned */
     bool in_sig;      /* resolving a function signature: proof `any` reports here */
+    TyEnv *tyenv;     /* type parameters of the function being checked: in
+                       * scope for annotations in its body as well as its
+                       * signature (`out: list[T] = []` inside def f[T]) */
     int loop_depth;
 } Ck;
 
@@ -572,9 +578,12 @@ static Var *env_add(VarEnv *env, const char *name, Type *t, bool annotated) {
     v->annotated = annotated;
     v->bound = false;
     v->is_const = false;
+    v->file = NULL;
     v->gen = 0;
     return v;
 }
+
+static bool updatable_global(Ck *ck, const char *name, const char *file);
 
 static Var *lookup_var(Ck *ck, const char *name) {
     for (Scope *sc = ck->scope; sc; sc = sc->parent) {
@@ -593,7 +602,13 @@ static bool is_builtin(const char *name) {
            strcmp(name, "sqrt") == 0 ||
            strcmp(name, "tan") == 0 || strcmp(name, "rand") == 0 ||
            strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
-           strcmp(name, "reduce") == 0;
+           strcmp(name, "reduce") == 0 ||
+           strcmp(name, "append") == 0 || strcmp(name, "slice") == 0 ||
+           strcmp(name, "ord") == 0 || strcmp(name, "chr") == 0 ||
+           strcmp(name, "float") == 0 || strcmp(name, "eprint") == 0 ||
+           strcmp(name, "argv") == 0 || strcmp(name, "exit") == 0 ||
+           strcmp(name, "read_file_opt") == 0 ||
+           strcmp(name, "file_exists") == 0;
 }
 
 /* which builtins are pure (no IO, no randomness, no ambient state)? A pure
@@ -605,7 +620,12 @@ static bool builtin_pure(const char *name) {
            strcmp(name, "gc_stats") == 0 ||
            strcmp(name, "sqrt") == 0 || strcmp(name, "tan") == 0 ||
            strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
-           strcmp(name, "reduce") == 0;
+           strcmp(name, "reduce") == 0 ||
+           /* slice/ord/chr/float are functions of their arguments; `append`
+            * mutates and `exit`/`argv`/`eprint` touch the process, so those
+            * stay impure. See stdlib/SPEC.md §1.2. */
+           strcmp(name, "slice") == 0 || strcmp(name, "ord") == 0 ||
+           strcmp(name, "chr") == 0 || strcmp(name, "float") == 0;
 }
 
 static FuncSig *find_func(Ck *ck, const char *name) {
@@ -805,7 +825,7 @@ static Type *infer_lambda(Ck *ck, const Expr *e, const Type *expected) {
             ptypes[i] = ex->fun.params[i];
         else
             ptypes[i] = e->as.lam.param_types[i]
-                            ? resolve_type(ck, e->as.lam.param_types[i], NULL)
+                            ? resolve_type(ck, e->as.lam.param_types[i], ck->tyenv)
                             : &t_any;
     }
     return infer_lambda_with(ck, e, ptypes);
@@ -912,6 +932,15 @@ static void unify(Type *param, Type *arg, Subst *sub) {
                 }
         return;
     case TY_UNION: {
+        /* union against union: bind from each alternative of the argument in
+         * turn. Without this, `def f[T](r: Result[T])` learns nothing from a
+         * `Result[int]` argument — the whole-union match below never fires,
+         * because no single alternative accepts the entire argument. */
+        if (arg->k == TY_UNION) {
+            for (size_t j = 0; j < arg->uni.count; j++)
+                unify(param, arg->uni.alts[j], sub);
+            return;
+        }
         /* if the argument already fits a variable-free alternative, done */
         for (size_t i = 0; i < param->uni.count; i++)
             if (!contains_var(param->uni.alts[i]) &&
@@ -1226,6 +1255,111 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                          "rand() takes 0 arguments, got %zu", argc);
             return &t_float;
         }
+        /* --- the stdlib foundation (see stdlib/SPEC.md §1.1) ------------- */
+        if (strcmp(name, "append") == 0) {
+            if (argc != 2) {
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "append() takes 2 arguments, got %zu", argc);
+                return &t_none;
+            }
+            Type *l = ty_base(ty_resolve(argt[0]));
+            if (l->k == TY_LIST) {
+                if (!assignable(l->elem, argt[1]))
+                    ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
+                               l->elem, argt[1],
+                               "append() to %s: expected %s, got %s",
+                               type_str(argt[0]), type_str(l->elem),
+                               type_str(argt[1]));
+            } else if (l->k != TY_ANY && l->k != TY_NEVER) {
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "append() expects a list, got %s", type_str(argt[0]));
+            }
+            return &t_none;
+        }
+        if (strcmp(name, "slice") == 0) {
+            if (argc != 3) {
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "slice() takes 3 arguments, got %zu", argc);
+                return &t_any;
+            }
+            for (size_t i = 1; i < 3; i++)
+                if (!assignable(&t_int, argt[i]))
+                    ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                             "slice() bound %zu must be int, got %s", i,
+                             type_str(argt[i]));
+            /* slicing preserves the sequence's type: str -> str, list[T] ->
+             * list[T]. Anything else is a compile error rather than a cast. */
+            Type *s = ty_base(ty_resolve(argt[0]));
+            if (s->k == TY_STR) return &t_str;
+            if (s->k == TY_LIST) return argt[0];
+            if (s->k == TY_ANY || s->k == TY_NEVER) return &t_any;
+            ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                     "cannot slice %s", type_str(argt[0]));
+            return &t_any;
+        }
+        if (strcmp(name, "ord") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "ord() takes 1 argument, got %zu", argc);
+            else if (!assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "ord() argument must be str, got %s", type_str(argt[0]));
+            return &t_int;
+        }
+        if (strcmp(name, "chr") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "chr() takes 1 argument, got %zu", argc);
+            else if (!assignable(&t_int, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "chr() argument must be int, got %s", type_str(argt[0]));
+            return &t_str;
+        }
+        if (strcmp(name, "float") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "float() takes 1 argument, got %zu", argc);
+            return &t_float;
+        }
+        if (strcmp(name, "eprint") == 0) return &t_none;
+        if (strcmp(name, "argv") == 0) {
+            if (argc != 0)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "argv() takes 0 arguments, got %zu", argc);
+            return ty_list(&t_str);
+        }
+        if (strcmp(name, "exit") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "exit() takes 1 argument, got %zu", argc);
+            else if (!assignable(&t_int, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "exit() status must be int, got %s", type_str(argt[0]));
+            /* `never`: exit() does not return, so `return exit(1)` satisfies
+             * any return type and a function ending in exit() is not a
+             * fall-off-the-end error. */
+            return &t_never;
+        }
+        if (strcmp(name, "read_file_opt") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "read_file_opt() takes 1 argument, got %zu", argc);
+            else if (!assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "read_file_opt() path must be str, got %s",
+                         type_str(argt[0]));
+            return ty_join(&t_str, &t_none);
+        }
+        if (strcmp(name, "file_exists") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "file_exists() takes 1 argument, got %zu", argc);
+            else if (!assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "file_exists() path must be str, got %s",
+                         type_str(argt[0]));
+            return &t_bool;
+        }
 
         if (f) {
             /* purity: a pure function may only call other pure functions */
@@ -1400,7 +1534,7 @@ static Type *infer(Ck *ck, const Expr *e) {
                                 (e->as.lam.param_count ? e->as.lam.param_count : 1));
         for (size_t i = 0; i < e->as.lam.param_count; i++)
             ptypes[i] = e->as.lam.param_types[i]
-                            ? resolve_type(ck, e->as.lam.param_types[i], NULL)
+                            ? resolve_type(ck, e->as.lam.param_types[i], ck->tyenv)
                             : &t_any;
         return infer_lambda_with(ck, e, ptypes);
     }
@@ -1746,6 +1880,12 @@ static bool stmt_returns(const Stmt *s) {
             if (!block_returns(&s->as.mtch.blocks[i])) return false;
         return true;
     }
+    case S_EXPR:
+        /* exit() is typed `never`: control does not reach the next statement,
+         * so a function ending in one has not fallen off its end */
+        return s->as.expr->kind == E_CALL &&
+               s->as.expr->as.call.fn->kind == E_NAME &&
+               strcmp(s->as.expr->as.call.fn->as.sval, "exit") == 0;
     default:
         return false;
     }
@@ -2107,14 +2247,25 @@ static void check_assign(Ck *ck, const Stmt *s) {
         }
         VarEnv *env = ck->scope ? &ck->scope->locals : &ck->globals;
         Var *v = env_find(env, name);
-        if (!v && ck->scope) v = env_find(&ck->globals, name); /* docs rule */
+        /* docs rule: assignment inside a def updates a same-module global */
+        if (!v && ck->scope && updatable_global(ck, name, s->file))
+            v = env_find(&ck->globals, name);
         if (v && v->is_const && !s->as.assign.is_const) {
             ck_error(ck, "E_TYPE_CONST", s->line, s->col,
                      "cannot assign to const '%s'", name);
             return;
         }
         if (s->as.assign.ann) {
-            Type *ann = resolve_type(ck, s->as.assign.ann, NULL);
+            Type *ann = resolve_type(ck, s->as.assign.ann, ck->tyenv);
+            /* contextual typing for `xs: list[T] = []`. An empty literal has
+             * element type `any` on its own, and without this the annotation
+             * is discarded the moment the variable is read back: `m: list[str]
+             * = []` then `cur = m` would make `cur` a `list[any]`, which is
+             * both imprecise and (in proof mode) an error. */
+            if (s->as.assign.value->kind == E_LIST &&
+                s->as.assign.value->as.list.count == 0 &&
+                ty_resolve(ann)->k == TY_LIST)
+                val = ann;
             if (ck->proof && ann->k == TY_ANY)
                 ck_error(ck, "E_PROOF_ANY", s->line, s->col,
                          "'any' is banned in proof mode: annotate '%s' with a "
@@ -2123,7 +2274,10 @@ static void check_assign(Ck *ck, const Stmt *s) {
                 ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, ann, val,
                            "cannot assign %s to '%s' declared as %s",
                            type_str(val), name, type_str(ann));
-            if (!v) v = env_add(env, name, ann, true);
+            if (!v) {
+                v = env_add(env, name, ann, true);
+                if (!ck->scope) v->file = s->file;
+            }
             v->decl = ann;
             v->annotated = true;
             v->is_const = s->as.assign.is_const;
@@ -2132,6 +2286,7 @@ static void check_assign(Ck *ck, const Stmt *s) {
         }
         if (!v) {
             v = env_add(env, name, widen(val), false);
+            if (!ck->scope) v->file = s->file;
             v->is_const = s->as.assign.is_const;
             set_flow(v, val);
             return;
@@ -2306,9 +2461,12 @@ static void check_stmt(Ck *ck, const Stmt *s) {
                      "%s is not iterable", type_str(seq));
         VarEnv *env = ck->scope ? &ck->scope->locals : &ck->globals;
         Var *v = env_find(env, s->as.fr.var);
-        if (!v && ck->scope) v = env_find(&ck->globals, s->as.fr.var);
-        if (!v) v = env_add(env, s->as.fr.var, elem, false);
-        else if (!v->annotated) v->decl = v->bound ? ty_join(v->decl, elem) : elem;
+        if (!v && ck->scope && updatable_global(ck, s->as.fr.var, s->file))
+            v = env_find(&ck->globals, s->as.fr.var);
+        if (!v) {
+            v = env_add(env, s->as.fr.var, elem, false);
+            if (!ck->scope) v->file = s->file;
+        } else if (!v->annotated) v->decl = v->bound ? ty_join(v->decl, elem) : elem;
         else if (!assignable(v->decl, elem))
             ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, v->decl, elem,
                        "loop assigns %s to '%s' declared as %s",
@@ -2395,11 +2553,22 @@ static void check_block(Ck *ck, const Block *b) {
 
 typedef struct { Ck *ck; VarEnv *env; const char *skip; } DeclCtx;
 
-static void declare_local(const char *name, int line, void *ud) {
+/* Is `name` a global this file may update by assignment? The docs rule is that
+ * assigning a global's name inside a def updates the global — but only within
+ * the module that declared it. Across a module boundary the names are
+ * unrelated: `for xs in xss` inside a library function must not write to an
+ * importer's `xs` just because the linker put them in one translation unit. */
+static bool updatable_global(Ck *ck, const char *name, const char *file) {
+    Var *g = env_find(&ck->globals, name);
+    if (!g) return false;
+    if (!g->file || !file) return true;
+    return strcmp(g->file, file) == 0;
+}
+
+static void declare_local(const char *name, const char *file, int line, void *ud) {
     DeclCtx *dc = ud;
     (void)line;
-    /* the docs rule: assigning a global's name inside a def updates the global */
-    if (dc->skip == NULL || !env_find(&dc->ck->globals, name))
+    if (dc->skip == NULL || !updatable_global(dc->ck, name, file))
         if (!env_find(dc->env, name))
             env_add(dc->env, name, &t_any, false);
 }
@@ -2546,6 +2715,9 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     Type *saved_ret = ck->cur_ret;
     bool saved_pure = ck->cur_pure;
     ck->scope = &sc;
+    TyEnv *saved_tyenv = ck->tyenv;
+    /* a nested def keeps the enclosing function's type parameters visible */
+    if (te) ck->tyenv = te;
     ck->cur_ret = resolve_type(ck, s->as.func.ret_type, te);
     ck->cur_pure = sc.pure;
     /* falling off the end returns None, so a stricter return type demands
@@ -2560,6 +2732,7 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     ck->scope = saved_scope;
     ck->cur_ret = saved_ret;
     ck->cur_pure = saved_pure;
+    ck->tyenv = saved_tyenv;
 
     free(ptypes);
     free(sc.locals.items);

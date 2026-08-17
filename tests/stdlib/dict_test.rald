@@ -1,0 +1,32 @@
+import dict
+import sort
+from dict import Map
+from result import opt_or
+
+m: Map[int] = dict.new_map()
+dict.set(m, "one", 1)
+dict.set(m, "two", 2)
+dict.set(m, "one", 11)
+print(dict.size(m), dict.has(m, "one"), dict.has(m, "nope"))
+print(opt_or(dict.get(m, "two"), -1), opt_or(dict.get(m, "zzz"), -1), dict.get_or(m, "zzz", 99))
+print(sort.sorted_strs(dict.keys(m)), sort.sorted_ints(dict.values(m)))
+print(dict.remove(m, "one"), dict.remove(m, "one"), dict.size(m))
+
+# force several growths
+big: Map[str] = dict.new_map()
+for i in range(200) { dict.set(big, "k" + str(i), "v" + str(i)) }
+print(dict.size(big), dict.get_or(big, "k137", "?"), dict.get_or(big, "k200", "?"))
+ok = True
+for i in range(200) { if dict.get_or(big, "k" + str(i), "?") != "v" + str(i) { ok = False } }
+print("all survived growth:", ok)
+
+counts: Map[int] = dict.new_map()
+for w in ["a", "b", "a", "c", "a"] { dict.bump(counts, w, 1) }
+print(dict.get_or(counts, "a", 0), dict.get_or(counts, "b", 0))
+
+a: Map[int] = dict.from_items([{ key: "x", val: 1 }, { key: "y", val: 2 }])
+b: Map[int] = dict.from_items([{ key: "y", val: 20 }])
+merged = dict.merge(a, b)
+print(sort.sorted_strs(dict.keys(merged)), dict.get_or(merged, "y", 0))
+dict.clear(a)
+print(dict.is_empty(a), dict.hash_str("") , dict.hash_str("a") != dict.hash_str("b"))

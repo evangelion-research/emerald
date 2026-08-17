@@ -52,7 +52,11 @@ static void sb_printf(SB *sb, const char *fmt, ...) {
 
 /* --- name tables --------------------------------------------------------- */
 
-typedef struct { char **names; size_t count, cap; } Names;
+typedef struct {
+    char **names;
+    const char **files; /* declaring module, for the global table; else NULL */
+    size_t count, cap;
+} Names;
 
 static int names_find(const Names *ns, const char *name) {
     for (size_t i = 0; i < ns->count; i++)
@@ -60,14 +64,34 @@ static int names_find(const Names *ns, const char *name) {
     return -1;
 }
 
-static void names_add(Names *ns, const char *name) {
+static void names_add_file(Names *ns, const char *name, const char *file) {
     if (names_find(ns, name) >= 0) return;
     if (ns->count == ns->cap) {
         ns->cap = ns->cap ? ns->cap * 2 : 8;
         ns->names = realloc(ns->names, sizeof(char *) * ns->cap);
-        if (!ns->names) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        ns->files = realloc(ns->files, sizeof(char *) * ns->cap);
+        if (!ns->names || !ns->files) {
+            fputs("emeraldc: out of memory\n", stderr);
+            exit(1);
+        }
     }
+    ns->files[ns->count] = file;
     ns->names[ns->count++] = (char *)name;
+}
+
+static void names_add(Names *ns, const char *name) {
+    names_add_file(ns, name, NULL);
+}
+
+/* Would an assignment in `file` update the global `name`, or shadow it with a
+ * local? Only the module that declared a global may update it: see the same
+ * rule, and the reasoning, in check.c's updatable_global(). */
+static bool global_owned_by(const Names *globals, const char *name,
+                            const char *file) {
+    int i = names_find(globals, name);
+    if (i < 0) return false;
+    if (!globals->files[i] || !file) return true;
+    return strcmp(globals->files[i], file) == 0;
 }
 
 static bool is_builtin(const char *name) {
@@ -78,7 +102,13 @@ static bool is_builtin(const char *name) {
            strcmp(name, "run") == 0 || strcmp(name, "sqrt") == 0 ||
            strcmp(name, "tan") == 0 || strcmp(name, "rand") == 0 ||
            strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
-           strcmp(name, "reduce") == 0;
+           strcmp(name, "reduce") == 0 || strcmp(name, "append_file") == 0 ||
+           strcmp(name, "append") == 0 || strcmp(name, "slice") == 0 ||
+           strcmp(name, "ord") == 0 || strcmp(name, "chr") == 0 ||
+           strcmp(name, "float") == 0 || strcmp(name, "eprint") == 0 ||
+           strcmp(name, "argv") == 0 || strcmp(name, "exit") == 0 ||
+           strcmp(name, "read_file_opt") == 0 ||
+           strcmp(name, "file_exists") == 0;
 }
 
 /* --- function info (closure conversion) ---------------------------------- */
@@ -342,6 +372,37 @@ static int gen_call(Cg *cg, const Expr *e) {
         } else if (strcmp(name, "reduce") == 0) {
             emit(cg, "%s = em_reduce(%s, %s, %s);", slotref(t, tb),
                  slotref(args[0], ab), slotref(args[1], bb), slotref(args[2], cb));
+        } else if (strcmp(name, "append") == 0) {
+            emit(cg, "em_append(%s, %s);", slotref(args[0], ab),
+                 slotref(args[1], bb));
+            emit(cg, "%s = em_none();", slotref(t, tb));
+        } else if (strcmp(name, "slice") == 0) {
+            emit(cg, "%s = em_slice(%s, %s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb), slotref(args[2], cb));
+        } else if (strcmp(name, "ord") == 0) {
+            emit(cg, "%s = em_ord(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "chr") == 0) {
+            emit(cg, "%s = em_chr(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "float") == 0) {
+            emit(cg, "%s = em_float_of(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "eprint") == 0) {
+            sb_printf(&call, "em_eprint(%zu", argc);
+            for (size_t i = 0; i < argc; i++)
+                sb_printf(&call, ", %s", slotref(args[i], ab));
+            sb_printf(&call, ");");
+            emit(cg, "%s", call.buf);
+            emit(cg, "%s = em_none();", slotref(t, tb));
+        } else if (strcmp(name, "argv") == 0) {
+            emit(cg, "%s = em_argv();", slotref(t, tb));
+        } else if (strcmp(name, "exit") == 0) {
+            emit(cg, "em_exit(%s);", slotref(args[0], ab));
+            emit(cg, "%s = em_none();", slotref(t, tb));
+        } else if (strcmp(name, "read_file_opt") == 0) {
+            emit(cg, "%s = em_read_file_opt(%s);", slotref(t, tb),
+                 slotref(args[0], ab));
+        } else if (strcmp(name, "file_exists") == 0) {
+            emit(cg, "%s = em_file_exists(%s);", slotref(t, tb),
+                 slotref(args[0], ab));
         } else {
             Access kind;
             int slot;
@@ -1150,19 +1211,21 @@ static void collect_lambdas_expr(const Expr *e, Expr ***lams, size_t *count,
     }
 }
 
-static void collect_local_cb(const char *name, int line, void *ud);
+static void collect_local_cb(const char *name, const char *file, int line,
+                             void *ud);
 
 /* every name a match pattern binds, recursively (needs an F/G slot: codegen
  * writes the bound value into it when an arm matches) */
-static void pat_bind_names(const Pat *p, void (*fn)(const char *, int line, void *),
-                           void *ud) {
+static void pat_bind_names(const Pat *p,
+                           void (*fn)(const char *, const char *, int, void *),
+                           const char *file, void *ud) {
     switch (p->kind) {
     case P_BIND:
-        fn(p->bind, p->line, ud);
+        fn(p->bind, file, p->line, ud);
         break;
     case P_REC:
         for (size_t i = 0; i < p->rec.count; i++)
-            pat_bind_names(p->rec.items[i], fn, ud);
+            pat_bind_names(p->rec.items[i], fn, file, ud);
         break;
     default:
         break;
@@ -1170,23 +1233,26 @@ static void pat_bind_names(const Pat *p, void (*fn)(const char *, int line, void
 }
 
 static void collect_match_pats_stmt(const Stmt *s,
-                                    void (*fn)(const char *, int line, void *),
+                                    void (*fn)(const char *, const char *,
+                                               int, void *),
                                     void *ud);
 
 static void collect_match_pats_block(const Block *b,
-                                     void (*fn)(const char *, int line, void *),
+                                     void (*fn)(const char *, const char *,
+                                                int, void *),
                                      void *ud) {
     for (size_t i = 0; i < b->count; i++)
         collect_match_pats_stmt(b->items[i], fn, ud);
 }
 
 static void collect_match_pats_stmt(const Stmt *s,
-                                    void (*fn)(const char *, int line, void *),
+                                    void (*fn)(const char *, const char *,
+                                               int, void *),
                                     void *ud) {
     switch (s->kind) {
     case S_MATCH:
         for (size_t j = 0; j < s->as.mtch.count; j++) {
-            pat_bind_names(s->as.mtch.pats[j], fn, ud);
+            pat_bind_names(s->as.mtch.pats[j], fn, s->file, ud);
             collect_match_pats_block(&s->as.mtch.blocks[j], fn, ud);
         }
         break;
@@ -1219,13 +1285,15 @@ static bool bound_in_ancestor(FuncInfo *fi, const char *name) {
     return false;
 }
 
-static void collect_local_cb(const char *name, int line, void *ud) {
+static void collect_local_cb(const char *name, const char *file, int line,
+                             void *ud) {
     (void)line;
     LocalCtx *lc = ud;
-    /* the docs rule: assigning a global's name updates the global; and an
-     * assignment to an enclosing function's local is a capture, not a new
-     * local — it updates the shared cell, so closures observe the mutation */
-    if (names_find(lc->globals, name) < 0 && !bound_in_ancestor(lc->fi, name))
+    /* the docs rule: assigning a same-module global's name updates the global;
+     * and an assignment to an enclosing function's local is a capture, not a
+     * new local — it updates the shared cell, so closures observe the mutation */
+    if (!global_owned_by(lc->globals, name, file) &&
+        !bound_in_ancestor(lc->fi, name))
         add_local(lc->fi, name);
 }
 
@@ -1381,9 +1449,10 @@ static FuncInfo *build_func(Ctx *ctx, const Stmt *node, FuncInfo *parent) {
 
 /* --- program ------------------------------------------------------------- */
 
-static void collect_name_cb(const char *name, int line, void *ud) {
+static void collect_name_cb(const char *name, const char *file, int line,
+                            void *ud) {
     (void)line;
-    names_add((Names *)ud, name);
+    names_add_file((Names *)ud, name, file);
 }
 
 /* --- tail-call optimization ---------------------------------------------- */
@@ -1572,8 +1641,9 @@ void codegen_program(FILE *out, const Program *prog, const char *filename) {
     gen_block(&cg, &prog->body);
 
     int ntemps = cg.max_temps < 1 ? 1 : cg.max_temps;
-    fprintf(out, "int main(void) {\n");
+    fprintf(out, "int main(int argc, char **argv) {\n");
     fprintf(out, "    rt_init();\n");
+    fprintf(out, "    rt_set_args(argc, argv);\n");
     fprintf(out, "    rt_cur_file = rt_src_file;\n");
     fprintf(out, "    static RootFrame __gfr;\n");
     fprintf(out, "    for (int __i = 0; __i < %zu; __i++) G[__i] = em_none();\n",

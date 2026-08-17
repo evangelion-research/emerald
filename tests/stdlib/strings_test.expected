@@ -1,0 +1,24 @@
+4 7 -1
+True True True
+2 2
+['a', 'b', '', 'c']
+['nosep'] ['x']
+['a', 'b', 'c'] []
+['hello', 'world']
+a-b-c 
+{before: 'key', found: True, after: 'value'} {before: 'nope', found: False, after: ''}
+[hi] [hi ] [ hi]
+bXXa aaaaaa
+ababab MIXED mixed cba
+[007] [7..]
+['a', 'b', 'c'] b abc def
+42 -17 8
+invalid digit in '4x2' empty string no digits in '-'
+255 11
+2.5 -1000.0 7.0
+False False False
+a\"b\\c\nd\te
+True
+unknown escape \q trailing backslash
+hello 42 8 True
+abc

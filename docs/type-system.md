@@ -208,6 +208,12 @@ a generic signature a universally quantified statement rather than a hint.
 Inference notes:
 
 - Type arguments are inferred from the call, never written explicitly.
+- A function's type parameters are in scope in its **body** as well as its
+  signature, so a generic function can declare a local of its own type
+  parameter: `out: list[T] = []` inside `def f[T](...)`.
+- Unification looks through unions on both sides, so `def f[T](r: Result[T])`
+  binds `T = int` from a `Result[int]` argument even though `Result` expands to
+  a two-alternative union.
 - A variable bound from several arguments takes the join (union) of them.
 - Inferred arguments are widened, so `head([1, 2])` gives `int`, not `1 | 2`.
 - An unconstrained variable falls back to `any` rather than erroring.

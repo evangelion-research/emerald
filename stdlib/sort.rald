@@ -1,0 +1,104 @@
+# sort — ordering.
+#
+# Bottom-up merge sort: stable, O(n log n), and iterative. Iterative matters
+# here for more than speed — Emerald functions are total by default, and a
+# recursive merge sort splits on `len(xs) / 2`, which is not a structural
+# descent the termination checker recognizes. It would need `partial`, i.e. it
+# would need to opt out of the language's main claim. The loop does not.
+#
+# Comparators are `less(a, b) -> bool`, strict: `less(a, b)` and `less(b, a)`
+# must not both be true, or the sort is stable with respect to nothing.
+
+import lists
+
+def less_int(a: int, b: int) -> bool pure { return a < b }
+def less_float(a: float, b: float) -> bool pure { return a < b }
+def less_str(a: str, b: str) -> bool pure { return a < b }
+
+def _merge_runs[T](src: list[T], lo: int, mid: int, hi: int,
+                   less: (T, T) -> bool, out: list[T]) -> None {
+    i = lo
+    j = mid
+    while i < mid and j < hi {
+        # `not less(src[i], src[j])` would break ties toward the right half and
+        # cost stability; taking the left on a tie preserves input order.
+        if less(src[j], src[i]) {
+            append(out, src[j])
+            j = j + 1
+        } else {
+            append(out, src[i])
+            i = i + 1
+        }
+    }
+    while i < mid {
+        append(out, src[i])
+        i = i + 1
+    }
+    while j < hi {
+        append(out, src[j])
+        j = j + 1
+    }
+}
+
+def sorted[T](xs: list[T], less: (T, T) -> bool) -> list[T] {
+    n = len(xs)
+    cur = lists.copy(xs)
+    width = 1
+    while width < n {
+        merged: list[T] = []
+        i = 0
+        while i < n {
+            mid = i + width
+            hi = i + width * 2
+            if mid > n { mid = n }
+            if hi > n { hi = n }
+            _merge_runs(cur, i, mid, hi, less, merged)
+            i = i + width * 2
+        }
+        cur = merged
+        width = width * 2
+    }
+    return cur
+}
+
+def sorted_ints(xs: list[int]) -> list[int] { return sorted(xs, less_int) }
+def sorted_floats(xs: list[float]) -> list[float] { return sorted(xs, less_float) }
+def sorted_strs(xs: list[str]) -> list[str] { return sorted(xs, less_str) }
+
+def sorted_desc[T](xs: list[T], less: (T, T) -> bool) -> list[T] {
+    return lists.reverse(sorted(xs, less))
+}
+
+# Sort by a derived key — Python's `sorted(xs, key=...)`. Two functions rather
+# than one because there is no `T: Comparable` to constrain the key with.
+def sort_by_key[T, K](xs: list[T], key: (T) -> K, less: (K, K) -> bool) -> list[T] {
+    return sorted(xs, (a: T, b: T) => less(key(a), key(b)))
+}
+
+def is_sorted[T](xs: list[T], less: (T, T) -> bool) -> bool {
+    i = 1
+    while i < len(xs) {
+        if less(xs[i], xs[i - 1]) { return False }
+        i = i + 1
+    }
+    return True
+}
+
+# Leftmost index whose element is not less than `v` — the insertion point.
+# Requires `xs` sorted by the same comparator; garbage in, garbage out.
+def lower_bound[T](xs: list[T], v: T, less: (T, T) -> bool) -> int {
+    lo = 0
+    hi = len(xs)
+    while lo < hi {
+        mid = lo + int((hi - lo) / 2)
+        if less(xs[mid], v) { lo = mid + 1 }
+        else { hi = mid }
+    }
+    return lo
+}
+
+def binary_search[T](xs: list[T], v: T, less: (T, T) -> bool) -> int {
+    i = lower_bound(xs, v, less)
+    if i < len(xs) and xs[i] == v { return i }
+    return -1
+}

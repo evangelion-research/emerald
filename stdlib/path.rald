@@ -1,0 +1,92 @@
+# path — filename manipulation.
+#
+# `os.path`, not `pathlib`: there are no classes, and a Path object without
+# methods is just a string with extra steps. Pure string work, no syscalls —
+# `io.exists` is where the filesystem gets touched.
+#
+# POSIX separators only. Windows is not a target.
+
+import strings
+import lists
+
+const SEP: str = "/"
+
+def is_abs(p: str) -> bool pure { return strings.starts_with(p, SEP) }
+
+def join(a: str, b: str) -> str {
+    if len(a) == 0 { return b }
+    if len(b) == 0 { return a }
+    if is_abs(b) { return b }
+    if strings.ends_with(a, SEP) { return a + b }
+    return a + SEP + b
+}
+
+def join_all(parts: list[str]) -> str {
+    out = ""
+    for p in parts { out = join(out, p) }
+    return out
+}
+
+def dirname(p: str) -> str pure {
+    i = strings.rfind(p, SEP)
+    if i < 0 { return "" }
+    if i == 0 { return SEP }
+    return slice(p, 0, i)
+}
+
+def basename(p: str) -> str pure {
+    i = strings.rfind(p, SEP)
+    if i < 0 { return p }
+    return slice(p, i + 1, len(p))
+}
+
+# ".rald", or "" when there is none. A leading dot is not an extension, so
+# `ext(".bashrc")` is "" rather than ".bashrc".
+def ext(p: str) -> str pure {
+    b = basename(p)
+    i = strings.rfind(b, ".")
+    if i <= 0 { return "" }
+    return slice(b, i, len(b))
+}
+
+def without_ext(p: str) -> str pure {
+    e = ext(p)
+    if len(e) == 0 { return p }
+    return slice(p, 0, len(p) - len(e))
+}
+
+def with_ext(p: str, e: str) -> str pure { return without_ext(p) + e }
+
+def split_parts(p: str) -> list[str] {
+    out: list[str] = []
+    for part in strings.split(p, SEP) {
+        if len(part) > 0 { append(out, part) }
+    }
+    return out
+}
+
+# Collapses "." and ".." lexically. **It does not touch the filesystem**, so it
+# does not resolve symlinks — `a/b/../c` is `a/c` here even when `b` is a link
+# pointing elsewhere. That difference is where the CVEs live; when it matters,
+# ask the filesystem instead.
+def normalize(p: str) -> str {
+    absolute = is_abs(p)
+    out: list[str] = []
+    for part in split_parts(p) {
+        if part == "." {
+            pass
+        } elif part == ".." {
+            if len(out) > 0 and out[len(out) - 1] != ".." {
+                out = lists.take(out, len(out) - 1)
+            } elif absolute == False {
+                append(out, part)
+            }
+        } else {
+            append(out, part)
+        }
+    }
+    joined = strings.join(SEP, out)
+    if absolute { return SEP + joined }
+    if len(joined) == 0 { return "." }
+    return joined
+}

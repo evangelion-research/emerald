@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Emerald test runner: golden tests per compiler stage.
 #
-#   tests/run_tests.sh [lexer|parser|check|json|e2e|proof|imports]...   (default: all stages)
+#   tests/run_tests.sh [lexer|parser|check|json|e2e|proof|imports|stdlib]...
+#                                                              (default: all stages)
 #
 # Each stage compares tool output against a .expected file:
 #   lexer/   emeraldc --emit-tokens X.rald  vs X.expected
@@ -14,6 +15,9 @@
 #            `flags` (extra emeraldc arguments, e.g. -I roots), and `expected`.
 #            A case named bad_* is checked with --check and must fail; every
 #            other case is compiled and run.
+#   stdlib/  one .rald per module, compiled and run against .expected. These
+#            import from stdlib/ with no -I flag, so they also test that the
+#            stdlib root resolves by default.
 set -u
 cd "$(dirname "$0")/.."   # repo root, so diagnostics have stable paths
 
@@ -116,7 +120,24 @@ run_imports() {
     done
 }
 
-stages="${*:-lexer parser check json proof e2e imports}"
+run_stdlib() {
+    echo "== stdlib"
+    for f in tests/stdlib/*.rald; do
+        bin="${f%.rald}.bin"
+        if ! "$EMERALDC" -o "$bin" "$f" 2>/tmp/emerald_std.$$; then
+            FAIL=$((FAIL + 1))
+            echo "  FAIL $f (compilation)"
+            sed 's/^/    /' /tmp/emerald_std.$$
+            rm -f /tmp/emerald_std.$$
+            continue
+        fi
+        rm -f /tmp/emerald_std.$$
+        report "$f" "${f%.rald}.expected" "$("$bin" 2>&1)"
+        rm -f "$bin"
+    done
+}
+
+stages="${*:-lexer parser check json proof e2e imports stdlib}"
 for s in $stages; do
     case "$s" in
         lexer) run_lexer ;;
@@ -126,6 +147,7 @@ for s in $stages; do
         proof) run_proof ;;
         e2e) run_e2e ;;
         imports) run_imports ;;
+        stdlib) run_stdlib ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac
 done

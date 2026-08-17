@@ -1,0 +1,67 @@
+# set — membership, as a thin layer over `dict`.
+#
+# A Set is a Map whose values carry no information. It exists because the
+# alternative is writing `dict.set(visited, name, True)` at every call site and
+# reading `dict.get_or(visited, name, False)` back, which says "map" when the
+# code means "set".
+#
+# String elements only, for the same reason `dict` has string keys.
+
+import dict
+import sort
+from dict import Map
+
+type Set = Map[bool]
+
+def new_set() -> Set { return dict.new_map() }
+
+def add(s: Set, v: str) -> None { dict.set(s, v, True) }
+
+def has(s: Set, v: str) -> bool { return dict.has(s, v) }
+
+def remove(s: Set, v: str) -> bool { return dict.remove(s, v) }
+
+def size(s: Set) -> int { return dict.size(s) }
+
+def is_empty(s: Set) -> bool { return dict.size(s) == 0 }
+
+# Bucket order, like the map underneath. `sorted_elements` when order matters.
+def elements(s: Set) -> list[str] { return dict.keys(s) }
+
+def sorted_elements(s: Set) -> list[str] { return sort.sorted_strs(dict.keys(s)) }
+
+def from_list(vs: list[str]) -> Set {
+    s = new_set()
+    for v in vs { add(s, v) }
+    return s
+}
+
+def union(a: Set, b: Set) -> Set {
+    out = new_set()
+    for v in elements(a) { add(out, v) }
+    for v in elements(b) { add(out, v) }
+    return out
+}
+
+def intersect(a: Set, b: Set) -> Set {
+    out = new_set()
+    for v in elements(a) {
+        if has(b, v) { add(out, v) }
+    }
+    return out
+}
+
+def difference(a: Set, b: Set) -> Set {
+    out = new_set()
+    for v in elements(a) {
+        if has(b, v) == False { add(out, v) }
+    }
+    return out
+}
+
+def is_subset(a: Set, b: Set) -> bool {
+    for v in elements(a) {
+        if has(b, v) == False { return False }
+    }
+    return True
+}

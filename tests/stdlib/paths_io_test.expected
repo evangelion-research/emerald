@@ -1,0 +1,17 @@
+a/b a/b /b b
+/x/y z.rald z.rald
+[] /
+.rald [] []
+a/b main.c a/b/c
+a/c /c
+../x . /
+True False ['a', 'b']
+None
+True False
+['one', 'two']
+None
+True
+False cannot read '/definitely/not/here'
+False
+to stdout
+0 [] True 1

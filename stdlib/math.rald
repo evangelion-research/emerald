@@ -1,0 +1,231 @@
+# math — numeric helpers.
+#
+# `sqrt` and `tan` are builtins because the ray tracer needed them before a
+# library existed. Everything else is ordinary Emerald, including the
+# transcendentals: exp/log/sin/cos are range reduction plus a truncated series,
+# accurate to roughly 1e-15 over their reduced ranges. They are here rather than
+# in the runtime because they *can* be, and a language that cannot write its own
+# `exp` has a gap worth knowing about.
+#
+# The _i/_f suffix pairs are the cost of invariant unification: `list[int]` does
+# not fit `list[float]` and a type variable cannot be constrained to "a number",
+# so one polymorphic `min` is not expressible. Written out rather than hidden
+# behind `any`, which would discard the checking that makes this worth doing.
+
+const PI: float = 3.141592653589793
+const TAU: float = 6.283185307179586
+const E: float = 2.718281828459045
+const LN2: float = 0.6931471805599453
+const INF: float = 1.0e308 * 10.0
+const NEG_INF: float = 0.0 - INF
+
+# --- basics ---------------------------------------------------------------
+
+def abs_i(x: int) -> int pure {
+    if x < 0 { return 0 - x }
+    return x
+}
+
+def abs_f(x: float) -> float pure {
+    if x < 0.0 { return 0.0 - x }
+    return x
+}
+
+def min_i(a: int, b: int) -> int pure { if a < b { return a } return b }
+def max_i(a: int, b: int) -> int pure { if a > b { return a } return b }
+def min_f(a: float, b: float) -> float pure { if a < b { return a } return b }
+def max_f(a: float, b: float) -> float pure { if a > b { return a } return b }
+
+def clamp(x: float, lo: float, hi: float) -> float pure {
+    if x < lo { return lo }
+    if x > hi { return hi }
+    return x
+}
+
+def clamp_i(x: int, lo: int, hi: int) -> int pure {
+    if x < lo { return lo }
+    if x > hi { return hi }
+    return x
+}
+
+def sign_i(x: int) -> int pure {
+    if x > 0 { return 1 }
+    if x < 0 { return -1 }
+    return 0
+}
+
+def sign_f(x: float) -> float pure {
+    if x > 0.0 { return 1.0 }
+    if x < 0.0 { return -1.0 }
+    return 0.0
+}
+
+# --- rounding -------------------------------------------------------------
+
+# int() truncates toward zero, so the negative side needs a correction.
+def floor(x: float) -> int pure {
+    t = int(x)
+    if t > x { return t - 1 }
+    return t
+}
+
+def ceil(x: float) -> int pure {
+    t = int(x)
+    if t < x { return t + 1 }
+    return t
+}
+
+# Half away from zero — *not* Python's banker's rounding, which surprises
+# people far more often than it helps them.
+def round(x: float) -> int pure {
+    if x >= 0.0 { return floor(x + 0.5) }
+    return ceil(x - 0.5)
+}
+
+def trunc(x: float) -> int pure { return int(x) }
+
+# Python's `//`. Emerald's `%` is already Python's modulo (sign of the divisor),
+# so `a - (a % b)` is exactly `floor_div(a, b) * b`.
+#
+# Exact only while |a| and |b| stay under 2^53: Emerald has no integer division
+# operator, so the quotient rounds through a double. A compiler counting lines
+# and columns never comes close; a bignum library would.
+def floor_div(a: int, b: int) -> int pure {
+    if b == 0 { return 0 }
+    return int((a - (a % b)) / b)
+}
+
+# --- powers ---------------------------------------------------------------
+
+# Exponentiation by squaring. A negative exponent gives 0, the way integer
+# division would: use pow_f when you meant a real power.
+def pow_i(base: int, e: int) -> int pure {
+    if e < 0 { return 0 }
+    result = 1
+    b = base
+    n = e
+    while n > 0 {
+        if n % 2 == 1 { result = result * b }
+        b = b * b
+        n = floor_div(n, 2)
+    }
+    return result
+}
+
+def _pow2(k: int) -> float pure {
+    r = 1.0
+    n = abs_i(k)
+    i = 0
+    while i < n {
+        r = r * 2.0
+        i = i + 1
+    }
+    if k < 0 { return 1.0 / r }
+    return r
+}
+
+# --- transcendentals ------------------------------------------------------
+
+# exp(x) = 2^k * exp(r), with r = x - k*ln2 and |r| <= ln2/2, where the Taylor
+# series converges in a dozen terms.
+def exp(x: float) -> float pure {
+    k = round(x / LN2)
+    r = x - k * LN2
+    term = 1.0
+    total = 1.0
+    i = 1
+    while i <= 16 {
+        term = term * r / i
+        total = total + term
+        i = i + 1
+    }
+    return total * _pow2(k)
+}
+
+# log(x) for x > 0. Reduce to m in [1, 2) by halving, then
+# log(m) = 2 * atanh((m-1)/(m+1)), which converges fast on that interval.
+#
+# **Precondition: x > 0.** log(0) is -INF and log of a negative is -INF too,
+# which is a lie the caller should not have to catch by accident — use
+# log_checked when the input is not known to be positive.
+def log(x: float) -> float pure {
+    if x <= 0.0 { return NEG_INF }
+    m = x
+    k = 0
+    while m >= 2.0 {
+        m = m / 2.0
+        k = k + 1
+    }
+    while m < 1.0 {
+        m = m * 2.0
+        k = k - 1
+    }
+    z = (m - 1.0) / (m + 1.0)
+    zz = z * z
+    term = z
+    total = z
+    i = 1
+    while i <= 20 {
+        term = term * zz
+        total = total + term / (2 * i + 1)
+        i = i + 1
+    }
+    return 2.0 * total + k * LN2
+}
+
+def log2(x: float) -> float pure { return log(x) / LN2 }
+def log10(x: float) -> float pure { return log(x) / 2.302585092994046 }
+
+def pow_f(base: float, e: float) -> float pure {
+    if e == 0.0 { return 1.0 }
+    if base == 0.0 { return 0.0 }
+    if base > 0.0 { return exp(e * log(base)) }
+    # a negative base is real only at integer exponents
+    n = round(e)
+    if n != e { return 0.0 }
+    r = exp(e * log(0.0 - base))
+    if n % 2 == 0 { return r }
+    return 0.0 - r
+}
+
+# sin by Taylor series after reducing to [-PI, PI].
+def sin(x: float) -> float pure {
+    t = x - TAU * round(x / TAU)
+    tt = t * t
+    term = t
+    total = t
+    i = 1
+    while i <= 10 {
+        term = 0.0 - term * tt / ((2 * i) * (2 * i + 1))
+        total = total + term
+        i = i + 1
+    }
+    return total
+}
+
+def cos(x: float) -> float pure { return sin(x + PI / 2.0) }
+
+def radians(deg: float) -> float pure { return deg * PI / 180.0 }
+def degrees(rad: float) -> float pure { return rad * 180.0 / PI }
+
+# --- integers -------------------------------------------------------------
+
+def gcd(a: int, b: int) -> int pure {
+    x = abs_i(a)
+    y = abs_i(b)
+    while y != 0 {
+        t = x % y
+        x = y
+        y = t
+    }
+    return x
+}
+
+def lcm(a: int, b: int) -> int pure {
+    g = gcd(a, b)
+    if g == 0 { return 0 }
+    return floor_div(abs_i(a * b), g)
+}
+
+def is_even(n: int) -> bool pure { return n % 2 == 0 }
+def is_odd(n: int) -> bool pure { return n % 2 != 0 }

@@ -1,0 +1,36 @@
+# The ten runtime primitives the standard library is built on. These have no
+# module: they are always in scope, like every other builtin.
+
+# append: amortized in-place growth, the operation no Emerald code can express
+xs: list[int] = []
+for i in range(5) { append(xs, i * i) }
+print(xs, len(xs))
+
+nested: list[list[int]] = []
+append(nested, [1])
+append(nested[0], 2)
+print(nested)
+
+# slice: clamped, never an error, negatives count from the end
+print(slice("hello world", 6, 11), slice("hello", -3, 5), slice("hi", 0, 99))
+print("[" + slice("abc", 2, 1) + "]", "[" + slice("", 0, 3) + "]")
+print(slice([1, 2, 3, 4], 1, 3), slice([1, 2, 3], -2, 3), slice([1], 5, 9))
+
+# ord / chr
+print(ord("A"), ord("Az"), chr(66), chr(10) == "\n")
+
+# float
+print(float("2.5") + 1.0, float(3), float(True), float("-1e3"))
+
+# file_exists / read_file_opt
+print(file_exists("/definitely/not/here"), read_file_opt("/definitely/not/here"))
+
+# eprint goes to stderr; the runner captures both, so it appears first
+eprint("to stderr")
+
+# exit() is typed `never`, so a function may end in one
+def checked(n: int) -> int {
+    if n < 0 { exit(3) }
+    return n
+}
+print(checked(7))

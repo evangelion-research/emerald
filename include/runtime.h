@@ -143,6 +143,19 @@ Value em_read_file(Value path);   /* contents of a file as a string */
 void  em_write_file(Value path, Value content); /* write a string to a file */
 void  em_append_file(Value path, Value content); /* append a string to a file */
 Value em_run(Value cmd);          /* run a shell command; returns exit status */
+Value em_read_file_opt(Value path); /* contents, or None if unreadable */
+Value em_file_exists(Value path);   /* is the path openable for reading? */
+
+/* stdlib foundation: the operations no Emerald code can express */
+void  em_append(Value xs, Value v);  /* amortized in-place list growth */
+Value em_slice(Value seq, Value lo, Value hi); /* str or list; clamped */
+Value em_ord(Value c);               /* first byte of a string, 0..255 */
+Value em_chr(Value n);               /* 0..255 as a one-byte string */
+Value em_float_of(Value v);          /* float(), the counterpart of int() */
+void  em_eprint(size_t n, ...);      /* print(), to stderr */
+Value em_argv(void);                 /* the process's argument vector */
+void  em_exit(Value code);           /* terminate with an exit status */
+void  rt_set_args(int argc, char **argv); /* called by main() before anything */
 
 /* first-class functions & closures */
 Value em_mkclosure(Value (*fn)(Value *env, Value *args), size_t arity,

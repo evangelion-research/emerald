@@ -12,6 +12,8 @@ vars:
   CFLAGS: -std=c11 -Wall -Wextra -O2 -g -Iinclude
   SRCDIR:
     sh: echo "$PWD/src"
+  STDLIBDIR:
+    sh: echo "$PWD/stdlib"
   COMPILER_SRCS: src/lexer.c src/ast.c src/parser.c src/module.c src/check.c src/codegen.c src/diag.c src/main.c
 
 tasks:
@@ -29,6 +31,7 @@ tasks:
       - mkdir -p bin
       - >-
         {{.CC}} {{.CFLAGS}} -DEMERALD_SRC_DIR='"{{.SRCDIR}}"'
+        -DEMERALD_STDLIB_DIR='"{{.STDLIBDIR}}"'
         -o bin/emeraldc {{.COMPILER_SRCS}}
 
   runtime-check:
@@ -37,7 +40,7 @@ tasks:
       - '{{.CC}} {{.CFLAGS}} -c src/runtime.c -o /dev/null -Iinclude'
 
   test:
-    desc: Run all stage test suites (lexer, parser, check, json, proof, e2e, imports)
+    desc: Run all stage test suites (lexer, parser, check, json, proof, e2e, imports, stdlib)
     deps: [build]
     cmds:
       - task: runtime-check
@@ -78,6 +81,12 @@ tasks:
     deps: [build]
     cmds:
       - ./tests/run_tests.sh imports
+
+  test:stdlib:
+    desc: Golden tests for the standard library (stdlib/*.rald)
+    deps: [build]
+    cmds:
+      - ./tests/run_tests.sh stdlib
 
   examples:
     desc: Compile and run every example program
@@ -123,9 +132,17 @@ tasks:
           esac
         done
 
+      - |
+        for f in tests/stdlib/*.rald; do
+          ./bin/emeraldc -o "${f%.rald}.bin" "$f" &&
+            "${f%.rald}.bin" > "${f%.rald}.expected" 2>&1 || true
+          rm -f "${f%.rald}.bin"
+        done
+
   clean:
     desc: Remove build outputs and generated C
     cmds:
       - rm -rf bin
       - rm -f examples/*.gen.c tests/e2e/*.gen.c tests/imports/*/main.bin*
+      - rm -f tests/stdlib/*.bin tests/stdlib/*.gen.c
       - for f in examples/*.rald tests/e2e/*.rald examples/*/main.rald; do rm -f "${f%.rald}"; done

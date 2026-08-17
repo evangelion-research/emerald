@@ -1,0 +1,83 @@
+# chars — byte classification.
+#
+# Emerald strings are bytes: `len` counts bytes, `s[i]` is one byte, and
+# `ord` returns 0..255. Everything here is therefore ASCII-only, on purpose —
+# see stdlib/SPEC.md D1. A UTF-8 layer, if it ever exists, goes beside this
+# module rather than silently changing what these functions mean.
+#
+# Every function takes a one-character string and inspects only its first byte,
+# so `is_digit(rest_of_the_line)` asks about the first character rather than
+# failing. An empty string answers False everywhere.
+
+def code(c: str) -> int pure {
+    if len(c) == 0 { return -1 }
+    return ord(c)
+}
+
+def from_code(n: int) -> str pure { return chr(n) }
+
+def is_digit(c: str) -> bool pure {
+    n = code(c)
+    return n >= 48 and n <= 57
+}
+
+def is_hex_digit(c: str) -> bool pure {
+    n = code(c)
+    if n >= 48 and n <= 57 { return True }
+    if n >= 97 and n <= 102 { return True }
+    return n >= 65 and n <= 70
+}
+
+def is_upper(c: str) -> bool pure {
+    n = code(c)
+    return n >= 65 and n <= 90
+}
+
+def is_lower(c: str) -> bool pure {
+    n = code(c)
+    return n >= 97 and n <= 122
+}
+
+def is_alpha(c: str) -> bool pure {
+    return is_upper(c) or is_lower(c)
+}
+
+def is_alnum(c: str) -> bool pure {
+    return is_alpha(c) or is_digit(c)
+}
+
+# space, tab, newline, carriage return, vertical tab, form feed
+def is_space(c: str) -> bool pure {
+    n = code(c)
+    if n == 32 { return True }
+    return n >= 9 and n <= 13
+}
+
+# Emerald's own identifier rule, from docs/grammar.md: `_` counts as a letter.
+def is_ident_start(c: str) -> bool pure {
+    return is_alpha(c) or code(c) == 95
+}
+
+def is_ident_cont(c: str) -> bool pure {
+    return is_ident_start(c) or is_digit(c)
+}
+
+def to_upper(c: str) -> str pure {
+    if is_lower(c) { return chr(ord(c) - 32) }
+    return c
+}
+
+def to_lower(c: str) -> str pure {
+    if is_upper(c) { return chr(ord(c) + 32) }
+    return c
+}
+
+# The numeric value of a digit in any base up to 16, or -1 if it is not one.
+# `digit_value("f")` is 15, which is what a lexer reading \xNN escapes wants.
+def digit_value(c: str) -> int pure {
+    n = code(c)
+    if n >= 48 and n <= 57 { return n - 48 }
+    if n >= 97 and n <= 102 { return n - 87 }
+    if n >= 65 and n <= 70 { return n - 55 }
+    return -1
+}

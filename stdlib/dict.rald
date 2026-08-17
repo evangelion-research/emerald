@@ -1,0 +1,167 @@
+# dict — the hash map the language does not have.
+#
+# Records are structurally typed with fixed fields, so they cannot take a
+# dynamic key: `r.b = 2` on an inferred record is E_TYPE_FIELD even at `any`.
+# This is a real hash table, in Emerald, over a list of buckets.
+#
+# **String keys only.** Every table in a compiler is string-keyed, and a generic
+# key needs a way to say "K must be hashable", which the type system cannot
+# express (see stdlib/SPEC.md D3). Values are generic.
+#
+# Iteration order is bucket order: unspecified, and it changes when the table
+# grows. Anything that needs determinism — a compiler's diagnostics do — sorts
+# the keys. Python's insertion-order guarantee is deliberately not copied; it
+# costs a second index that nothing here has asked for yet.
+
+from result import Option
+
+type Entry[V] = { key: str, val: V }
+type Map[V] = { buckets: list[list[Entry[V]]], size: int }
+
+const _INITIAL_BUCKETS: int = 8
+
+# djb2. Not FNV-1a, which the spec called for: FNV mixes with xor, and Emerald
+# has no bitwise operators — `|` and `&` are type-level only. The multiply is
+# kept under 2^32 by the modulo so the int64 arithmetic never overflows.
+def hash_str(s: str) -> int pure {
+    h = 5381
+    for c in s { h = (h * 33 + ord(c)) % 4294967296 }
+    return h
+}
+
+def _empty_buckets[V](n: int) -> list[list[Entry[V]]] {
+    bs: list[list[Entry[V]]] = []
+    i = 0
+    while i < n {
+        b: list[Entry[V]] = []
+        append(bs, b)
+        i = i + 1
+    }
+    return bs
+}
+
+def new_map[V]() -> Map[V] {
+    return { buckets: _empty_buckets(_INITIAL_BUCKETS), size: 0 }
+}
+
+def _slot[V](m: Map[V], k: str) -> int { return hash_str(k) % len(m.buckets) }
+
+def get[V](m: Map[V], k: str) -> Option[V] {
+    bucket = m.buckets[_slot(m, k)]
+    for e in bucket {
+        if e.key == k { return { some: True, val: e.val } }
+    }
+    return { some: False }
+}
+
+def get_or[V](m: Map[V], k: str, d: V) -> V {
+    bucket = m.buckets[_slot(m, k)]
+    for e in bucket {
+        if e.key == k { return e.val }
+    }
+    return d
+}
+
+def has[V](m: Map[V], k: str) -> bool {
+    bucket = m.buckets[_slot(m, k)]
+    for e in bucket {
+        if e.key == k { return True }
+    }
+    return False
+}
+
+def size[V](m: Map[V]) -> int pure { return m.size }
+def is_empty[V](m: Map[V]) -> bool pure { return m.size == 0 }
+
+def _grow[V](m: Map[V]) -> None {
+    old = m.buckets
+    m.buckets = _empty_buckets(len(old) * 2)
+    for bucket in old {
+        for e in bucket { append(m.buckets[hash_str(e.key) % len(m.buckets)], e) }
+    }
+}
+
+# Insert or overwrite, like Python's `d[k] = v`. Mutates: a persistent map
+# would copy the spine on every insert, and a symbol table does not want that.
+def set[V](m: Map[V], k: str, v: V) -> None {
+    bucket = m.buckets[_slot(m, k)]
+    i = 0
+    while i < len(bucket) {
+        if bucket[i].key == k {
+            bucket[i] = { key: k, val: v }
+            return
+        }
+        i = i + 1
+    }
+    append(bucket, { key: k, val: v })
+    m.size = m.size + 1
+    # Grow past an average of two entries per bucket, so lookups stay short.
+    if m.size > len(m.buckets) * 2 { _grow(m) }
+}
+
+# True when the key was there. Rebuilds one bucket rather than shifting in
+# place, because there is no list-remove primitive.
+def remove[V](m: Map[V], k: str) -> bool {
+    idx = _slot(m, k)
+    bucket = m.buckets[idx]
+    found = False
+    kept: list[Entry[V]] = []
+    for e in bucket {
+        if e.key == k { found = True }
+        else { append(kept, e) }
+    }
+    if found {
+        m.buckets[idx] = kept
+        m.size = m.size - 1
+    }
+    return found
+}
+
+def clear[V](m: Map[V]) -> None {
+    m.buckets = _empty_buckets(_INITIAL_BUCKETS)
+    m.size = 0
+}
+
+def keys[V](m: Map[V]) -> list[str] {
+    out: list[str] = []
+    for bucket in m.buckets {
+        for e in bucket { append(out, e.key) }
+    }
+    return out
+}
+
+def values[V](m: Map[V]) -> list[V] {
+    out: list[V] = []
+    for bucket in m.buckets {
+        for e in bucket { append(out, e.val) }
+    }
+    return out
+}
+
+def items[V](m: Map[V]) -> list[Entry[V]] {
+    out: list[Entry[V]] = []
+    for bucket in m.buckets {
+        for e in bucket { append(out, e) }
+    }
+    return out
+}
+
+def from_items[V](es: list[Entry[V]]) -> Map[V] {
+    m: Map[V] = new_map()
+    for e in es { set(m, e.key, e.val) }
+    return m
+}
+
+# Right wins, like Python's `{**a, **b}`.
+def merge[V](a: Map[V], b: Map[V]) -> Map[V] {
+    m: Map[V] = new_map()
+    for e in items(a) { set(m, e.key, e.val) }
+    for e in items(b) { set(m, e.key, e.val) }
+    return m
+}
+
+# Increment a counter, defaulting to 0 — the single most common use of a map
+# that is not a symbol table.
+def bump(m: Map[int], k: str, by: int) -> None {
+    set(m, k, get_or(m, k, 0) + by)
+}

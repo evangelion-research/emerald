@@ -5,3 +5,4 @@ error[E_IMPORT_NOT_FOUND]: cannot find module 'nowhere' on the search path
    | ^
    = searched: tests/imports/bad_not_found
    = searched: src
+   = searched: <stdlib>

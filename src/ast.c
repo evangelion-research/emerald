@@ -327,13 +327,15 @@ static void print_stmt(FILE *out, const Stmt *s, int indent) {
  * codegen to implement Python-style scoping: a name assigned anywhere in a
  * scope belongs to that scope.
  */
-void ast_collect_assigned(const Block *b, void (*fn)(const char *, int line, void *), void *ud) {
+void ast_collect_assigned(const Block *b,
+                          void (*fn)(const char *, const char *, int, void *),
+                          void *ud) {
     for (size_t i = 0; i < b->count; i++) {
         const Stmt *s = b->items[i];
         switch (s->kind) {
         case S_ASSIGN:
             if (s->as.assign.target->kind == E_NAME)
-                fn(s->as.assign.target->as.sval, s->line, ud);
+                fn(s->as.assign.target->as.sval, s->file, s->line, ud);
             break;
         case S_IF:
             for (size_t j = 0; j < s->as.ifs.count; j++)
@@ -345,7 +347,7 @@ void ast_collect_assigned(const Block *b, void (*fn)(const char *, int line, voi
             ast_collect_assigned(&s->as.wh.body, fn, ud);
             break;
         case S_FOR:
-            fn(s->as.fr.var, s->line, ud);
+            fn(s->as.fr.var, s->file, s->line, ud);
             ast_collect_assigned(&s->as.fr.body, fn, ud);
             break;
         case S_BLOCK:

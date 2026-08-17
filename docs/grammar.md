@@ -175,8 +175,11 @@ normally.
   *globals*; names assigned inside `def` are *locals*, **unless the name
   already exists as a global — then the assignment updates the global**.
   Watch out: this applies to `for` loop variables too (a function reusing a
-  global's name as its loop variable will clobber the global). Blocks `{ }`
-  do **not** create a new variable scope — they only group statements.
+  global's name as its loop variable will clobber the global). That rule stops
+  at the module boundary — a global is only updatable from the file that
+  declared it, so a library cannot clobber its importer's globals (see
+  [`modules.md`](modules.md)). Blocks `{ }` do **not** create a new variable
+  scope — they only group statements.
 - **Truthiness** matches Python: `None`, `False`, `0`, `0.0`, `""`, `[]` are
   falsy. Records are always truthy (they model objects, not dicts).
 - `5 / 2` is float division (`2.5`); `%` is Python modulo (sign of divisor).
@@ -192,11 +195,15 @@ normally.
   and linked dependencies-first; its top-level names are mangled to
   `<module>__<name>` internally so two modules can both define `parse`
   without colliding. `import` is only allowed at the top level.
-- **Builtins**: `print(*args)`, `len(x)`, `range(n)` / `range(a, b)`,
-  `str(x)`, `int(x)`, `sqrt(x)`, `tan(x)`, `rand()`, `gc_stats()`,
-  `read_file(path)`, `write_file(path, s)`, `append_file(path, s)`,
-  `run(cmd)`. Builtins cannot be shadowed, redefined, or used as values.
-  Signatures and semantics: [`builtins.md`](builtins.md).
+- **Builtins**: `print(*args)`, `eprint(*args)`, `len(x)`, `range(n)` /
+  `range(a, b)`, `str(x)`, `int(x)`, `float(x)`, `sqrt(x)`, `tan(x)`, `rand()`,
+  `gc_stats()`, `append(xs, v)`, `slice(seq, lo, hi)`, `ord(c)`, `chr(n)`,
+  `argv()`, `exit(code)`, `map`/`filter`/`reduce`, `read_file(path)`,
+  `read_file_opt(path)`, `file_exists(path)`, `write_file(path, s)`,
+  `append_file(path, s)`, `run(cmd)`. Builtins cannot be shadowed, redefined,
+  or used as values. Signatures and semantics: [`builtins.md`](builtins.md).
+- **Standard library**: ordinary Emerald modules in `stdlib/`, resolved with no
+  `-I` flag (`import strings`). See [`../stdlib/SPEC.md`](../stdlib/SPEC.md).
 - **Functions are values**. A function type is written `(A, B) -> C`; a
   top-level function name reads as a closure, can be stored, passed, and
   called indirectly (`f(x)`). A `def` may be nested inside another `def`; a

@@ -1,0 +1,205 @@
+# lists — the sequence operations that are not builtins.
+#
+# `map`, `filter` and `reduce` stay builtins (they are generic in a way user
+# code cannot yet be) and are not shadowed here. `slice` is a builtin too, and
+# works on lists as well as strings, so there is no `lists.slice`.
+#
+# Almost nothing here is `pure`: building a list means `append`, and `append`
+# mutates. See stdlib/SPEC.md §1.2 — the functions that only *read* are marked
+# pure, and they are the ones proof-mode code can still reach.
+
+from result import Option
+
+# `append` is a builtin; `push` is the name a module can export.
+def push[T](xs: list[T], v: T) -> None { append(xs, v) }
+
+def extend[T](xs: list[T], ys: list[T]) -> None {
+    for y in ys { append(xs, y) }
+}
+
+def concat[T](xs: list[T], ys: list[T]) -> list[T] {
+    out: list[T] = []
+    for x in xs { append(out, x) }
+    for y in ys { append(out, y) }
+    return out
+}
+
+# slice() allocates rather than mutating, so these three stay pure.
+def copy[T](xs: list[T]) -> list[T] pure { return slice(xs, 0, len(xs)) }
+
+def take[T](xs: list[T], n: int) -> list[T] pure { return slice(xs, 0, n) }
+def drop[T](xs: list[T], n: int) -> list[T] pure { return slice(xs, n, len(xs)) }
+
+def reverse[T](xs: list[T]) -> list[T] {
+    out: list[T] = []
+    i = len(xs) - 1
+    while i >= 0 {
+        append(out, xs[i])
+        i = i - 1
+    }
+    return out
+}
+
+# --- searching (pure: these only read) ------------------------------------
+
+def index_of[T](xs: list[T], v: T) -> int pure {
+    i = 0
+    while i < len(xs) {
+        if xs[i] == v { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+def last_index_of[T](xs: list[T], v: T) -> int pure {
+    i = len(xs) - 1
+    while i >= 0 {
+        if xs[i] == v { return i }
+        i = i - 1
+    }
+    return -1
+}
+
+def contains[T](xs: list[T], v: T) -> bool pure {
+    return index_of(xs, v) >= 0
+}
+
+def is_empty[T](xs: list[T]) -> bool pure { return len(xs) == 0 }
+
+# Total indexing: no runtime error, ever. `xs[i]` is still there when the
+# caller has already established the bound.
+def get[T](xs: list[T], i: int) -> Option[T] pure {
+    if i < 0 { return { some: False } }
+    if i >= len(xs) { return { some: False } }
+    return { some: True, val: xs[i] }
+}
+
+def first[T](xs: list[T]) -> Option[T] pure { return get(xs, 0) }
+def last[T](xs: list[T]) -> Option[T] pure { return get(xs, len(xs) - 1) }
+
+def all(xs: list[bool]) -> bool pure {
+    for b in xs { if b == False { return False } }
+    return True
+}
+
+def any(xs: list[bool]) -> bool pure {
+    for b in xs { if b == True { return True } }
+    return False
+}
+
+def count_of[T](xs: list[T], v: T) -> int pure {
+    n = 0
+    for x in xs { if x == v { n = n + 1 } }
+    return n
+}
+
+def count_if[T](xs: list[T], f: (T) -> bool) -> int {
+    n = 0
+    for x in xs { if f(x) { n = n + 1 } }
+    return n
+}
+
+def find_index[T](xs: list[T], f: (T) -> bool) -> int {
+    i = 0
+    while i < len(xs) {
+        if f(xs[i]) { return i }
+        i = i + 1
+    }
+    return -1
+}
+
+def find[T](xs: list[T], f: (T) -> bool) -> Option[T] {
+    i = find_index(xs, f)
+    if i < 0 { return { some: False } }
+    return { some: True, val: xs[i] }
+}
+
+# --- shaping ---------------------------------------------------------------
+
+def zip[A, B](xs: list[A], ys: list[B]) -> list[{ a: A, b: B }] {
+    out: list[{ a: A, b: B }] = []
+    n = len(xs)
+    if len(ys) < n { n = len(ys) }
+    i = 0
+    while i < n {
+        append(out, { a: xs[i], b: ys[i] })
+        i = i + 1
+    }
+    return out
+}
+
+def enumerate[T](xs: list[T]) -> list[{ i: int, v: T }] {
+    out: list[{ i: int, v: T }] = []
+    i = 0
+    while i < len(xs) {
+        append(out, { i: i, v: xs[i] })
+        i = i + 1
+    }
+    return out
+}
+
+def flatten[T](xss: list[list[T]]) -> list[T] {
+    out: list[T] = []
+    for xs in xss {
+        for x in xs { append(out, x) }
+    }
+    return out
+}
+
+def repeat[T](v: T, n: int) -> list[T] {
+    out: list[T] = []
+    i = 0
+    while i < n {
+        append(out, v)
+        i = i + 1
+    }
+    return out
+}
+
+# Split into runs of `n` — the shape a batcher wants.
+def chunk[T](xs: list[T], n: int) -> list[list[T]] {
+    out: list[list[T]] = []
+    if n <= 0 { return out }
+    i = 0
+    while i < len(xs) {
+        append(out, slice(xs, i, i + n))
+        i = i + n
+    }
+    return out
+}
+
+def unique[T](xs: list[T]) -> list[T] {
+    out: list[T] = []
+    for x in xs {
+        if index_of(out, x) < 0 { append(out, x) }
+    }
+    return out
+}
+
+# --- folds -----------------------------------------------------------------
+
+def sum(xs: list[int]) -> int pure {
+    total = 0
+    for x in xs { total = total + x }
+    return total
+}
+
+def sum_f(xs: list[float]) -> float pure {
+    total = 0.0
+    for x in xs { total = total + x }
+    return total
+}
+
+def min_of(xs: list[int]) -> Option[int] pure {
+    if len(xs) == 0 { return { some: False } }
+    m = xs[0]
+    for x in xs { if x < m { m = x } }
+    return { some: True, val: m }
+}
+
+def max_of(xs: list[int]) -> Option[int] pure {
+    if len(xs) == 0 { return { some: False } }
+    m = xs[0]
+    for x in xs { if x > m { m = x } }
+    return { some: True, val: m }
+}

@@ -1,0 +1,33 @@
+# sys — the process.
+#
+# `argv()` returns the whole vector including argv[0]; Python's sys.argv does
+# the same, and this module keeps that shape while adding the `args()` most
+# callers actually want.
+
+import lists
+
+def all_args() -> list[str] { return argv() }
+
+# Everything after the program name — the arguments a program was given.
+def args() -> list[str] {
+    a = argv()
+    if len(a) == 0 { return [] }
+    return lists.drop(a, 1)
+}
+
+def program() -> str {
+    a = argv()
+    if len(a) == 0 { return "" }
+    return a[0]
+}
+
+def arg_count() -> int { return len(args()) }
+
+# exit() returns `never`, so this is a legal tail for any return type:
+# `if bad { sys.die("...") }` in a function returning int typechecks.
+def exit_with(code: int) -> never { exit(code) }
+
+def die(msg: str) -> never {
+    eprint(msg)
+    exit(1)
+}

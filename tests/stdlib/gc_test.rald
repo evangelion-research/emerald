@@ -1,0 +1,45 @@
+import dict
+import lists
+import strings
+from dict import Map
+
+# Build a large structure through append, forcing many collections, then verify
+# every element survived. A missing write barrier shows up here as a crash or a
+# wrong value, not as a subtle slowdown.
+rows: list[list[str]] = []
+for i in range(2000) {
+    row: list[str] = []
+    for j in range(5) { append(row, "cell-" + str(i) + "-" + str(j)) }
+    append(rows, row)
+}
+print(len(rows), rows[1999][4], rows[0][0])
+
+ok = True
+for i in range(2000) {
+    if len(rows[i]) != 5 { ok = False }
+    if rows[i][2] != "cell-" + str(i) + "-2" { ok = False }
+}
+print("rows intact:", ok)
+
+# A map big enough to rehash several times, with the values themselves heap
+# objects, so promotion and the remembered set are both exercised.
+m: Map[list[str]] = dict.new_map()
+for i in range(2000) { dict.set(m, "key" + str(i), ["a" + str(i), "b" + str(i)]) }
+print(dict.size(m))
+good = True
+for i in range(2000) {
+    v = dict.get_or(m, "key" + str(i), [])
+    if len(v) != 2 { good = False }
+    elif v[0] != "a" + str(i) { good = False }
+}
+print("map intact:", good)
+
+# Long string built through the builder: many intermediate strings, all garbage.
+parts: list[str] = []
+for i in range(5000) { append(parts, "x") }
+joined = strings.join("", parts)
+print(len(joined), strings.count(joined, "x"))
+
+g = gc_stats()
+print("collections happened:", g.collections > 0)
+print(len(lists.unique(["a", "b", "a"])))

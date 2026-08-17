@@ -1,0 +1,26 @@
+import path
+import io
+import sys
+from result import unwrap_or, is_ok, why
+
+print(path.join("a", "b"), path.join("a/", "b"), path.join("a", "/b"), path.join("", "b"))
+print(path.dirname("/x/y/z.rald"), path.basename("/x/y/z.rald"), path.basename("z.rald"))
+print("[" + path.dirname("z.rald") + "]", path.dirname("/z"))
+print(path.ext("a/b.rald"), "[" + path.ext("a/b") + "]", "[" + path.ext(".bashrc") + "]")
+print(path.without_ext("a/b.rald"), path.with_ext("main.rald", ".c"), path.join_all(["a", "b", "c"]))
+print(path.normalize("a/./b/../c"), path.normalize("/a/b/../../../c"))
+print(path.normalize("../x"), path.normalize("a/.."), path.normalize("/"))
+print(path.is_abs("/a"), path.is_abs("a"), path.split_parts("/a//b/"))
+
+tmp = "/tmp/emerald_stdlib_io_test.txt"
+print(unwrap_or(io.write(tmp, "one\ntwo\n"), None))
+print(io.exists(tmp), io.exists("/definitely/not/here"))
+print(unwrap_or(io.read_lines(tmp), []))
+print(unwrap_or(io.write_lines(tmp, ["a", "b"]), None))
+print(unwrap_or(io.read(tmp), "?") == "a\nb\n")
+print(is_ok(io.read("/definitely/not/here")), why(io.read("/definitely/not/here")))
+print(is_ok(io.read_lines("/definitely/not/here")))
+io.say("to stdout")
+
+# argv: the runner passes no arguments, so this is deterministic
+print(sys.arg_count(), sys.args(), len(sys.program()) > 0, len(sys.all_args()))

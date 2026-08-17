@@ -1,0 +1,60 @@
+# builder — amortized string building.
+#
+# `a + b` allocates a new string, so growing one a character at a time is
+# O(n^2): a lexer that concatenates token text this way spends more time in
+# memcpy than in lexing. A Builder collects the fragments and pays for the
+# joining once.
+#
+# `build` merges pairwise rather than left-to-right, which is O(total * log k)
+# instead of O(total * k). A `join` builtin would make it a single pass, but it
+# would also be the eleventh builtin added for this library, and log k is small.
+#
+# This module deliberately does not import `strings`: `strings` builds its
+# results here, and the import graph is a DAG.
+
+type Builder = { parts: list[str], count: int }
+
+def new() -> Builder { return { parts: [], count: 0 } }
+
+def push(b: Builder, s: str) -> None {
+    if len(s) == 0 { return }
+    append(b.parts, s)
+    b.count = b.count + len(s)
+}
+
+def push_char(b: Builder, c: str) -> None { push(b, c) }
+
+def push_int(b: Builder, n: int) -> None { push(b, str(n)) }
+
+# Bytes pushed so far, without building. `len(build(b))` would allocate.
+def size(b: Builder) -> int pure { return b.count }
+
+def is_empty(b: Builder) -> bool pure { return b.count == 0 }
+
+def clear(b: Builder) -> None {
+    b.parts = []
+    b.count = 0
+}
+
+def build(b: Builder) -> str {
+    cur = b.parts
+    while len(cur) > 1 {
+        merged: list[str] = []
+        i = 0
+        while i + 1 < len(cur) {
+            append(merged, cur[i] + cur[i + 1])
+            i = i + 2
+        }
+        if i < len(cur) { append(merged, cur[i]) }
+        cur = merged
+    }
+    if len(cur) == 0 { return "" }
+    return cur[0]
+}
+
+# One-shot: the common case of "concatenate these" without a builder variable.
+def concat_all(parts: list[str]) -> str {
+    b = new()
+    for p in parts { push(b, p) }
+    return build(b)
+}

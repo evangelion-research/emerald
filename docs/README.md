@@ -12,7 +12,8 @@ native binary. Everything here is implemented and covered by `task test`.
 |---|---|
 | [`grammar.md`](grammar.md) | What is the syntax? Lexical rules, EBNF, precedence table, the record-vs-block ambiguity and how it is resolved. |
 | [`type-system.md`](type-system.md) | Records, structural subtyping, `&`/`\|`, literal types, flow narrowing, `never`, generics, and where the checker is deliberately gradual. |
-| [`builtins.md`](builtins.md) | The thirteen builtins, exactly — and why there is no standard library yet. |
+| [`builtins.md`](builtins.md) | The twenty-six builtins, exactly — and the rule for what earns a place among them rather than a place in the library. |
+| [`../stdlib/SPEC.md`](../stdlib/SPEC.md) | The standard library: twelve modules written in Emerald, why it has Python's shape but not Python's signatures, and the compiler bugs writing it exposed. |
 | [`modules.md`](modules.md) | `import` / `from ... import`, path resolution order, privacy by leading underscore, name mangling, and the `emeraldc` CLI contract a package manager would drive. |
 | [`diagnostics.md`](diagnostics.md) | Error-code reference and the `--json` schema, designed to be fed back to a tool (or an LLM) that fixes the program and re-runs. |
 | [`architecture.md`](architecture.md) | How the compiler is built: stage-by-stage responsibilities, the `Value` model, the driver flags, the test layout. |

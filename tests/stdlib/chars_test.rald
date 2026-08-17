@@ -1,0 +1,8 @@
+import chars
+
+print(chars.is_digit("7"), chars.is_digit("x"), chars.is_digit(""))
+print(chars.is_alpha("Q"), chars.is_alnum("_"), chars.is_ident_start("_"))
+print(chars.is_space(" "), chars.is_space("\n"), chars.is_space("a"))
+print(chars.to_upper("q"), chars.to_lower("Q"), chars.to_upper("!"))
+print(chars.digit_value("9"), chars.digit_value("f"), chars.digit_value("F"), chars.digit_value("z"))
+print(chars.code(""), chars.from_code(65))

@@ -30,7 +30,18 @@ root **in this order**:
 1. the directory of the importing file,
 2. the project's `src/` root — the nearest `src/` directory found by walking up
    from the entry file's directory,
-3. each `-I <dir>` given on the command line, in the order given.
+3. each `-I <dir>` given on the command line, in the order given,
+4. the standard library.
+
+The stdlib root is baked in at build time and overridable with
+`$EMERALD_STDLIB`, the way `$EMERALD_SRC` overrides the runtime's location. It
+is searched **last** deliberately: a project that defines its own `strings.rald`
+shadows the stdlib one, which is the same "first hit wins" precedence the `-I`
+roots already follow. In diagnostics it prints as `<stdlib>` rather than an
+absolute path, so error output does not depend on where the compiler was built.
+
+`import strings` therefore works with no flags at all — see
+[`stdlib/SPEC.md`](../stdlib/SPEC.md).
 
 The first root with a hit wins; a later `-I` never shadows an earlier one. If a
 *single* root offers both spellings (`text/strings.rald` and
@@ -109,6 +120,31 @@ bound names are its parameters, its nested `def`s, and every assigned name that
 is not already a module-level global (assigning a global's name updates the
 global). Those are left alone; everything else that names a module-level
 definition is rewritten.
+
+### Globals belong to their module
+
+"Assigning a global's name updates the global" holds **only inside the module
+that declared the global**. Across a module boundary the two names are
+unrelated, and a library function assigning `xs` must not write to an importer's
+`xs` just because linking put them in one translation unit.
+
+This is not a style rule, it is a correctness one. Linking leaves function-body
+locals unrenamed while the entry module's globals keep their bare names, so
+without the restriction:
+
+```
+# lists.rald
+def flatten[T](xss: list[list[T]]) -> list[T] { for xs in xss { ... } }
+
+# main.rald
+xs = [3, 1, 4, 1, 5]
+lists.flatten([[1], [2]])     # silently reassigns main's `xs` to [2]
+```
+
+The checker (`updatable_global`) and codegen (`global_owned_by`) both compare
+the assigning statement's source file against the global's declaring file, so
+`xs` inside `flatten` is a local of `flatten` and the importer's global is
+untouched. Within one file the Python-style rule is unchanged.
 
 Because renaming can make a symbol unrecognizable, every AST node that gets
 rewritten keeps the spelling the user wrote, and diagnostics quote *that*:

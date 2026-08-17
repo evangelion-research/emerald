@@ -1,0 +1,35 @@
+import strings as s
+import builder
+from result import unwrap_or, why, is_ok
+
+print(s.find("hello world", "o"), s.rfind("hello world", "o"), s.find("abc", "z"))
+print(s.contains("abc", "bc"), s.starts_with("abc", "ab"), s.ends_with("abc", "bc"))
+print(s.count("aaaa", "aa"), s.count("abcabc", "bc"))
+print(s.split("a,b,,c", ","))
+print(s.split("nosep", ","), s.split("x", ""))
+print(s.split_lines("a\nb\r\nc\n"), s.split_lines(""))
+print(s.split_ws("  hello   world  "))
+print(s.join("-", ["a", "b", "c"]), s.join(", ", []))
+print(s.partition("key=value", "="), s.partition("nope", "="))
+print("[" + s.strip("  hi  ") + "]", "[" + s.lstrip(" hi ") + "]", "[" + s.rstrip(" hi ") + "]")
+print(s.replace("banana", "an", "X"), s.replace("aaa", "a", "aa"))
+print(s.repeat("ab", 3), s.upper("mIxEd"), s.lower("mIxEd"), s.reverse("abc"))
+print("[" + s.pad_left("7", 3, "0") + "]", "[" + s.pad_right("7", 3, ".") + "]")
+print(s.to_chars("abc"), s.char_at("abc", 1), s.take("abcdef", 3), s.drop("abcdef", 3))
+
+print(unwrap_or(s.parse_int("42"), 0), unwrap_or(s.parse_int("-17"), 0), unwrap_or(s.parse_int(" 8 "), 0))
+print(why(s.parse_int("4x2")), why(s.parse_int("")), why(s.parse_int("-")))
+print(unwrap_or(s.parse_int_radix("ff", 16), 0), unwrap_or(s.parse_int_radix("1011", 2), 0))
+print(unwrap_or(s.parse_float("2.5"), 0.0), unwrap_or(s.parse_float("-1e3"), 0.0), unwrap_or(s.parse_float("7"), 0.0))
+print(is_ok(s.parse_float("1.2.3")), is_ok(s.parse_float("abc")), is_ok(s.parse_float("1e")))
+
+print(s.escape("a\"b\\c\nd\te"))
+print(unwrap_or(s.unescape("a\\nb\\tc\\\\d"), "?") == "a\nb\tc\\d")
+print(why(s.unescape("bad \\q")), why(s.unescape("trail \\")))
+
+b = builder.new()
+builder.push(b, "hello")
+builder.push_char(b, " ")
+builder.push_int(b, 42)
+print(builder.build(b), builder.size(b), builder.is_empty(builder.new()))
+print(builder.concat_all(["a", "b", "c"]))

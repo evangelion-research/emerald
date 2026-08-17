@@ -63,8 +63,9 @@ has a switch:
   be shown to descend must say `partial`, which marks it as *not* a proof.
 - **`pure`** — `def forward(x: T) -> U pure` promises no `print`, no `rand`,
   no file or process IO, and no impure callee (a nested `def` inside a pure
-  function must itself be pure). Ten of the sixteen builtins are pure and may
-  be called from pure code.
+  function must itself be pure). Fourteen of the twenty-six builtins are pure
+  and may be called from pure code, as is roughly half the standard library —
+  everything that reads rather than builds.
 - **`--proof`** — `emeraldc --check --proof f.rald` bans `any` and `partial`.
   Since `any` is assignable in both directions, a proof that mentions it proves
   nothing, so proof mode rejects every `any` that surfaces: unannotated
@@ -100,12 +101,45 @@ for a seven-part tour of each feature.
 
 ## Builtins
 
-There is no standard library yet — sixteen builtins compile straight into
-runtime calls and are in scope in every module: `print`, `len`, `range`, `str`,
-`int`, `sqrt`, `tan`, `rand`, `map`, `filter`, `reduce`, `read_file`,
-`write_file`, `append_file`, `run`, `gc_stats`. They are not values (`f = print`
-is an error — there is no closure to hand out) and cannot be redefined. See
-[`docs/builtins.md`](docs/builtins.md).
+Twenty-six builtins compile straight into runtime calls and are in scope in
+every module: `print`, `eprint`, `len`, `range`, `str`, `int`, `float`, `sqrt`,
+`tan`, `rand`, `append`, `slice`, `ord`, `chr`, `argv`, `exit`, `map`, `filter`,
+`reduce`, `read_file`, `read_file_opt`, `file_exists`, `write_file`,
+`append_file`, `run`, `gc_stats`. They are not values (`f = print` is an error —
+there is no closure to hand out) and cannot be redefined.
+
+A builtin exists only when it cannot be written in Emerald: allocation-level
+(`append`, `slice`, `len`, `range`), formatting (`str`, `print`), foreign
+(`read_file`, `argv`, `run`), or privileged (`gc_stats`). `append` is the
+load-bearing one — without amortized in-place growth, every list built in a loop
+is quadratic. See [`docs/builtins.md`](docs/builtins.md).
+
+## Standard library
+
+Everything else is ordinary Emerald in [`stdlib/`](stdlib/), resolved with no
+flags:
+
+```
+import strings
+import dict
+from result import Result, unwrap_or
+
+def parse_flag(arg: str) -> Result[{ name: str, val: str }] {
+    p = strings.partition(arg, "=")
+    if p.found == False { return { ok: False, err: "expected name=value" } }
+    return { ok: True, val: { name: p.before, val: p.after } }
+}
+```
+
+Twelve modules: `result` (errors as values — there are no exceptions), `chars`,
+`strings`, `builder`, `lists`, `sort`, `dict` (a real hash table, because
+records cannot take dynamic keys), `set`, `math` (including `exp`/`log`/`sin`
+written in Emerald), `io`, `sys`, `path`.
+
+Its shape is Python's; its signatures are not, because there are no methods and
+no exceptions. It was scoped to what a self-hosted compiler needs and nothing
+else. See [`stdlib/SPEC.md`](stdlib/SPEC.md) — including §8, the three compiler
+bugs and limitations writing it exposed.
 
 ## Modules
 
@@ -119,7 +153,8 @@ from strings import split, join   # names lifted into this module
 ```
 
 Module paths resolve against the importing file's directory, then the project's
-`src/` root, then each `-I <dir>` in the order given — first hit wins. A leading
+`src/` root, then each `-I <dir>` in the order given, then the standard library
+— first hit wins, so a project can shadow a stdlib module with its own. A leading
 underscore makes a top-level name private; everything else is exported. The
 compiler loads the whole import graph and links it into one program, mangling
 each imported module's top-level names to `<module>__<name>`, so two packages
@@ -252,6 +287,7 @@ much of that they unblock.
 | `include/` | compiler headers |
 | `src/` | compiler (`lexer` → `parser` → `module` → `check` → `codegen` → `main`, plus `diag`) and `runtime.c` (Value model + GC, compiled into every program) |
 | `docs/` | **start at [`docs/README.md`](docs/README.md)** — grammar, type system, builtins, modules, diagnostics, architecture, GC, proofs, research directions |
-| `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `e2e`, `imports`) + `run_tests.sh` |
+| `stdlib/` | the standard library, in Emerald — **start at [`stdlib/SPEC.md`](stdlib/SPEC.md)** |
+| `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `e2e`, `imports`, `stdlib`) + `run_tests.sh` |
 | `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `functional/` (a seven-part tour of the functional core), `modules/` (a multi-file program), `ray_tracer/` (the experiment) |
 | `Taskfile.yml` | build / test / examples / bless / clean |

@@ -1,0 +1,16 @@
+from result import Result, Option, ok, err, some, none, unwrap_or, opt_or, map_ok, and_then, is_ok, ok_or, why
+
+r: Result[int] = ok(3)
+b: Result[int] = err("boom")
+print(unwrap_or(r, 0), unwrap_or(b, 0), is_ok(r), is_ok(b), why(b))
+print(unwrap_or(map_ok(r, (x: int) => x * 2), 0))
+print(unwrap_or(and_then(r, (x: int) => ok(x + 1)), 0))
+o: Option[str] = some("hi")
+n: Option[str] = none()
+print(opt_or(o, "-"), opt_or(n, "-"))
+print(unwrap_or(ok_or(n, "was none"), "?"), why(ok_or(n, "was none")))
+
+match b {
+    { ok: True, val } -> { print("val", val) }
+    { ok: False, err } -> { print("err", err) }
+}

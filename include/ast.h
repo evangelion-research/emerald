@@ -202,6 +202,11 @@ typedef struct { Block body; } Program;
 
 /* ast.c */
 void ast_print_program(FILE *out, const Program *p);
-void ast_collect_assigned(const Block *b, void (*fn)(const char *, int line, void *), void *ud);
+/* `file` is the source file of the assigning statement: a global is only
+ * updated by an assignment from the module that declared it (see module.c). */
+void ast_collect_assigned(const Block *b,
+                          void (*fn)(const char *name, const char *file,
+                                     int line, void *ud),
+                          void *ud);
 
 #endif

@@ -1,0 +1,20 @@
+import lists
+from result import opt_or
+
+xs = [3, 1, 4, 1, 5]
+print(lists.concat(xs, [9, 2]), lists.reverse(xs), lists.copy(xs))
+print(lists.take(xs, 2), lists.drop(xs, 3), lists.unique(xs))
+print(lists.index_of(xs, 1), lists.last_index_of(xs, 1), lists.contains(xs, 9))
+print(opt_or(lists.first(xs), -1), opt_or(lists.last(xs), -1), opt_or(lists.get(xs, 99), -1))
+print(lists.all([True, True]), lists.any([False, False]), lists.count_of(xs, 1))
+print(lists.count_if(xs, (x: int) => x > 2), lists.find_index(xs, (x: int) => x > 3))
+print(opt_or(lists.find(xs, (x: int) => x > 3), -1))
+print(lists.zip([1, 2], ["a", "b"]))
+print(lists.enumerate(["a", "b"]))
+print(lists.flatten([[1, 2], [3]]), lists.repeat("x", 3), lists.chunk(xs, 2))
+print(lists.sum(xs), lists.sum_f([1.5, 2.5]), opt_or(lists.min_of(xs), 0), opt_or(lists.max_of(xs), 0))
+
+ys: list[int] = []
+lists.push(ys, 1)
+lists.extend(ys, [2, 3])
+print(ys, lists.is_empty(ys), lists.is_empty([]))

@@ -856,6 +856,173 @@ Value em_run(Value cmd) {
     return em_int(system(str_data(&cmd)));
 }
 
+/* read_file() aborts on a missing file, which is right for a script and wrong
+ * for a library: `io.read` needs the failure as a value. Same reader, None
+ * instead of a fatal. */
+Value em_read_file_opt(Value path) {
+    if (!is_str(path))
+        rt_fatal("read_file_opt() path must be str, not %s", type_name(path));
+    FILE *f = fopen(str_data(&path), "rb");
+    if (!f) return em_none();
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size < 0) { fclose(f); return em_none(); }
+    char *buf = xmalloc((size_t)size + 1);
+    if (fread(buf, 1, (size_t)size, f) != (size_t)size) {
+        free(buf);
+        fclose(f);
+        return em_none();
+    }
+    buf[size] = '\0';
+    fclose(f);
+    return str_take(buf, (size_t)size);
+}
+
+Value em_file_exists(Value path) {
+    if (!is_str(path))
+        rt_fatal("file_exists() path must be str, not %s", type_name(path));
+    FILE *f = fopen(str_data(&path), "rb");
+    if (!f) return em_bool(false);
+    fclose(f);
+    return em_bool(true);
+}
+
+/* --- growth, slicing, characters, process (the stdlib's foundation) ------- */
+
+/* The one operation no amount of Emerald can express: amortized in-place list
+ * growth. Without it every list built in a loop is O(n^2). */
+void em_append(Value xs, Value v) {
+    if (!is_list(xs))
+        rt_fatal("append() expects a list, got %s", type_name(xs));
+    Obj *o = xs.as.o;
+    if (o->as.list.len == o->as.list.cap) {
+        o->as.list.cap = o->as.list.cap ? o->as.list.cap * 2 : 4;
+        o->as.list.items =
+            xrealloc(o->as.list.items, sizeof(Value) * o->as.list.cap);
+    }
+    o->as.list.items[o->as.list.len++] = v;
+    gc_write_barrier(o, v);
+}
+
+/* Python's s[lo:hi] as a function: clamped, never an error, negatives count
+ * from the end. Also slices lists, because the alternative is a second name. */
+static void slice_bounds(int64_t lo, int64_t hi, size_t n, size_t *out_lo,
+                         size_t *out_hi) {
+    int64_t len = (int64_t)n;
+    if (lo < 0) lo += len;
+    if (hi < 0) hi += len;
+    if (lo < 0) lo = 0;
+    if (hi > len) hi = len;
+    if (lo > len) lo = len;
+    if (hi < lo) hi = lo;
+    *out_lo = (size_t)lo;
+    *out_hi = (size_t)hi;
+}
+
+Value em_slice(Value seq, Value lo, Value hi) {
+    if (lo.tag != V_INT || hi.tag != V_INT)
+        rt_fatal("slice() bounds must be int, not %s/%s", type_name(lo),
+                 type_name(hi));
+    if (is_str(seq)) {
+        size_t a, b;
+        slice_bounds(lo.as.i, hi.as.i, str_len(&seq), &a, &b);
+        return str_copy(str_data(&seq) + a, b - a);
+    }
+    if (is_list(seq)) {
+        size_t a, b;
+        Obj *src = seq.as.o;
+        slice_bounds(lo.as.i, hi.as.i, src->as.list.len, &a, &b);
+        Obj *o = rt_obj_new(O_LIST);
+        size_t n = b - a;
+        o->as.list.items = xmalloc(sizeof(Value) * (n ? n : 1));
+        o->as.list.cap = n ? n : 1;
+        /* src cannot move: rt_obj_new may collect, but seq is rooted by the
+         * caller's frame and the copy happens after the allocation. */
+        memcpy(o->as.list.items, seq.as.o->as.list.items + a, sizeof(Value) * n);
+        o->as.list.len = n;
+        return obj_val(o);
+    }
+    rt_fatal("cannot slice a %s", type_name(seq));
+    return em_none();
+}
+
+Value em_ord(Value c) {
+    if (!is_str(c)) rt_fatal("ord() expects a str, got %s", type_name(c));
+    if (str_len(&c) == 0) rt_fatal("ord() of an empty string");
+    return em_int((int64_t)(unsigned char)str_data(&c)[0]);
+}
+
+Value em_chr(Value n) {
+    if (n.tag != V_INT) rt_fatal("chr() expects an int, got %s", type_name(n));
+    if (n.as.i < 0 || n.as.i > 255)
+        rt_fatal("chr() argument out of range (0..255): %" PRId64, n.as.i);
+    char b[1] = { (char)(unsigned char)n.as.i };
+    return str_copy(b, 1);
+}
+
+Value em_float_of(Value v) {
+    if (is_num(v)) return em_float(as_double(v));
+    if (is_str(v)) {
+        const char *s = str_data(&v);
+        char *end;
+        double r = strtod(s, &end);
+        while (*end == ' ') end++;
+        if (end == s || *end != '\0')
+            rt_fatal("invalid literal for float(): '%s'", s);
+        return em_float(r);
+    }
+    rt_fatal("cannot convert %s to float", type_name(v));
+    return em_none();
+}
+
+void em_eprint(size_t n, ...) {
+    SB sb = {0};
+    va_list ap;
+    va_start(ap, n);
+    for (size_t i = 0; i < n; i++) {
+        if (i) sb_puts(&sb, " ");
+        write_value(&sb, va_arg(ap, Value), false);
+    }
+    va_end(ap);
+    sb_puts(&sb, "\n");
+    fwrite(sb.buf ? sb.buf : "\n", 1, sb.len, stderr);
+    free(sb.buf);
+}
+
+/* argv, captured by main() before any Emerald code runs */
+static int rt_argc = 0;
+static char **rt_argv = NULL;
+
+void rt_set_args(int argc, char **argv) {
+    rt_argc = argc;
+    rt_argv = argv;
+}
+
+Value em_argv(void) {
+    Obj *o = rt_obj_new(O_LIST);
+    size_t n = rt_argc > 0 ? (size_t)rt_argc : 0;
+    o->as.list.items = xmalloc(sizeof(Value) * (n ? n : 1));
+    o->as.list.cap = n ? n : 1;
+    o->as.list.len = 0;
+    Value list = obj_val(o);
+    RootFrame fr;
+    rt_push_frame(&fr, &list, 1);
+    for (size_t i = 0; i < n; i++) {
+        Value s = em_str_new(rt_argv[i]);
+        /* str_copy may collect; the list is rooted, so append after */
+        em_append(list, s);
+    }
+    rt_pop_frame();
+    return list;
+}
+
+void em_exit(Value code) {
+    if (code.tag != V_INT)
+        rt_fatal("exit() expects an int, got %s", type_name(code));
+    exit((int)code.as.i);
+}
+
 /* --- first-class functions ------------------------------------------------ */
 
 Value em_mkclosure(Value (*fn)(Value *env, Value *args), size_t arity,

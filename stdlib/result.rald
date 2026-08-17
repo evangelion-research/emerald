@@ -1,0 +1,60 @@
+# result — errors as values.
+#
+# Emerald has no exceptions, so a fallible operation returns its failure. Both
+# types below are unions with a literal discriminant, which is what lets the
+# checker prove at every call site that the failure was handled: `match` over a
+# Result with a missing arm is E_TYPE_MATCH, not a crash at 3am.
+#
+# There is deliberately no `unwrap()` that aborts. If a caller wants to give up
+# on a failure it writes that out, where a reader can see it.
+
+type Result[T] = { ok: True, val: T } | { ok: False, err: str }
+type Option[T] = { some: True, val: T } | { some: False }
+
+def ok[T](v: T) -> Result[T] pure { return { ok: True, val: v } }
+def err[T](msg: str) -> Result[T] pure { return { ok: False, err: msg } }
+def some[T](v: T) -> Option[T] pure { return { some: True, val: v } }
+def none[T]() -> Option[T] pure { return { some: False } }
+
+def is_ok[T](r: Result[T]) -> bool pure { return r.ok == True }
+def is_err[T](r: Result[T]) -> bool pure { return r.ok == False }
+def is_some[T](o: Option[T]) -> bool pure { return o.some == True }
+def is_none[T](o: Option[T]) -> bool pure { return o.some == False }
+
+def unwrap_or[T](r: Result[T], d: T) -> T pure {
+    if r.ok == True { return r.val }
+    return d
+}
+
+def opt_or[T](o: Option[T], d: T) -> T pure {
+    if o.some == True { return o.val }
+    return d
+}
+
+# The error message, or "" for a success. For diagnostics, where the caller has
+# already established which case it is in.
+def why[T](r: Result[T]) -> str pure {
+    if r.ok == False { return r.err }
+    return ""
+}
+
+def map_ok[T, U](r: Result[T], f: (T) -> U) -> Result[U] {
+    if r.ok == True { return { ok: True, val: f(r.val) } }
+    return { ok: False, err: r.err }
+}
+
+def and_then[T, U](r: Result[T], f: (T) -> Result[U]) -> Result[U] {
+    if r.ok == True { return f(r.val) }
+    return { ok: False, err: r.err }
+}
+
+def map_some[T, U](o: Option[T], f: (T) -> U) -> Option[U] {
+    if o.some == True { return { some: True, val: f(o.val) } }
+    return { some: False }
+}
+
+# Option -> Result, supplying the message the Option did not carry.
+def ok_or[T](o: Option[T], msg: str) -> Result[T] pure {
+    if o.some == True { return { ok: True, val: o.val } }
+    return { ok: False, err: msg }
+}

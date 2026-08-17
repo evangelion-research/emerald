@@ -239,8 +239,9 @@ static char *mangle(const Mod *m, const char *name) {
     return xasprintf("%s__%s", m->prefix, name);
 }
 
-static void collect_global_cb(const char *name, int line, void *ud) {
-    (void)line;
+static void collect_global_cb(const char *name, const char *file, int line,
+                              void *ud) {
+    (void)line; (void)file;
     names_add((Names *)ud, name);
 }
 
@@ -277,9 +278,21 @@ static char *resolve_in_root(const char *root, const char *dotted,
     return NULL;
 }
 
+#ifndef EMERALD_STDLIB_DIR
+#define EMERALD_STDLIB_DIR "stdlib"
+#endif
+
+/* The standard library's root, searched last so a project can shadow a stdlib
+ * module with one of its own. $EMERALD_STDLIB overrides the built-in path the
+ * same way $EMERALD_SRC overrides the runtime's. */
+static const char *stdlib_root(void) {
+    const char *p = getenv("EMERALD_STDLIB");
+    return (p && *p) ? p : EMERALD_STDLIB_DIR;
+}
+
 /* Resolve a module path against, in order: the importing file's directory,
- * the project's src/ root, then each -I root in the order given. First hit
- * wins; a later root never shadows an earlier one. */
+ * the project's src/ root, each -I root in the order given, then the stdlib.
+ * First hit wins; a later root never shadows an earlier one. */
 static char *resolve_module(Loader *ld, const char *dotted,
                             const char *importer_dir, const Stmt *site) {
     const char *roots[64];
@@ -289,6 +302,7 @@ static char *resolve_module(Loader *ld, const char *dotted,
         roots[nroots++] = ld->src_root;
     for (size_t i = 0; i < ld->nroots && nroots < 64; i++)
         roots[nroots++] = ld->roots[i];
+    if (nroots < 64) roots[nroots++] = stdlib_root();
 
     for (size_t i = 0; i < nroots; i++) {
         bool ambiguous = false;
@@ -311,7 +325,10 @@ static char *resolve_module(Loader *ld, const char *dotted,
              "cannot find module '%s' on the search path", dotted);
     Diag *d = &ld->diags->items[ld->diags->count - 1];
     for (size_t i = 0; i < nroots; i++)
-        diag_note(d, "searched", roots[i]);
+        /* the stdlib root is an absolute build-time path; naming it would make
+         * every diagnostic machine-specific, so it reports as <stdlib> */
+        diag_note(d, "searched",
+                  roots[i] == stdlib_root() ? "<stdlib>" : roots[i]);
     return NULL;
 }
 
@@ -626,8 +643,9 @@ static void collect_nested_defs(const Block *b, Names *out) {
 
 typedef struct { Names *bound; const Names *globals; } LocalCtx;
 
-static void collect_local_cb(const char *name, int line, void *ud) {
-    (void)line;
+static void collect_local_cb(const char *name, const char *file, int line,
+                             void *ud) {
+    (void)line; (void)file;
     LocalCtx *lc = ud;
     /* assigning a module global's name updates the global, so it is not local */
     if (!names_has(lc->globals, name)) names_add(lc->bound, name);
