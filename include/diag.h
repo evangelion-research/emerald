@@ -47,15 +47,28 @@ typedef struct Diag {
     size_t note_count, note_cap;
 } Diag;
 
+/* A file's text, kept so a diagnostic can quote the offending line. */
+typedef struct {
+    const char *file;
+    const char *src;
+} DiagSource;
+
 typedef struct {
     Diag *items;
     size_t count, cap;
-    const char *src;   /* borrowed source text, for snippet rendering */
+    const char *src;   /* borrowed source of the entry file (fallback) */
+    DiagSource *sources; /* per-file sources, for multi-module programs */
+    size_t source_count, source_cap;
     bool json;         /* render as JSON rather than human text */
 } DiagList;
 
 void diag_init(DiagList *dl, const char *src);
 void diag_free(DiagList *dl);
+
+/* Register `src` as the text of `file`, so diagnostics against that file can
+ * quote their source line. Both pointers are borrowed and must outlive the
+ * DiagList. Registering the same file twice keeps the first registration. */
+void diag_add_source(DiagList *dl, const char *file, const char *src);
 
 /* Append a diagnostic and return it so callers can attach expected/actual. */
 Diag *diag_add(DiagList *dl, DiagKind kind, const char *code,

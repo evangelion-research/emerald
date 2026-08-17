@@ -263,6 +263,17 @@ static void print_stmt(FILE *out, const Stmt *s, int indent) {
         ind(out, indent);
         fputs(")\n", out);
         break;
+    case S_IMPORT:
+        if (!s->as.imp.is_from) {
+            fprintf(out, "(import %s as %s)\n", s->as.imp.path, s->as.imp.alias);
+            break;
+        }
+        fprintf(out, "(from %s import", s->as.imp.path);
+        for (size_t i = 0; i < s->as.imp.name_count; i++)
+            fprintf(out, " (%s as %s)", s->as.imp.names[i].name,
+                    s->as.imp.names[i].local);
+        fputs(")\n", out);
+        break;
     case S_TYPEDEF:
         fprintf(out, "(type %s ", s->as.tdef.name);
         if (s->as.tdef.param_count) {

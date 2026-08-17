@@ -18,6 +18,29 @@ static char *xstrdup(const char *s) {
     return p;
 }
 
+void diag_add_source(DiagList *dl, const char *file, const char *src) {
+    if (!file || !src) return;
+    for (size_t i = 0; i < dl->source_count; i++)
+        if (strcmp(dl->sources[i].file, file) == 0) return;
+    if (dl->source_count == dl->source_cap) {
+        dl->source_cap = dl->source_cap ? dl->source_cap * 2 : 8;
+        dl->sources = realloc(dl->sources, sizeof(DiagSource) * dl->source_cap);
+        if (!dl->sources) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    }
+    dl->sources[dl->source_count].file = file;
+    dl->sources[dl->source_count].src = src;
+    dl->source_count++;
+}
+
+/* The source text a diagnostic's snippet should come from. */
+static const char *diag_src_for(const DiagList *dl, const Diag *d) {
+    if (d->file)
+        for (size_t i = 0; i < dl->source_count; i++)
+            if (strcmp(dl->sources[i].file, d->file) == 0)
+                return dl->sources[i].src;
+    return dl->source_count ? NULL : dl->src;
+}
+
 void diag_free(DiagList *dl) {
     for (size_t i = 0; i < dl->count; i++) {
         Diag *d = &dl->items[i];
@@ -31,6 +54,7 @@ void diag_free(DiagList *dl) {
         free(d->notes);
     }
     free(dl->items);
+    free(dl->sources);
     memset(dl, 0, sizeof(*dl));
 }
 
@@ -153,7 +177,7 @@ static void render_json(const DiagList *dl, FILE *out) {
     for (size_t i = 0; i < dl->count; i++) {
         const Diag *d = &dl->items[i];
         size_t slen = 0;
-        const char *sline = src_line(dl->src, d->line, &slen);
+        const char *sline = src_line(diag_src_for(dl, d), d->line, &slen);
 
         fprintf(out, "%s\n  {\n", i ? "," : "");
         fputs("    \"kind\": ", out);
@@ -220,7 +244,7 @@ static void render_human(const DiagList *dl, FILE *out) {
         fprintf(out, "  --> %s:%d:%d\n", d->file ? d->file : "", d->line, d->col);
 
         size_t slen = 0;
-        const char *sline = src_line(dl->src, d->line, &slen);
+        const char *sline = src_line(diag_src_for(dl, d), d->line, &slen);
         if (sline) {
             int gutter = snprintf(NULL, 0, "%d", d->line);
             fprintf(out, "%*s |\n", gutter + 2, "");

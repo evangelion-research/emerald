@@ -20,6 +20,7 @@ typedef struct {
     const char *filename;
     DiagList *diags; /* where syntax diagnostics are collected */
     bool no_rec; /* inside a control-flow header: `{` means block, not record */
+    int block_depth; /* >0 inside a block: imports are top-level only */
 } Parser;
 
 /* --- infrastructure ----------------------------------------------------- */
@@ -122,12 +123,13 @@ static Expr *new_expr(ExprKind k, int line, int col) {
     return e;
 }
 
-static Stmt *new_stmt(StmtKind k, int line, int col) {
+static Stmt *new_stmt(Parser *p, StmtKind k, int line, int col) {
     Stmt *s = xmalloc(sizeof(Stmt));
     memset(s, 0, sizeof(Stmt));
     s->kind = k;
     s->line = line;
     s->col = col;
+    s->file = p->filename;
     return s;
 }
 
@@ -539,10 +541,12 @@ static Stmt *parse_stmt(Parser *p);
 static Block parse_block(Parser *p) {
     expect(p, TK_LBRACE, "'{' opening a block");
     PtrVec stmts = {0};
+    p->block_depth++;
     while (!check(p, TK_RBRACE) && !check(p, TK_EOF)) {
         if (match(p, TK_SEMI)) continue; /* semicolons are optional separators */
         vec_push(&stmts, parse_stmt(p));
     }
+    p->block_depth--;
     expect(p, TK_RBRACE, "'}' closing the block");
     Block b = { (Stmt **)stmts.items, stmts.count };
     return b;
@@ -552,8 +556,9 @@ static Stmt *parse_func(Parser *p) {
     int line = p->cur.line, col = p->cur.col;
     advance(p); /* def */
     Token name = expect(p, TK_IDENT, "function name after 'def'");
-    Stmt *s = new_stmt(S_FUNC, line, col);
+    Stmt *s = new_stmt(p, S_FUNC, line, col);
     s->as.func.name = tok_text(name);
+    s->as.func.dispname = s->as.func.name;
     parse_type_params(p, &s->as.func.tparams, &s->as.func.tparam_count);
     expect(p, TK_LPAREN, "'(' after function name");
     PtrVec params = {0}, ptypes = {0};
@@ -575,7 +580,7 @@ static Stmt *parse_func(Parser *p) {
 static Stmt *parse_if(Parser *p) {
     int line = p->cur.line, col = p->cur.col;
     advance(p); /* if */
-    Stmt *s = new_stmt(S_IF, line, col);
+    Stmt *s = new_stmt(p, S_IF, line, col);
     PtrVec conds = {0};
     Block *blocks = NULL;
     size_t nblocks = 0, capblocks = 0;
@@ -606,6 +611,76 @@ static Stmt *parse_if(Parser *p) {
     return s;
 }
 
+/* --- imports -------------------------------------------------------------
+ * import_stmt := "import" dotted ["as" IDENT]
+ *              | "from" dotted "import" alias ("," alias)*
+ * dotted      := IDENT ("." IDENT)*
+ * alias       := IDENT ["as" IDENT]
+ */
+
+/* A dotted module path, returned as a single "a.b.c" string. */
+static char *parse_dotted(Parser *p) {
+    Token first = expect(p, TK_IDENT, "module name");
+    char *path = tok_text(first);
+    while (check(p, TK_DOT)) {
+        advance(p);
+        Token n = expect(p, TK_IDENT, "module name component after '.'");
+        char *seg = tok_text(n);
+        size_t len = strlen(path) + 1 + strlen(seg) + 1;
+        char *joined = xmalloc(len);
+        snprintf(joined, len, "%s.%s", path, seg);
+        path = joined;
+    }
+    return path;
+}
+
+/* The local binding a plain `import a.b.c` introduces: its last component. */
+static char *last_component(const char *path) {
+    const char *dot = strrchr(path, '.');
+    return (char *)(dot ? dot + 1 : path);
+}
+
+static Stmt *parse_import(Parser *p) {
+    int line = p->cur.line, col = p->cur.col;
+    if (p->block_depth > 0)
+        perror_at(p, line, col,
+                  "imports are only allowed at the top level of a module");
+    bool is_from = check(p, TK_FROM);
+    advance(p); /* import | from */
+
+    Stmt *s = new_stmt(p, S_IMPORT, line, col);
+    s->as.imp.path = parse_dotted(p);
+    s->as.imp.is_from = is_from;
+
+    if (!is_from) {
+        if (match(p, TK_AS)) s->as.imp.alias = tok_text(expect(p, TK_IDENT, "alias after 'as'"));
+        else s->as.imp.alias = last_component(s->as.imp.path);
+        return s;
+    }
+
+    expect(p, TK_IMPORT, "'import' after the module path in a 'from' import");
+    PtrVec names = {0};
+    do {
+        Token n = expect(p, TK_IDENT, "imported name");
+        ImportName *in = xmalloc(sizeof(ImportName));
+        in->name = tok_text(n);
+        in->line = n.line;
+        in->col = n.col;
+        in->local = match(p, TK_AS)
+                        ? tok_text(expect(p, TK_IDENT, "alias after 'as'"))
+                        : in->name;
+        vec_push(&names, in);
+    } while (match(p, TK_COMMA));
+
+    /* flatten the pointer vector into a contiguous array */
+    s->as.imp.names = xmalloc(sizeof(ImportName) * names.count);
+    for (size_t i = 0; i < names.count; i++)
+        s->as.imp.names[i] = *(ImportName *)names.items[i];
+    s->as.imp.name_count = names.count;
+    free(names.items);
+    return s;
+}
+
 static bool valid_target(const Expr *e) {
     return e->kind == E_NAME || e->kind == E_INDEX || e->kind == E_ATTR;
 }
@@ -615,10 +690,11 @@ static Stmt *parse_stmt(Parser *p) {
 
     switch (p->cur.kind) {
     case TK_DEF:   return parse_func(p);
+    case TK_IMPORT: case TK_FROM: return parse_import(p);
     case TK_IF:    return parse_if(p);
     case TK_WHILE: {
         advance(p);
-        Stmt *s = new_stmt(S_WHILE, line, col);
+        Stmt *s = new_stmt(p, S_WHILE, line, col);
         s->as.wh.cond = parse_header_expr(p);
         s->as.wh.body = parse_block(p);
         return s;
@@ -627,7 +703,7 @@ static Stmt *parse_stmt(Parser *p) {
         advance(p);
         Token var = expect(p, TK_IDENT, "loop variable after 'for'");
         expect(p, TK_IN, "'in' in for statement");
-        Stmt *s = new_stmt(S_FOR, line, col);
+        Stmt *s = new_stmt(p, S_FOR, line, col);
         s->as.fr.var = tok_text(var);
         s->as.fr.seq = parse_header_expr(p);
         s->as.fr.body = parse_block(p);
@@ -635,7 +711,7 @@ static Stmt *parse_stmt(Parser *p) {
     }
     case TK_RETURN: {
         advance(p);
-        Stmt *s = new_stmt(S_RETURN, line, col);
+        Stmt *s = new_stmt(p, S_RETURN, line, col);
         /* `return` with no value: next token can't start an expression */
         switch (p->cur.kind) {
         case TK_RBRACE: case TK_EOF: case TK_SEMI:
@@ -648,21 +724,22 @@ static Stmt *parse_stmt(Parser *p) {
         }
         return s;
     }
-    case TK_BREAK:    advance(p); return new_stmt(S_BREAK, line, col);
-    case TK_CONTINUE: advance(p); return new_stmt(S_CONTINUE, line, col);
-    case TK_PASS:     advance(p); return new_stmt(S_PASS, line, col);
+    case TK_BREAK:    advance(p); return new_stmt(p, S_BREAK, line, col);
+    case TK_CONTINUE: advance(p); return new_stmt(p, S_CONTINUE, line, col);
+    case TK_PASS:     advance(p); return new_stmt(p, S_PASS, line, col);
     case TK_TYPE: {
         advance(p);
         Token name = expect(p, TK_IDENT, "type alias name after 'type'");
-        Stmt *s = new_stmt(S_TYPEDEF, line, col);
+        Stmt *s = new_stmt(p, S_TYPEDEF, line, col);
         s->as.tdef.name = tok_text(name);
+        s->as.tdef.dispname = s->as.tdef.name;
         parse_type_params(p, &s->as.tdef.params, &s->as.tdef.param_count);
         expect(p, TK_ASSIGN, "'=' in type alias");
         s->as.tdef.value = parse_type(p);
         return s;
     }
     case TK_LBRACE: { /* a bare block just groups statements */
-        Stmt *s = new_stmt(S_BLOCK, line, col);
+        Stmt *s = new_stmt(p, S_BLOCK, line, col);
         s->as.block = parse_block(p);
         return s;
     }
@@ -674,7 +751,7 @@ static Stmt *parse_stmt(Parser *p) {
             advance(p);
             TypeExpr *ann = parse_type(p);
             expect(p, TK_ASSIGN, "'=' after annotated variable");
-            Stmt *s = new_stmt(S_ASSIGN, line, col);
+            Stmt *s = new_stmt(p, S_ASSIGN, line, col);
             s->as.assign.target = e;
             s->as.assign.ann = ann;
             s->as.assign.value = parse_expr(p);
@@ -684,12 +761,12 @@ static Stmt *parse_stmt(Parser *p) {
             if (!valid_target(e))
                 perror_at(p, line, col, "invalid assignment target "
                           "(expected a name, index, or field)");
-            Stmt *s = new_stmt(S_ASSIGN, line, col);
+            Stmt *s = new_stmt(p, S_ASSIGN, line, col);
             s->as.assign.target = e;
             s->as.assign.value = parse_expr(p);
             return s;
         }
-        Stmt *s = new_stmt(S_EXPR, line, col);
+        Stmt *s = new_stmt(p, S_EXPR, line, col);
         s->as.expr = e;
         return s;
     }
@@ -702,6 +779,7 @@ Program *parse_program(const char *src, const char *filename, DiagList *diags) {
     p.filename = filename;
     p.diags = diags;
     p.no_rec = false;
+    p.block_depth = 0;
     advance(&p);
 
     Program *prog = xmalloc(sizeof(Program));

@@ -20,6 +20,7 @@ static const struct { const char *word; TokKind kind; } keywords[] = {
     {"True", TK_TRUE}, {"False", TK_FALSE}, {"None", TK_NONE},
     {"break", TK_BREAK}, {"continue", TK_CONTINUE}, {"pass", TK_PASS},
     {"type", TK_TYPE},
+    {"import", TK_IMPORT}, {"from", TK_FROM}, {"as", TK_AS},
 };
 
 static Token make(Lexer *lx, TokKind k, const char *start, int start_col) {
@@ -146,6 +147,7 @@ const char *token_kind_name(TokKind k) {
         [TK_NOT] = "NOT", [TK_TRUE] = "TRUE", [TK_FALSE] = "FALSE",
         [TK_NONE] = "NONE", [TK_BREAK] = "BREAK", [TK_CONTINUE] = "CONTINUE",
         [TK_PASS] = "PASS", [TK_TYPE] = "TYPE",
+        [TK_IMPORT] = "IMPORT", [TK_FROM] = "FROM", [TK_AS] = "AS",
         [TK_LBRACE] = "LBRACE", [TK_RBRACE] = "RBRACE",
         [TK_LPAREN] = "LPAREN", [TK_RPAREN] = "RPAREN",
         [TK_LBRACK] = "LBRACK", [TK_RBRACK] = "RBRACK",

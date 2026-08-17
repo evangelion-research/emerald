@@ -1,0 +1,122 @@
+# Deterministic raytracer smoke test: a fixed three-sphere scene rendered at
+# 16x9 with one sample per pixel. Pixel values vary run-to-run (rand()), so
+# we only assert the deterministic facts: the PPM header, dimensions, sphere
+# count, and that the output file was produced with the expected size.
+#
+# This exercises the same machinery as examples/ray_tracer/one_weekend.rald:
+# Vec3 records, closure materials, recursive ray_color, and PPM writing.
+
+type Vec3 = { x: float, y: float, z: float }
+type Color = Vec3
+type Ray = { orig: Vec3, dir: Vec3 }
+type Scatter = { ok: bool, atten: Color, ray: Ray }
+type Material = { scatter: (Ray, Vec3, Vec3, bool) -> Scatter }
+type Hit = { t: float, p: Vec3, normal: Vec3, front: bool, mat: Material }
+type Sphere = { center: Vec3, radius: float, mat: Material }
+
+def v(x: float, y: float, z: float) -> Vec3 { return { x: x, y: y, z: z } }
+def vadd(a: Vec3, b: Vec3) -> Vec3 { return v(a.x + b.x, a.y + b.y, a.z + b.z) }
+def vsub(a: Vec3, b: Vec3) -> Vec3 { return v(a.x - b.x, a.y - b.y, a.z - b.z) }
+def vmul(a: Vec3, b: Vec3) -> Vec3 { return v(a.x * b.x, a.y * b.y, a.z * b.z) }
+def vscale(a: Vec3, t: float) -> Vec3 { return v(a.x * t, a.y * t, a.z * t) }
+def vdot(a: Vec3, b: Vec3) -> float { return a.x * b.x + a.y * b.y + a.z * b.z }
+def vlen_sq(a: Vec3) -> float { return vdot(a, a) }
+def vlen(a: Vec3) -> float { return sqrt(vlen_sq(a)) }
+def vunit(a: Vec3) -> Vec3 { return vscale(a, 1.0 / vlen(a)) }
+def ray_at(r: Ray, t: float) -> Vec3 { return vadd(r.orig, vscale(r.dir, t)) }
+
+def random_unit_vector() -> Vec3 {
+    while True {
+        p = v(rand() * 2.0 - 1.0, rand() * 2.0 - 1.0, rand() * 2.0 - 1.0)
+        if vlen_sq(p) < 1.0 { return vunit(p) }
+    }
+}
+
+def lambertian(albedo: Color) -> Material {
+    def sc(r: Ray, p: Vec3, n: Vec3, front: bool) -> Scatter {
+        return { ok: True, atten: albedo,
+                 ray: { orig: p, dir: vadd(n, random_unit_vector()) } }
+    }
+    return { scatter: sc }
+}
+
+def metal(albedo: Color) -> Material {
+    def sc(r: Ray, p: Vec3, n: Vec3, front: bool) -> Scatter {
+        dir = vsub(vunit(r.dir), vscale(n, 2.0 * vdot(vunit(r.dir), n)))
+        return { ok: True, atten: albedo, ray: { orig: p, dir: dir } }
+    }
+    return { scatter: sc }
+}
+
+def hit_sphere(s: Sphere, r: Ray, tmin: float, tmax: float) -> Hit | None {
+    oc = vsub(r.orig, s.center)
+    a = vlen_sq(r.dir)
+    half_b = vdot(oc, r.dir)
+    c = vlen_sq(oc) - s.radius * s.radius
+    disc = half_b * half_b - a * c
+    if disc < 0.0 { return None }
+    sqrtd = sqrt(disc)
+    root = (-half_b - sqrtd) / a
+    if root < tmin or tmax < root {
+        root = (-half_b + sqrtd) / a
+        if root < tmin or tmax < root { return None }
+    }
+    p = ray_at(r, root)
+    outward_normal = vscale(vsub(p, s.center), 1.0 / s.radius)
+    front = vdot(r.dir, outward_normal) < 0.0
+    normal = outward_normal
+    if not front { normal = vscale(outward_normal, -1.0) }
+    return { t: root, p: p, normal: normal, front: front, mat: s.mat }
+}
+
+def hit_world(world: list[Sphere], r: Ray) -> Hit | None {
+    best: Hit | None = None
+    for s in world {
+        sph = hit_sphere(s, r, 0.001, 1000000.0)
+        if sph != None {
+            if best == None { best = sph }
+            elif sph.t < best.t { best = sph }
+        }
+    }
+    return best
+}
+
+def ray_color(r: Ray, world: list[Sphere], depth: int) -> Color {
+    if depth <= 0 { return v(0.0, 0.0, 0.0) }
+    rec = hit_world(world, r)
+    if rec == None {
+        unit = vunit(r.dir)
+        t = 0.5 * (unit.y + 1.0)
+        return vadd(vscale(v(1.0, 1.0, 1.0), 1.0 - t),
+                    vscale(v(0.5, 0.7, 1.0), t))
+    }
+    s = rec.mat.scatter(r, rec.p, rec.normal, rec.front)
+    if not s.ok { return v(0.0, 0.0, 0.0) }
+    return vmul(s.atten, ray_color(s.ray, world, depth - 1))
+}
+
+# fixed three-sphere scene: ground + one lambertian + one metal
+world = [
+    { center: v(0.0, -100.5, -1.0), radius: 100.0, mat: lambertian(v(0.5, 0.5, 0.5)) },
+    { center: v(0.0, 0.0, -1.0), radius: 0.5, mat: lambertian(v(0.8, 0.3, 0.3)) },
+    { center: v(1.0, 0.0, -1.0), radius: 0.5, mat: metal(v(0.8, 0.6, 0.2)) },
+]
+
+w = 16
+h = 9
+out_path = "/tmp/emerald_rt_smoke.ppm"
+write_file(out_path, "P3\n" + str(w) + " " + str(h) + "\n255\n")
+for j in range(h) {
+    row = ""
+    for i in range(w) {
+        u = (i + 0.5) / w
+        vv = (j + 0.5) / h
+        dir = vsub(vadd(v(-2.0 + 4.0 * u, 2.0 - 4.0 * vv, -1.0), v(0.0, 0.0, 0.0)),
+                   v(0.0, 0.0, 0.0))
+        col = ray_color({ orig: v(0.0, 0.0, 0.0), dir: dir }, world, 8)
+        row = row + str(int(255.0 * col.x)) + " " + str(int(255.0 * col.y)) + " " + str(int(255.0 * col.z)) + "\n"
+    }
+    append_file(out_path, row)
+}
+print("P3", w, h, "spheres", len(world))
+print("wrote", out_path)

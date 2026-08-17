@@ -71,6 +71,11 @@ struct Expr {
     ExprKind kind;
     int line;
     int col;                /* 1-based column of the first token */
+    /* Source spelling, when it differs from the node's own name because the
+     * module linker rewrote it (`strings.split` -> `strings__split`). NULL
+     * means "the node already spells itself the way the user wrote it".
+     * Diagnostics quote this so users never see mangled names. */
+    const char *disp;
     union {
         int64_t ival;                 /* E_INT */
         double fval;                  /* E_FLOAT */
@@ -90,8 +95,15 @@ struct Expr {
 typedef enum {
     S_EXPR, S_ASSIGN, S_IF, S_WHILE, S_FOR,
     S_RETURN, S_BREAK, S_CONTINUE, S_PASS,
-    S_BLOCK, S_FUNC, S_TYPEDEF,
+    S_BLOCK, S_FUNC, S_TYPEDEF, S_IMPORT,
 } StmtKind;
+
+/* one entry of `from <path> import a, b as c` */
+typedef struct {
+    char *name;   /* the name as it appears in the imported module */
+    char *local;  /* the local binding (equal to `name` without `as`) */
+    int line, col;
+} ImportName;
 
 typedef struct Stmt Stmt;
 typedef struct { Stmt **items; size_t count; } Block;
@@ -100,6 +112,7 @@ struct Stmt {
     StmtKind kind;
     int line;
     int col;                /* 1-based column of the first token */
+    const char *file;       /* source file this statement was parsed from */
     union {
         Expr *expr;                                   /* S_EXPR */
         struct {                                      /* S_ASSIGN */
@@ -119,7 +132,8 @@ struct Stmt {
         Expr *ret;                                    /* S_RETURN, may be NULL */
         Block block;                                  /* S_BLOCK */
         struct {                                      /* S_FUNC */
-            char *name;
+            char *name;             /* linker-mangled for imported modules */
+            const char *dispname;   /* name as written in the source */
             char **tparams;         /* generic type parameters `def f[T, U]` */
             size_t tparam_count;
             char **params;
@@ -129,11 +143,19 @@ struct Stmt {
             Block body;
         } func;
         struct {                                      /* S_TYPEDEF */
-            char *name;
+            char *name;             /* linker-mangled for imported modules */
+            const char *dispname;   /* name as written in the source */
             char **params;          /* generic parameters `type Pair[A, B]` */
             size_t param_count;
             TypeExpr *value;
         } tdef;
+        struct {                                      /* S_IMPORT */
+            char *path;             /* dotted module path, "text.strings" */
+            char *alias;            /* `import p as a`; NULL otherwise */
+            ImportName *names;      /* `from p import ...`; NULL for plain */
+            size_t name_count;
+            bool is_from;
+        } imp;
     } as;
 };
 
