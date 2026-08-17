@@ -1,0 +1,3 @@
+import a
+
+print(a.from_a())

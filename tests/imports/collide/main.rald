@@ -1,0 +1,10 @@
+import json
+import toml
+
+def parse(s: str) -> str {
+    return "main:" + s
+}
+
+print(json.parse("a"))
+print(toml.parse("b"))
+print(parse("c"))

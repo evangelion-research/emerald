@@ -125,6 +125,7 @@ typedef struct {
     int ntemps;          /* temporaries currently live */
     int max_temps;
     int last_line;       /* last emitted source line (for rt_cur_line) */
+    const char *last_file; /* last emitted source file (linked programs span several) */
 } Cg;
 
 static void emit(Cg *cg, const char *fmt, ...) {
@@ -591,7 +592,15 @@ static void gen_stmt(Cg *cg, const Stmt *s) {
     int mark = cg->ntemps; /* release this statement's temporaries at the end */
     char ab[32], bb[32], cb[32];
 
-    /* track the current source line so runtime errors report a location */
+    /* track the current source position so runtime errors report a location;
+     * a linked program spans several files, so the file can change too */
+    if (s->file && s->file != cg->last_file) {
+        cg->last_file = s->file;
+        SB f = {0};
+        sb_c_string(&f, s->file);
+        emit(cg, "rt_cur_file = %s;", f.buf);
+        free(f.buf);
+    }
     if (s->line != cg->last_line) {
         cg->last_line = s->line;
         emit(cg, "rt_cur_line = %d;", s->line);
@@ -681,7 +690,8 @@ static void gen_stmt(Cg *cg, const Stmt *s) {
             gen_nested_def(cg, s);
         break; /* top-level bodies are emitted separately */
     case S_TYPEDEF:
-        break; /* compile-time only */
+    case S_IMPORT:
+        break; /* compile-time only (imports are resolved away by linking) */
     }
     cg->ntemps = mark;
 }

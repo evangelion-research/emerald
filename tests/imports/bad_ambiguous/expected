@@ -1,0 +1,7 @@
+error[E_IMPORT_AMBIGUOUS]: module 'text.strings' is claimed by two files under 'tests/imports/bad_ambiguous'
+  --> tests/imports/bad_ambiguous/main.rald:1:1
+    |
+ 1 | import text.strings
+   | ^
+   = candidate: tests/imports/bad_ambiguous/text/strings.rald
+   = candidate: tests/imports/bad_ambiguous/text.strings.rald

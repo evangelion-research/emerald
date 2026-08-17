@@ -1,0 +1,8 @@
+(program
+  (import strings as strings)
+  (import text.strings as ts)
+  (from text.strings import (split as split) (join as concat))
+  (def use () -> str
+    (return (call concat (call split "a b")))
+  )
+)

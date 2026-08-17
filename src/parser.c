@@ -249,6 +249,10 @@ static TypeExpr *parse_type_atom(Parser *p) {
     }
     TypeExpr *t = new_type(TE_NAME, line, col);
     t->name = tok_text(n);
+    if (check(p, TK_DOT)) /* `m.T`: types are not reachable through a module object */
+        perror_at(p, p->cur.line, p->cur.col,
+                  "qualified type names are not supported; write "
+                  "'from %s import <type>' and use the type directly", t->name);
     if (match(p, TK_LBRACK)) { /* generic application: Pair[int, str] */
         PtrVec args = {0};
         do {

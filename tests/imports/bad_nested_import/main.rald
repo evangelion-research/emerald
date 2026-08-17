@@ -1,0 +1,4 @@
+def f() -> int {
+    import somewhere
+    return 1
+}

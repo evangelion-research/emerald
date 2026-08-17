@@ -1,0 +1,5 @@
+import base
+
+def quadruple(n: int) -> int {
+    return base.double(base.double(n))
+}

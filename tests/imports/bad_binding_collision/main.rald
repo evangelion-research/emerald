@@ -1,0 +1,6 @@
+from lib import parse, other
+from lib import other
+
+def parse(s: str) -> str {
+    return s
+}

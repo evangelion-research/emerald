@@ -49,6 +49,7 @@ struct Type {
  * encountered while resolving becomes a TY_ALIAS node instead. */
 typedef struct Alias {
     char *name;
+    const char *disp;           /* source-level name (linking may mangle `name`) */
     Type *type;                 /* resolved eagerly for non-generic aliases */
     char **params;              /* generic parameters, NULL when non-generic */
     size_t param_count;
@@ -400,7 +401,7 @@ static void type_write(char *buf, size_t cap, const Type *t) {
     case TY_FLOAT: tw_append(buf, cap, "float"); break;
     case TY_STR:   tw_append(buf, cap, "str"); break;
     case TY_VAR:   tw_append(buf, cap, t->var); break;
-    case TY_ALIAS: tw_append(buf, cap, ((const Alias *)t->ref.al)->name); break;
+    case TY_ALIAS: tw_append(buf, cap, ((const Alias *)t->ref.al)->disp); break;
     case TY_FUNC:
         tw_append(buf, cap, "(");
         for (size_t i = 0; i < t->fun.count; i++) {
@@ -475,6 +476,7 @@ typedef struct { Var *items; size_t count, cap; } VarEnv;
 
 typedef struct {
     char *name;
+    const char *disp;    /* source-level name (differs when a module was linked) */
     char **tparams;      /* generic type parameters, e.g. def head[T] */
     size_t tparam_count;
     Type **params;       /* may contain TY_VAR when generic */
@@ -627,7 +629,7 @@ static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
         if (al->param_count == 0) {
             if (te->arg_count) {
                 ck_error(ck, "E_TYPE_NOT_GENERIC", te->line, te->col,
-                         "type '%s' is not generic", te->name);
+                         "type '%s' is not generic", al->disp);
                 return &t_any;
             }
             if (al->resolving) { /* recursive self-reference */
@@ -938,6 +940,7 @@ static Type *infer_call(Ck *ck, const Expr *e) {
 
     if (fn->kind == E_NAME) {
         const char *name = fn->as.sval;
+        const char *dname = fn->disp ? fn->disp : name;
         if (strcmp(name, "print") == 0) return &t_none;
         if (strcmp(name, "len") == 0) {
             if (argc != 1)
@@ -1026,7 +1029,7 @@ static Type *infer_call(Ck *ck, const Expr *e) {
         if (f) {
             if (argc != f->param_count) {
                 ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "%s() takes %zu argument%s, got %zu", name,
+                         "%s() takes %zu argument%s, got %zu", dname,
                          f->param_count, f->param_count == 1 ? "" : "s", argc);
                 return f->tparam_count ? &t_any : f->ret;
             }
@@ -1036,7 +1039,7 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                         ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
                                    f->params[i], argt[i],
                                    "argument %zu of %s(): expected %s, got %s",
-                                   i + 1, name, type_str(f->params[i]),
+                                   i + 1, dname, type_str(f->params[i]),
                                    type_str(argt[i]));
                 return f->ret;
             }
@@ -1056,7 +1059,7 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                     ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
                                pi, argt[i],
                                "argument %zu of %s(): expected %s, got %s",
-                               i + 1, name, type_str(pi), type_str(argt[i]));
+                               i + 1, dname, type_str(pi), type_str(argt[i]));
             }
             Type *ret = ty_subst(f->ret, &sub);
             free(sub.types);
@@ -1065,7 +1068,7 @@ static Type *infer_call(Ck *ck, const Expr *e) {
         /* an undefined name being called is its own error */
         if (!lookup_var(ck, name)) {
             ck_error(ck, "E_TYPE_UNDEFINED", e->line, e->col,
-                     "call to undefined function '%s'", name);
+                     "call to undefined function '%s'", dname);
             return &t_any;
         }
         /* otherwise a function value held in a variable: indirect call */
@@ -1775,12 +1778,20 @@ static void check_stmt(Ck *ck, const Stmt *s) {
     case S_TYPEDEF:
         /* resolved during the signature pass */
         break;
+    case S_IMPORT:
+        /* resolved away by the module linker before checking */
+        break;
     }
 }
 
 static void check_block(Ck *ck, const Block *b) {
-    for (size_t i = 0; i < b->count; i++)
+    for (size_t i = 0; i < b->count; i++) {
+        /* a linked program spans several files; follow the statement's own */
+        const char *saved = ck->filename;
+        if (b->items[i]->file) ck->filename = b->items[i]->file;
         check_stmt(ck, b->items[i]);
+        ck->filename = saved;
+    }
 }
 
 /* --- passes -------------------------------------------------------------- */
@@ -1811,7 +1822,7 @@ static TyEnv func_tyenv(const Stmt *s) {
 static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
     if (is_builtin(s->as.func.name)) {
         ck_error(ck, "E_TYPE_REDEFINE", s->line, s->col,
-                 "cannot redefine builtin '%s'", s->as.func.name);
+                 "cannot redefine builtin '%s'", s->as.func.dispname);
         return;
     }
     FuncSig *f;
@@ -1820,7 +1831,7 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
             if (strcmp(scope->funcs[i].name, s->as.func.name) == 0) {
                 ck_error(ck, "E_TYPE_REDEFINE", s->line, s->col,
                          "function '%s' is already defined",
-                         s->as.func.name);
+                         s->as.func.dispname);
                 return;
             }
         if (scope->func_count == scope->func_cap) {
@@ -1834,7 +1845,7 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
             if (strcmp(ck->funcs[i].name, s->as.func.name) == 0) {
                 ck_error(ck, "E_TYPE_REDEFINE", s->line, s->col,
                          "function '%s' is already defined",
-                         s->as.func.name);
+                         s->as.func.dispname);
                 return;
             }
         f = &ck->funcs[ck->func_count++];
@@ -1842,6 +1853,7 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
     TyEnv tenv = func_tyenv(s);
     TyEnv *te = tenv.count ? &tenv : NULL;
     f->name = s->as.func.name;
+    f->disp = s->as.func.dispname;
     f->tparams = s->as.func.tparams;
     f->tparam_count = s->as.func.tparam_count;
     f->param_count = s->as.func.param_count;
@@ -1884,6 +1896,8 @@ static void register_nested(Ck *ck, Scope *scope, const Block *b) {
 }
 
 static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
+    const char *saved_file = ck->filename;
+    if (s->file) ck->filename = s->file;
     TyEnv tenv = func_tyenv(s);
     TyEnv *te = tenv.count ? &tenv : NULL;
 
@@ -1910,7 +1924,7 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     if (!assignable(ck->cur_ret, &t_none) && !block_returns(&s->as.func.body))
         ck_error(ck, "E_TYPE_MISSING_RETURN", s->line, s->col,
                  "%s() can finish without returning a value, but is declared "
-                 "to return %s", s->as.func.name, type_str(ck->cur_ret));
+                 "to return %s", s->as.func.dispname, type_str(ck->cur_ret));
     check_block(ck, &s->as.func.body);
     ck->scope = saved_scope;
     ck->cur_ret = saved_ret;
@@ -1918,6 +1932,7 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     free(sc.locals.items);
     free(sc.funcs);
     free(tenv.types);
+    ck->filename = saved_file;
 }
 
 int check_program(const Program *prog, const char *filename, DiagList *diags) {
@@ -1931,6 +1946,7 @@ int check_program(const Program *prog, const char *filename, DiagList *diags) {
     for (size_t i = 0; i < prog->body.count; i++) {
         const Stmt *s = prog->body.items[i];
         if (s->kind != S_TYPEDEF) continue;
+        if (s->file) ck.filename = s->file;
         if (ck.alias_count == ck.alias_cap) {
             ck.alias_cap = ck.alias_cap ? ck.alias_cap * 2 : 8;
             ck.aliases = realloc(ck.aliases, sizeof(*ck.aliases) * ck.alias_cap);
@@ -1938,6 +1954,7 @@ int check_program(const Program *prog, const char *filename, DiagList *diags) {
         }
         Alias *al = &ck.aliases[ck.alias_count++];
         al->name = s->as.tdef.name;
+        al->disp = s->as.tdef.dispname;
         al->params = s->as.tdef.params;
         al->param_count = s->as.tdef.param_count;
         al->body = s->as.tdef.value;
@@ -1946,14 +1963,17 @@ int check_program(const Program *prog, const char *filename, DiagList *diags) {
                                    : resolve_type(&ck, s->as.tdef.value, NULL);
         al->resolving = false;
     }
+    ck.filename = filename;
 
     /* pass 1b: top-level function signatures */
     ck.funcs = xmalloc(sizeof(FuncSig) * (prog->body.count ? prog->body.count : 1));
     for (size_t i = 0; i < prog->body.count; i++) {
         const Stmt *s = prog->body.items[i];
         if (s->kind != S_FUNC) continue;
+        if (s->file) ck.filename = s->file;
         register_func(&ck, NULL, s);
     }
+    ck.filename = filename;
 
     /* pass 2a: top-level statements (this populates global variable types) */
     check_block(&ck, &prog->body);

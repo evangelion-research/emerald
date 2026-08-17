@@ -1,0 +1,3 @@
+from secret import _hidden
+
+print(_hidden())

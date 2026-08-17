@@ -21,14 +21,19 @@ comment    = "#" .* to end of line ;
 - Whitespace (space, tab, newline) separates tokens; newlines are **not significant**.
 - Strings support escapes: `\\`, `\"`, `\'`, `\n`, `\t`, `\r`, `\0`.
 - Keywords: `def if else elif while for in return and or not
-  True False None break continue pass type`.
+  True False None break continue pass type import from as`.
 - Operators/punct: `{ } ( ) [ ] , . : ; = + - * / % == != < <= > >= | & ->`.
 - Semicolons `;` are optional statement separators.
 
 ## Concrete Syntax (EBNF)
 
 ```
-program       := statement*
+program       := import_stmt* statement*
+
+import_stmt   := "import" dotted ["as" IDENT]
+               | "from" dotted "import" alias ("," alias)*
+dotted        := IDENT ("." IDENT)*
+alias         := IDENT ["as" IDENT]
 
 statement     := func_def
                | if_stmt
@@ -37,7 +42,13 @@ statement     := func_def
                | return_stmt
                | break_stmt | continue_stmt | pass_stmt
                | type_def
+               | import_stmt
                | block | simple_stmt
+
+import_stmt   := "import" dotted ["as" IDENT]
+               | "from" dotted "import" alias ("," alias)*
+dotted        := IDENT ("." IDENT)*
+alias         := IDENT ["as" IDENT]
 
 func_def      := "def" IDENT [tparams] "(" [param ("," param)*] ")"
                  ["->" type] block
@@ -71,7 +82,11 @@ type_atom := "int" | "float" | "str" | "bool" | "None" | "any" | "never"
            | "(" type ")"
 ```
 
-- Type aliases must be declared (at top level) before use.
+- Type aliases must be declared (at top level) before use. Across modules this
+  is automatic: linking orders imported modules before the modules that import
+  them. See `docs/modules.md`.
+- A qualified type name (`m.T`) is not valid syntax; bring a type across a module
+  boundary with `from m import T`.
 - `A & B` requires both sides to be record types; fields merge, right wins.
 - Literal types make a single value a type: `type Dice = 1|2|3|4|5|6`.
   Float literals are not valid types.
@@ -129,6 +144,16 @@ normally.
 - `5 / 2` is float division (`2.5`); `%` is Python modulo (sign of divisor).
 - Comparisons work across int/float/bool; strings and lists compare
   lexicographically; `==` is deep for lists and records.
+- **Modules**: `import text.strings` binds the last path component
+  (`strings`) as a module object; `from text.strings import split as s`
+  binds `split` (as `s`) directly. Only top-level `def`s, `type` aliases,
+  and globals are exported; names starting with `_` are private. A module
+  is resolved against the importing file's directory, then the project's
+  `src/` root, then each `-I` root in command-line order (first hit wins,
+  so an earlier `-I` root shadows a later one). Each module is parsed once
+  and linked dependencies-first; its top-level names are mangled to
+  `<module>__<name>` internally so two modules can both define `parse`
+  without colliding. `import` is only allowed at the top level.
 - **Builtins**: `print(*args)`, `len(x)`, `range(n)` / `range(a, b)`,
   `str(x)`, `int(x)`, `gc_stats()`, `read_file(path)`, `write_file(path, s)`,
   `run(cmd)`. Builtins cannot be shadowed or redefined.

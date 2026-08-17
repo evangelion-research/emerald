@@ -1,0 +1,15 @@
+from lib import value, shared
+
+def local_wins() -> str {
+    value = "a local named value"
+    return value
+}
+
+def param_wins(shared: str) -> str {
+    return shared
+}
+
+print(value())
+print(shared)
+print(local_wins())
+print(param_wins("a parameter named shared"))

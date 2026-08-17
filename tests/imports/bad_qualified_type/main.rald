@@ -1,0 +1,3 @@
+import lib
+
+p: lib.Pair = { fst: 1, snd: "x" }

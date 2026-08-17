@@ -1,0 +1,5 @@
+error[E_SYNTAX]: imports are only allowed at the top level of a module
+  --> tests/imports/bad_nested_import/main.rald:2:5
+    |
+ 2 |     import somewhere
+   |     ^

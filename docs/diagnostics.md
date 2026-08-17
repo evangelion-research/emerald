@@ -58,6 +58,9 @@ diagnostics as a JSON array on stdout. Each element has:
 | `source_line`  | string | the text of the offending source line            |
 | `notes`        | array  | extra structured notes `{label, value}`          |
 
+In a multi-module program every diagnostic names the file it belongs to, and
+`source_line` is quoted from *that* file — not from the entry file.
+
 A clean file emits `[]`.
 
 ```json
@@ -110,6 +113,36 @@ etc.
 | `E_TYPE_INTERSECTION`         | `&` on non-record types                  |
 | `E_TYPE_REDEFINE`             | redefining a builtin or function         |
 | `E_TYPE_BREAK` / `E_TYPE_CONTINUE` | control flow outside a loop          |
+
+### Import errors (`E_IMPORT_*`)
+
+The module loader resolves `import`/`from` statements to files and links the
+import graph into one program (see `grammar.md`). Its errors use the same
+structured pipeline, so `--json` reports them identically to type errors:
+
+| code                          | meaning                                  |
+|-------------------------------|------------------------------------------|
+| `E_IMPORT_NOT_FOUND`          | module path resolved to no file on the search path (notes list every root searched) |
+| `E_IMPORT_CYCLE`              | import graph contains a cycle; notes list the modules on it |
+| `E_IMPORT_PRIVATE`            | imported name exists but is private (leading `_`) |
+| `E_IMPORT_NAME`               | imported name does not exist in that module |
+| `E_IMPORT_AMBIGUOUS`          | one search root offers both `a/b.rald` and `a.b.rald`; notes list both candidates |
+| `E_IMPORT_REDEFINE`           | an import binding collides with a top-level name of the importing module, or with an earlier import |
+| `E_IMPORT_MODULE_VALUE`       | a module object used where a value is expected, or assigned to (use `module.name`; imports are read-only) |
+
+### Import errors (`E_IMPORT_*`)
+
+Raised by the module loader before type checking. See `docs/modules.md`.
+
+| code                          | meaning                                  |
+|-------------------------------|------------------------------------------|
+| `E_IMPORT_NOT_FOUND`          | module path resolved to no file on the search path |
+| `E_IMPORT_CYCLE`              | import graph contains a cycle; a note lists it |
+| `E_IMPORT_PRIVATE`            | imported name exists but is private (leading `_`) |
+| `E_IMPORT_NAME`               | imported name does not exist in that module |
+| `E_IMPORT_AMBIGUOUS`          | two files under one root claim the same module path |
+| `E_IMPORT_MODULE_VALUE`       | module object used as a value (only `m.<name>` is legal) |
+| `E_IMPORT_REDEFINE`           | import binding collides with a local definition or an earlier import |
 
 ## Runtime errors
 

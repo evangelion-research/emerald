@@ -1,0 +1,4 @@
+import greet
+
+print(greet.hello("world"))
+print(greet.greeting_count)

@@ -1,0 +1,3 @@
+import text.strings
+
+print(strings.upper_first("dotted"))

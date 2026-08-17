@@ -1,0 +1,3 @@
+def name() -> str {
+    return "loaded once"
+}

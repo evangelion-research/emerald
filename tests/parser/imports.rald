@@ -1,0 +1,7 @@
+import strings
+import text.strings as ts
+from text.strings import split, join as concat
+
+def use() -> str {
+    return concat(split("a b"))
+}

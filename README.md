@@ -118,13 +118,38 @@ emerald: runtime error: division by zero (at foo.rald:7)
 See [`docs/diagnostics.md`](docs/diagnostics.md) for the error-code reference
 and the JSON schema.
 
+## Modules
+
+A program can span several files. A `.rald` file is a module, and `import` names
+code in another one:
+
+```
+import strings                    # module object: strings.split(...)
+import text.strings as ts         # dotted paths map to directories
+from strings import split, join   # names lifted into this module
+```
+
+Module paths resolve against the importing file's directory, then the project's
+`src/` root, then each `-I <dir>` in the order given — first hit wins. A leading
+underscore makes a top-level name private; everything else is exported. The
+compiler loads the whole import graph and links it into one program, mangling
+each imported module's top-level names to `<module>__<name>`, so two packages can
+both define `parse`.
+
+```
+emeraldc [-I <dir>]... [--json] [-o OUT] <entry>.rald
+```
+
+That command line is the whole contract between `emeraldc` and any package
+manager driving it. See [`docs/modules.md`](docs/modules.md).
+
 ## Layout
 
 | Path            | What                                                    |
 |-----------------|---------------------------------------------------------|
 | `include/`      | compiler headers (`.h` files)                           |
-| `src/`          | compiler implementation (`.c` files: `lexer` → `parser` → `check` → `codegen` → `main`) and `runtime.c` (Value model + GC, compiled into every program) |
-| `docs/`         | grammar, plan, `type-system.md`, `proofs.md`, `gc.md`, `diagnostics.md` |
+| `src/`          | compiler implementation (`.c` files: `lexer` → `parser` → `module` → `check` → `codegen` → `main`) and `runtime.c` (Value model + GC, compiled into every program) |
+| `docs/`         | grammar, plan, `type-system.md`, `proofs.md`, `gc.md`, `diagnostics.md`, `modules.md` |
 | `tests/`        | golden tests per stage + `run_tests.sh`                 |
 | `examples/`     | runnable programs (`shapes.rald` shows structural typing, `proofs.rald` the proof features, `gc_stress.rald` the collector) |
 | `Taskfile.yml`  | build/test/examples/bless/clean                         |

@@ -1,0 +1,1 @@
+type Pair = { fst: int, snd: str }

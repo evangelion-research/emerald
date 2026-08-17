@@ -1,0 +1,5 @@
+import shared
+
+def show() -> str {
+    return shared.name()
+}

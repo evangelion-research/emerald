@@ -1,0 +1,3 @@
+import lib
+
+print(lib.takes_int("not an int"))

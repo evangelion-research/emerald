@@ -1,0 +1,5 @@
+import shared
+import pkg.wrapper
+
+print(shared.name())
+print(wrapper.show())

@@ -12,7 +12,7 @@ vars:
   CFLAGS: -std=c11 -Wall -Wextra -O2 -g -Iinclude
   SRCDIR:
     sh: echo "$PWD/src"
-  COMPILER_SRCS: src/lexer.c src/ast.c src/parser.c src/check.c src/codegen.c src/diag.c src/main.c
+  COMPILER_SRCS: src/lexer.c src/ast.c src/parser.c src/module.c src/check.c src/codegen.c src/diag.c src/main.c
 
 tasks:
   default:
@@ -37,7 +37,7 @@ tasks:
       - '{{.CC}} {{.CFLAGS}} -c src/runtime.c -o /dev/null -Iinclude'
 
   test:
-    desc: Run all stage test suites (lexer, parser, check, e2e)
+    desc: Run all stage test suites (lexer, parser, check, e2e, imports)
     deps: [build]
     cmds:
       - task: runtime-check
@@ -67,6 +67,12 @@ tasks:
     cmds:
       - ./tests/run_tests.sh e2e
 
+  test:imports:
+    desc: Golden tests for the module system (resolution, linking, errors)
+    deps: [build]
+    cmds:
+      - ./tests/run_tests.sh imports
+
   examples:
     desc: Compile and run every example program
     deps: [build]
@@ -75,6 +81,11 @@ tasks:
         for f in examples/*.rald; do
           echo "== $f"
           ./bin/emeraldc "$f" && "${f%.rald}"
+        done
+      - |
+        for f in examples/*/main.rald; do
+          echo "== $f"
+          ./bin/emeraldc -o "${f%.rald}" "$f" && "${f%.rald}"
         done
 
   bless:
@@ -90,10 +101,24 @@ tasks:
           ./bin/emeraldc -o "${f%.rald}" "$f" && "${f%.rald}" > "${f%.rald}.expected"
           rm -f "${f%.rald}"
         done
+      - |
+        for d in tests/imports/*/; do
+          d="${d%/}"
+          [ -f "$d/main.rald" ] || continue
+          flags=""; [ -f "$d/flags" ] && flags="$(cat "$d/flags")"
+          case "$(basename "$d")" in
+          bad_*)
+            ./bin/emeraldc --check $flags "$d/main.rald" > "$d/expected" 2>&1 || true ;;
+          *)
+            ./bin/emeraldc $flags -o "$d/main.bin" "$d/main.rald" &&
+              "$d/main.bin" > "$d/expected" 2>&1
+            rm -f "$d/main.bin" ;;
+          esac
+        done
 
   clean:
     desc: Remove build outputs and generated C
     cmds:
       - rm -rf bin
-      - rm -f examples/*.gen.c tests/e2e/*.gen.c
-      - for f in examples/*.rald tests/e2e/*.rald; do rm -f "${f%.rald}"; done
+      - rm -f examples/*.gen.c tests/e2e/*.gen.c tests/imports/*/main.bin*
+      - for f in examples/*.rald tests/e2e/*.rald examples/*/main.rald; do rm -f "${f%.rald}"; done

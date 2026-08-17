@@ -1,0 +1,7 @@
+def parse(s: str) -> str {
+    return s
+}
+
+def other(s: str) -> str {
+    return s
+}

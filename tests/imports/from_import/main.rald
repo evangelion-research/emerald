@@ -1,0 +1,5 @@
+from strings import shout, whisper as quiet, Word
+
+w: Word = "hey"
+print(shout(w))
+print(quiet(w))

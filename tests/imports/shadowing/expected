@@ -1,0 +1,4 @@
+from module
+module global
+a local named value
+a parameter named shared

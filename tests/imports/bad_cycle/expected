@@ -1,0 +1,8 @@
+error[E_IMPORT_CYCLE]: import cycle: module 'a' imports itself, directly or indirectly
+  --> tests/imports/bad_cycle/b.rald:1:1
+    |
+ 1 | import a
+   | ^
+   = cycle: a
+   = cycle: b
+   = cycle: a

@@ -1,0 +1,7 @@
+error[E_IMPORT_NOT_FOUND]: cannot find module 'nowhere' on the search path
+  --> tests/imports/bad_not_found/main.rald:1:1
+    |
+ 1 | import nowhere
+   | ^
+   = searched: tests/imports/bad_not_found
+   = searched: src

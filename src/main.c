@@ -1,6 +1,7 @@
 /* emeraldc: the Emerald compiler driver.
  *
  *   emeraldc file.rald              compile to a native binary (./file)
+ *   emeraldc -I dir ...             add a module search root (repeatable)
  *   emeraldc -o out file.rald       choose the output path
  *   emeraldc --emit-tokens f.rald   dump the token stream (lexer stage)
  *   emeraldc --emit-ast f.rald      dump the AST as s-expressions (parser stage)
@@ -11,11 +12,20 @@
  * The generated C is compiled together with the runtime by the system C
  * compiler ($CC, default "cc"). The runtime location defaults to the macro
  * EMERALD_SRC_DIR (set by the build) and can be overridden with $EMERALD_SRC.
+ *
+ * Everything from --check onwards operates on the *linked* program: the entry
+ * file plus every module it imports, resolved by src/module.c. The two earlier
+ * stages (--emit-tokens, --emit-ast) are per-file views and never follow an
+ * import. This command line is the whole contract between emeraldc and any
+ * driver (such as pme) that resolves packages on its behalf:
+ *
+ *   emeraldc [-I <dir>]... [--json] [-o OUT] <entry>.rald
  */
 #include "check.h"
 #include "codegen.h"
 #include "diag.h"
 #include "lexer.h"
+#include "module.h"
 #include "parser.h"
 
 #include <stdio.h>
@@ -72,7 +82,8 @@ static char *default_output(const char *path) {
 
 static void usage(void) {
     fputs("usage: emeraldc [--emit-tokens|--emit-ast|--check|--emit-c]\n"
-          "                [--json] [--keep-c] [-o OUT] file.rald\n", stderr);
+          "                [--json] [--keep-c] [-I DIR]... [-o OUT] file.rald\n",
+          stderr);
     exit(2);
 }
 
@@ -81,6 +92,9 @@ int main(int argc, char **argv) {
     enum { MODE_BUILD, MODE_TOKENS, MODE_AST, MODE_CHECK, MODE_C } mode = MODE_BUILD;
     bool keep_c = false;
     bool json_errors = false;
+    const char **inc = malloc(sizeof(char *) * (size_t)argc);
+    size_t ninc = 0;
+    if (!inc) return 1;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--emit-tokens") == 0) mode = MODE_TOKENS;
@@ -92,30 +106,41 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-o") == 0) {
             if (++i == argc) usage();
             out_path = argv[i];
+        } else if (strcmp(argv[i], "-I") == 0) {
+            if (++i == argc) usage();
+            inc[ninc++] = argv[i];
+        } else if (strncmp(argv[i], "-I", 2) == 0) {
+            inc[ninc++] = argv[i] + 2;
         } else if (argv[i][0] == '-') usage();
         else if (file) usage();
         else file = argv[i];
     }
     if (!file) usage();
 
-    char *src = read_file(file);
     DiagList diags;
-    diag_init(&diags, src);
+    diag_init(&diags, NULL);
     diags.json = json_errors;
 
-    if (mode == MODE_TOKENS) {
-        emit_tokens(src);
+    /* the first two stages are per-file views: they never follow an import */
+    if (mode == MODE_TOKENS || mode == MODE_AST) {
+        char *src = read_file(file);
+        diag_add_source(&diags, file, src);
+        if (mode == MODE_TOKENS) {
+            emit_tokens(src);
+            return 0;
+        }
+        ast_print_program(stdout, parse_program(src, file, &diags));
         return 0;
     }
 
-    Program *prog = parse_program(src, file, &diags);
-
-    if (mode == MODE_AST) {
-        ast_print_program(stdout, prog);
-        return 0;
+    int errors = 0;
+    Program *prog = module_link(file, inc, ninc, &diags, &errors);
+    if (!prog) {
+        if (diags.count) diag_render(&diags, diags.json ? stdout : stderr);
+        return 1;
     }
 
-    int errors = check_program(prog, file, &diags);
+    errors = check_program(prog, file, &diags);
     if (mode == MODE_CHECK) {
         if (diags.json) diag_render(&diags, stdout);
         else if (errors == 0) printf("ok\n");

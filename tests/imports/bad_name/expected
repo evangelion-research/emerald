@@ -1,0 +1,5 @@
+error[E_IMPORT_NAME]: module 'm' has no member 'absent'
+  --> tests/imports/bad_name/main.rald:1:24
+    |
+ 1 | from m import present, absent
+   |                        ^

@@ -1,0 +1,7 @@
+error[E_TYPE_ARG]: argument 1 of lib.takes_int(): expected int, got "not an int"
+  --> tests/imports/bad_type/main.rald:3:20
+    |
+ 3 | print(lib.takes_int("not an int"))
+   |                    ^
+   = expected: int
+   = actual:   "not an int"

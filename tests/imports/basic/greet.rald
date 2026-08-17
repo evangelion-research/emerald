@@ -1,0 +1,5 @@
+def hello(name: str) -> str {
+    return "hello, " + name
+}
+
+greeting_count = 0

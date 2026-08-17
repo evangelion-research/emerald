@@ -1,0 +1,6 @@
+import counter
+
+print("main starting")
+print(counter.bump())
+print(counter.bump())
+print(counter.count)

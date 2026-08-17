@@ -1,0 +1,9 @@
+type Word = str
+
+def shout(s: Word) -> str {
+    return s + "!"
+}
+
+def whisper(s: Word) -> str {
+    return "(" + s + ")"
+}

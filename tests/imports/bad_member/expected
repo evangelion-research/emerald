@@ -1,0 +1,5 @@
+error[E_IMPORT_NAME]: module 'm' has no member 'nope'
+  --> tests/imports/bad_member/main.rald:3:8
+    |
+ 3 | print(m.nope())
+   |        ^

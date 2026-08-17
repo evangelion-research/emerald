@@ -1,0 +1,10 @@
+error[E_IMPORT_REDEFINE]: import of 'parse' collides with a top-level definition of the same name in this module
+  --> tests/imports/bad_binding_collision/main.rald:1:17
+    |
+ 1 | from lib import parse, other
+   |                 ^
+error[E_IMPORT_REDEFINE]: 'other' is already bound by an earlier import
+  --> tests/imports/bad_binding_collision/main.rald:2:17
+    |
+ 2 | from lib import other
+   |                 ^

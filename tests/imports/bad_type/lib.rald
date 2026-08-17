@@ -1,0 +1,3 @@
+def takes_int(n: int) -> int {
+    return n
+}

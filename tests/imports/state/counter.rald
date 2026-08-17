@@ -1,0 +1,8 @@
+count = 0
+
+def bump() -> int {
+    count = count + 1
+    return count
+}
+
+print("counter module initialized")

@@ -1,0 +1,5 @@
+def value() -> str {
+    return "from module"
+}
+
+shared = "module global"

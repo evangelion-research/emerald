@@ -1,0 +1,5 @@
+error[E_IMPORT_PRIVATE]: '_hidden' is private to module 'secret' (names starting with '_' are not exported)
+  --> tests/imports/bad_private_attr/main.rald:3:13
+    |
+ 3 | print(secret._hidden())
+   |             ^

@@ -1,0 +1,5 @@
+error[E_SYNTAX]: qualified type names are not supported; write 'from lib import <type>' and use the type directly
+  --> tests/imports/bad_qualified_type/main.rald:3:7
+    |
+ 3 | p: lib.Pair = { fst: 1, snd: "x" }
+   |       ^

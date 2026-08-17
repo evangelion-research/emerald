@@ -1,0 +1,5 @@
+error[E_IMPORT_MODULE_VALUE]: cannot assign into module 'm'
+  --> tests/imports/bad_reassign/main.rald:3:2
+    |
+ 3 | m.present = 2
+   |  ^

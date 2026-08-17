@@ -1,0 +1,2 @@
+import text.strings as ts
+from text.strings import split, join as concat

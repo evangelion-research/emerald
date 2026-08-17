@@ -1,0 +1,3 @@
+import mid
+
+print(mid.quadruple(3))
