@@ -155,8 +155,10 @@ normally.
   `<module>__<name>` internally so two modules can both define `parse`
   without colliding. `import` is only allowed at the top level.
 - **Builtins**: `print(*args)`, `len(x)`, `range(n)` / `range(a, b)`,
-  `str(x)`, `int(x)`, `gc_stats()`, `read_file(path)`, `write_file(path, s)`,
-  `run(cmd)`. Builtins cannot be shadowed or redefined.
+  `str(x)`, `int(x)`, `sqrt(x)`, `tan(x)`, `rand()`, `gc_stats()`,
+  `read_file(path)`, `write_file(path, s)`, `append_file(path, s)`,
+  `run(cmd)`. Builtins cannot be shadowed, redefined, or used as values.
+  Signatures and semantics: [`builtins.md`](builtins.md).
 - **Functions are values**. A function type is written `(A, B) -> C`; a
   top-level function name reads as a closure, can be stored, passed, and
   called indirectly (`f(x)`). A `def` may be nested inside another `def`; a
