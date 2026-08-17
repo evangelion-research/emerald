@@ -1,0 +1,32 @@
+# interval.rald — the smart-constructor pattern (PLAN.md §5.2).
+#
+# The invariant "lo <= hi" is not statable as a refinement type, so the
+# public constructor returns Interval | None and every caller must narrow.
+# Callers that know better could use the private _unchecked constructor —
+# but only from inside this module, which is exactly what underscore
+# privacy gives us.
+
+type Interval = { lo: float, hi: float }
+
+# total, checked constructor: None iff lo > hi
+def interval(lo: float, hi: float) -> Interval | None {
+    if lo <= hi { return { lo: lo, hi: hi } }
+    return None
+}
+
+# private escape hatch for callers that hold a proof of lo <= hi
+def _unchecked(lo: float, hi: float) -> Interval {
+    return { lo: lo, hi: hi }
+}
+
+# NOTE: Emerald comparisons associate pairwise, so `i.lo < t < i.hi` would
+# be a bug ((i.lo < t) < i.hi); two comparisons joined with `and` only.
+def surrounds(i: Interval, t: float) -> bool {
+    return t > i.lo and t < i.hi
+}
+
+def clamp_to(i: Interval, t: float) -> float {
+    if t < i.lo { return i.lo }
+    if t > i.hi { return i.hi }
+    return t
+}

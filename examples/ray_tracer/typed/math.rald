@@ -1,0 +1,52 @@
+# math.rald — scalar helpers the language lacks as builtins.
+#
+# Builtins today: print len range str int gc_stats read_file write_file
+# append_file run sqrt tan rand.  There is no abs / min / max / pow /
+# float(), so this module is a prerequisite for everything else, not a
+# nicety (PLAN.md §3, §10.8).
+
+def min(a: float, b: float) -> float {
+    if a < b { return a }
+    return b
+}
+
+def max(a: float, b: float) -> float {
+    if a > b { return a }
+    return b
+}
+
+def abs(x: float) -> float {
+    if x < 0.0 { return -x }
+    return x
+}
+
+def clamp(x: float, lo: float, hi: float) -> float {
+    return min(max(x, lo), hi)
+}
+
+# integer-exponent power, by repeated multiplication (no ** operator,
+# no general pow builtin)
+def pow(x: float, n: int) -> float {
+    r = 1.0
+    k = 0
+    while k < n {
+        r = r * x
+        k = k + 1
+    }
+    return r
+}
+
+_PI = 3.141592653589793
+
+def radians(deg: float) -> float {
+    return deg * _PI / 180.0
+}
+
+# Schlick's approximation (book ch. 10).  The 5th power is written out;
+# pow() would work but this avoids the loop in the hot path.
+def reflectance(cosine: float, ref_idx: float) -> float {
+    r0 = (1.0 - ref_idx) / (1.0 + ref_idx)
+    r0 = r0 * r0
+    c = 1.0 - cosine
+    return r0 + (1.0 - r0) * c * c * c * c * c
+}

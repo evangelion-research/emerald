@@ -1,0 +1,48 @@
+# rng.rald — a seeded PRNG with the state threaded explicitly.
+#
+# Emerald has no effects and no purity checker, so "the image is a function
+# of the seed" cannot be *stated* (PLAN.md §6 #14).  What we can do is make
+# it true by construction: the generator state is a value that is threaded
+# through every sampling call site and comes back out.  This is the state
+# monad, unrolled by hand — the verbosity is the point (PLAN.md §5.6,
+# milestone 6 measures it).
+#
+# Park-Miller minimal standard LCG: state in [1, 2^31-2], 16807 as the
+# multiplier.  Emerald ints are 64-bit, so state * 16807 (~3.6e13) cannot
+# overflow.
+
+type Rng = { state: int }
+
+# Draw[T] is the one generic that earns its keep in this program: a sampled
+# value plus the *next* generator state.  Parametricity says the sampler
+# cannot inspect the value it draws.
+type Draw[T] = { value: T, rng: Rng }
+
+_M = 2147483647
+_A = 16807
+
+def rng(seed: int) -> Rng {
+    s = seed
+    if s == 0 { s = 1 }        # 0 is a fixed point of the LCG
+    return { state: s }
+}
+
+# _lcg_next is private: nobody can advance the generator without threading
+# the state back out through a Draw, which is exactly the discipline we want.
+def _lcg_next(g: Rng) -> Rng {
+    s = (g.state * _A) % _M
+    if s == 0 { s = 1 }
+    return { state: s }
+}
+
+# a uniform draw in [0, 1]
+def next_float(g: Rng) -> Draw[float] {
+    g2 = _lcg_next(g)
+    return { value: (g2.state - 1) / 2147483646.0, rng: g2 }
+}
+
+# a uniform draw in [lo, hi)
+def draw_range(g: Rng, lo: float, hi: float) -> Draw[float] {
+    d = next_float(g)
+    return { value: lo + (hi - lo) * d.value, rng: d.rng }
+}

@@ -1,0 +1,43 @@
+# camera.rald — the positionable camera with defocus blur (book ch. 11–12).
+#
+# All parameters are typed (Pt / Dir / float), never positional floats
+# (PLAN.md milestone 8).  get_ray threads the Rng because defocus sampling
+# is a draw.
+
+from vec import Pt, Dir, dadd, dcross, dscale, dsub, padd, psub, psubd, random_in_unit_disk, unit
+from ray import Ray
+from rng import Rng, Draw
+from math import radians
+
+type Camera = { origin: Pt, lower_left: Pt, horizontal: Dir, vertical: Dir,
+                u: Dir, v: Dir, lens_radius: float }
+
+def camera(lookfrom: Pt, lookat: Pt, vup: Dir, vfov: float, aspect: float,
+           aperture: float, focus_dist: float) -> Camera {
+    theta = radians(vfov)
+    h = tan(theta / 2.0)
+    viewport_height = 2.0 * h
+    viewport_width = aspect * viewport_height
+    w = unit(psub(lookfrom, lookat))
+    u = unit(dcross(vup, w))
+    v = dcross(w, u)
+    origin = lookfrom
+    horizontal = dscale(u, viewport_width * focus_dist)
+    vertical = dscale(v, viewport_height * focus_dist)
+    lower_left = psubd(psubd(psubd(origin, dscale(horizontal, 0.5)),
+                             dscale(vertical, 0.5)),
+                       dscale(w, focus_dist))
+    return { origin: origin, lower_left: lower_left, horizontal: horizontal,
+             vertical: vertical, u: u, v: v, lens_radius: aperture / 2.0 }
+}
+
+def get_ray(cam: Camera, su: float, sv: float, g: Rng) -> Draw[Ray] {
+    rd = random_in_unit_disk(g)
+    offset = dadd(dscale(cam.u, rd.value.x * cam.lens_radius),
+                  dscale(cam.v, rd.value.y * cam.lens_radius))
+    origin = padd(cam.origin, offset)
+    mid = padd(padd(cam.lower_left, dscale(cam.horizontal, su)),
+               dscale(cam.vertical, sv))
+    return { value: { orig: origin, dir: dsub(psub(mid, cam.origin), offset) },
+             rng: rd.rng }
+}

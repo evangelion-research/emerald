@@ -1,0 +1,280 @@
+# ============================================================================
+# Ray Tracing in One Weekend — final scene, ported to Emerald.
+#
+# Every Vec3 is a GC-managed record, materials are closures, and ray_color()
+# recurses up to max_depth — so this exercises the allocator, the generational
+# collector, and closure calls as hard as any program we have.
+#
+# Scale the render with the three constants below (see stress.sh for a
+# systematic sweep):
+#   image_width       default 120   (height derives from 16:9 aspect)
+#   samples_per_pixel default 4
+#   max_depth         default 16
+# Output: out.ppm in the current directory.
+# ============================================================================
+
+# --- config -----------------------------------------------------------------
+image_width       = 120
+aspect_ratio      = 16.0 / 9.0
+samples_per_pixel = 4
+max_depth         = 16
+out_path          = "out.ppm"
+
+# --- types ------------------------------------------------------------------
+type Vec3 = { x: float, y: float, z: float }
+type Color = Vec3
+type Ray = { orig: Vec3, dir: Vec3 }
+type Scatter = { ok: bool, atten: Color, ray: Ray }
+type Material = { scatter: (Ray, Vec3, Vec3, bool) -> Scatter }
+type Hit = { t: float, p: Vec3, normal: Vec3, front: bool, mat: Material }
+type Sphere = { center: Vec3, radius: float, mat: Material }
+type Camera = { origin: Vec3, lower_left: Vec3, horizontal: Vec3,
+                vertical: Vec3, u: Vec3, v: Vec3, lens_radius: float }
+
+# --- vec3 helpers -----------------------------------------------------------
+def v(x: float, y: float, z: float) -> Vec3 { return { x: x, y: y, z: z } }
+def vadd(a: Vec3, b: Vec3) -> Vec3 { return v(a.x + b.x, a.y + b.y, a.z + b.z) }
+def vsub(a: Vec3, b: Vec3) -> Vec3 { return v(a.x - b.x, a.y - b.y, a.z - b.z) }
+def vmul(a: Vec3, b: Vec3) -> Vec3 { return v(a.x * b.x, a.y * b.y, a.z * b.z) }
+def vscale(a: Vec3, t: float) -> Vec3 { return v(a.x * t, a.y * t, a.z * t) }
+def vdot(a: Vec3, b: Vec3) -> float { return a.x * b.x + a.y * b.y + a.z * b.z }
+def vcross(a: Vec3, b: Vec3) -> Vec3 {
+    return v(a.y * b.z - a.z * b.y,
+             a.z * b.x - a.x * b.z,
+             a.x * b.y - a.y * b.x)
+}
+def vlen_sq(a: Vec3) -> float { return vdot(a, a) }
+def vlen(a: Vec3) -> float { return sqrt(vlen_sq(a)) }
+def vunit(a: Vec3) -> Vec3 { return vscale(a, 1.0 / vlen(a)) }
+def vnear_zero(a: Vec3) -> bool {
+    return a.x < 1e-8 and a.x > -1e-8 and a.y < 1e-8 and a.y > -1e-8 and a.z < 1e-8 and a.z > -1e-8
+}
+def ray_at(r: Ray, t: float) -> Vec3 { return vadd(r.orig, vscale(r.dir, t)) }
+
+# --- random helpers ---------------------------------------------------------
+def random_double() -> float { return rand() }
+def random_range(lo: float, hi: float) -> float { return lo + (hi - lo) * rand() }
+def random_vec() -> Vec3 { return v(rand(), rand(), rand()) }
+def random_vec_range(lo: float, hi: float) -> Vec3 {
+    return v(random_range(lo, hi), random_range(lo, hi), random_range(lo, hi))
+}
+def random_in_unit_sphere() -> Vec3 {
+    while True {
+        p = random_vec_range(-1.0, 1.0)
+        if vlen_sq(p) < 1.0 { return p }
+    }
+}
+def random_unit_vector() -> Vec3 { return vunit(random_in_unit_sphere()) }
+def random_in_unit_disk() -> Vec3 {
+    while True {
+        p = v(random_range(-1.0, 1.0), random_range(-1.0, 1.0), 0.0)
+        if vlen_sq(p) < 1.0 { return p }
+    }
+}
+
+# --- materials (closures capturing albedo / fuzz / index of refraction) -----
+def lambertian(albedo: Color) -> Material {
+    def sc(r: Ray, p: Vec3, n: Vec3, front: bool) -> Scatter {
+        dir = vadd(n, random_unit_vector())
+        if vnear_zero(dir) { dir = n }
+        return { ok: True, atten: albedo, ray: { orig: p, dir: dir } }
+    }
+    return { scatter: sc }
+}
+
+def metal(albedo: Color, fuzz: float) -> Material {
+    def sc(r: Ray, p: Vec3, n: Vec3, front: bool) -> Scatter {
+        reflected = reflect(vunit(r.dir), n)
+        dir = vadd(reflected, vscale(random_in_unit_sphere(), fuzz))
+        if vdot(dir, n) > 0.0 {
+            return { ok: True, atten: albedo, ray: { orig: p, dir: dir } }
+        }
+        return { ok: False, atten: albedo, ray: { orig: p, dir: dir } }
+    }
+    return { scatter: sc }
+}
+
+def dielectric(ir: float) -> Material {
+    def sc(r: Ray, p: Vec3, n: Vec3, front: bool) -> Scatter {
+        ratio = ir
+        if front { ratio = 1.0 / ir }
+        unit_dir = vunit(r.dir)
+        cos_theta = -vdot(unit_dir, n)
+        sin_theta = sqrt(1.0 - cos_theta * cos_theta)
+        if ratio * sin_theta > 1.0 or reflectance(cos_theta, ratio) > rand() {
+            return { ok: True, atten: v(1.0, 1.0, 1.0),
+                     ray: { orig: p, dir: reflect(unit_dir, n) } }
+        }
+        return { ok: True, atten: v(1.0, 1.0, 1.0),
+                 ray: { orig: p, dir: refract(unit_dir, n, ratio) } }
+    }
+    return { scatter: sc }
+}
+
+def reflect(v_in: Vec3, n: Vec3) -> Vec3 {
+    return vsub(v_in, vscale(n, 2.0 * vdot(v_in, n)))
+}
+
+def refract(uv: Vec3, n: Vec3, etai_over_etat: float) -> Vec3 {
+    cos_theta = -vdot(uv, n)
+    if cos_theta > 1.0 { cos_theta = 1.0 }
+    r_out_perp = vscale(vadd(uv, vscale(n, cos_theta)), etai_over_etat)
+    sq = 1.0 - vlen_sq(r_out_perp)
+    if sq < 0.0 { sq = 0.0 }
+    return vadd(r_out_perp, vscale(n, -sqrt(sq)))
+}
+
+def reflectance(cosine: float, ref_idx: float) -> float {
+    r0 = (1.0 - ref_idx) / (1.0 + ref_idx)
+    r0 = r0 * r0
+    c = 1.0 - cosine
+    return r0 + (1.0 - r0) * c * c * c * c * c
+}
+
+# --- hittables --------------------------------------------------------------
+def hit_sphere(s: Sphere, r: Ray, tmin: float, tmax: float) -> Hit | None {
+    oc = vsub(r.orig, s.center)
+    a = vlen_sq(r.dir)
+    half_b = vdot(oc, r.dir)
+    c = vlen_sq(oc) - s.radius * s.radius
+    disc = half_b * half_b - a * c
+    if disc < 0.0 { return None }
+    sqrtd = sqrt(disc)
+    root = (-half_b - sqrtd) / a
+    if root < tmin or tmax < root {
+        root = (-half_b + sqrtd) / a
+        if root < tmin or tmax < root { return None }
+    }
+    t = root
+    p = ray_at(r, t)
+    outward_normal = vscale(vsub(p, s.center), 1.0 / s.radius)
+    front = vdot(r.dir, outward_normal) < 0.0
+    normal = outward_normal
+    if not front { normal = vscale(outward_normal, -1.0) }
+    return { t: t, p: p, normal: normal, front: front, mat: s.mat }
+}
+
+def hit_world(world: list[Sphere], r: Ray, tmin: float, tmax: float) -> Hit | None {
+    closest = tmax
+    best: Hit | None = None
+    for s in world {
+        h = hit_sphere(s, r, tmin, closest)
+        if h != None {
+            closest = h.t
+            best = h
+        }
+    }
+    return best
+}
+
+# --- camera (with defocus blur) ---------------------------------------------
+def camera(lookfrom: Vec3, lookat: Vec3, vup: Vec3, vfov: float,
+           aspect: float, aperture: float, focus_dist: float) -> Camera {
+    theta = vfov * 3.141592653589793 / 180.0
+    h = tan(theta / 2.0)
+    vph = 2.0 * h
+    vpw = aspect * vph
+    w2 = vunit(vsub(lookfrom, lookat))
+    u2 = vunit(vcross(vup, w2))
+    v2 = vcross(w2, u2)
+    origin = lookfrom
+    horizontal = vscale(u2, vpw * focus_dist)
+    vertical = vscale(v2, vph * focus_dist)
+    lower_left = vsub(vsub(vsub(origin, vscale(horizontal, 0.5)),
+                           vscale(vertical, 0.5)), vscale(w2, focus_dist))
+    return { origin: origin, lower_left: lower_left, horizontal: horizontal,
+             vertical: vertical, u: u2, v: v2, lens_radius: aperture / 2.0 }
+}
+
+def get_ray(cam: Camera, su: float, sv: float) -> Ray {
+    rd = vscale(random_in_unit_disk(), cam.lens_radius)
+    offset = vadd(vscale(cam.u, rd.x), vscale(cam.v, rd.y))
+    return { orig: vadd(cam.origin, offset),
+             dir: vsub(vsub(vadd(vadd(cam.lower_left,
+                                      vscale(cam.horizontal, su)),
+                                vscale(cam.vertical, sv)), cam.origin), offset) }
+}
+
+# --- ray color (recursive, capped at max_depth) -----------------------------
+def ray_color(r: Ray, world: list[Sphere], depth: int) -> Color {
+    if depth <= 0 { return v(0.0, 0.0, 0.0) }
+    rec = hit_world(world, r, 0.001, 1000000.0)
+    if rec == None {
+        unit = vunit(r.dir)
+        t = 0.5 * (unit.y + 1.0)
+        return vadd(vscale(v(1.0, 1.0, 1.0), 1.0 - t),
+                    vscale(v(0.5, 0.7, 1.0), t))
+    }
+    s = rec.mat.scatter(r, rec.p, rec.normal, rec.front)
+    if not s.ok { return v(0.0, 0.0, 0.0) }
+    return vmul(s.atten, ray_color(s.ray, world, depth - 1))
+}
+
+# --- the book's final scene -------------------------------------------------
+def build_world() -> list[Sphere] {
+    world: list[Sphere] = []
+    world = world + [{ center: v(0.0, -1000.0, 0.0), radius: 1000.0,
+                       mat: lambertian(v(0.5, 0.5, 0.5)) }]
+    for a in range(-11, 11) {
+        for b in range(-11, 11) {
+            choose = rand()
+            center = v(a + 0.9 * rand(), 0.2, b + 0.9 * rand())
+            if vlen(vsub(center, v(4.0, 0.2, 0.0))) > 0.9 {
+                if choose < 0.8 {
+                    albedo = vmul(random_vec(), random_vec())
+                    world = world + [{ center: center, radius: 0.2,
+                                       mat: lambertian(albedo) }]
+                } elif choose < 0.95 {
+                    albedo = random_vec_range(0.5, 1.0)
+                    fuzz = random_range(0.0, 0.5)
+                    world = world + [{ center: center, radius: 0.2,
+                                       mat: metal(albedo, fuzz) }]
+                } else {
+                    world = world + [{ center: center, radius: 0.2,
+                                       mat: dielectric(1.5) }]
+                }
+            }
+        }
+    }
+    world = world + [{ center: v(0.0, 1.0, 0.0), radius: 1.0,
+                       mat: dielectric(1.5) }]
+    world = world + [{ center: v(-4.0, 1.0, 0.0), radius: 1.0,
+                       mat: lambertian(v(0.4, 0.2, 0.1)) }]
+    world = world + [{ center: v(4.0, 1.0, 0.0), radius: 1.0,
+                       mat: metal(v(0.7, 0.6, 0.5), 0.0) }]
+    return world
+}
+
+# --- render -----------------------------------------------------------------
+def main() {
+    world = build_world()
+    cam = camera(v(13.0, 2.0, 3.0), v(0.0, 0.0, 0.0), v(0.0, 1.0, 0.0),
+                 20.0, aspect_ratio, 0.1, 10.0)
+    height = int(image_width / aspect_ratio)
+    write_file(out_path, "P3\n" + str(image_width) + " " + str(height) + "\n255\n")
+    j = height - 1
+    while j >= 0 {
+        row = ""
+        for i in range(image_width) {
+            col = v(0.0, 0.0, 0.0)
+            for s in range(samples_per_pixel) {
+                pu = (i + rand()) / (image_width - 1)
+                pv = (j + rand()) / (height - 1)
+                r = get_ray(cam, pu, pv)
+                col = vadd(col, ray_color(r, world, max_depth))
+            }
+            cr = int(255.999 * col.x / samples_per_pixel)
+            cg = int(255.999 * col.y / samples_per_pixel)
+            cb = int(255.999 * col.z / samples_per_pixel)
+            row = row + str(cr) + " " + str(cg) + " " + str(cb) + "\n"
+        }
+        append_file(out_path, row)
+        j = j - 1
+    }
+    stats = gc_stats()
+    # GCSTATS print("gc:", stats)
+    print("rendered", image_width, "x", height,
+          "samples", samples_per_pixel, "spheres", len(world))
+}
+
+main()

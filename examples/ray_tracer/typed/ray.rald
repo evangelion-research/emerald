@@ -1,0 +1,9 @@
+# ray.rald — a ray is an affine line: a point and a direction (book ch. 6).
+
+from vec import Pt, Dir, padd, dscale
+
+type Ray = { orig: Pt, dir: Dir }
+
+def ray_at(r: Ray, t: float) -> Pt {
+    return padd(r.orig, dscale(r.dir, t))
+}

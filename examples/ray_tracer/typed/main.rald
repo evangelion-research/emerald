@@ -1,0 +1,30 @@
+# main.rald — entry point (PLAN.md §7, §12).
+#
+# Same default dimensions as one_weekend.rald (120 wide, 4 spp, depth 16)
+# so the two renderers can be compared; bump cfg.image_width to scale.
+# The render is a pure function of seed_state: same seed, byte-identical
+# out.ppm (PLAN.md milestone 0).
+
+from scene import build_world
+from camera import camera
+from render import render
+from vec import pt, dir
+from rng import rng
+
+seed_state = 42
+
+def main() {
+    g = rng(seed_state)
+    wd = build_world(g)
+    cam = camera(pt(13.0, 2.0, 3.0), pt(0.0, 0.0, 0.0), dir(0.0, 1.0, 0.0),
+                 20.0, 16.0 / 9.0, 0.1, 10.0)
+    cfg = { image_width: 120, aspect: 16.0 / 9.0,
+            samples_per_pixel: 4, max_depth: 16 }
+    ppm = render(cam, wd.value, cfg, wd.rng)
+    write_file("out.ppm", ppm)
+    height = int(cfg.image_width / cfg.aspect)
+    print("rendered", cfg.image_width, "x", height,
+          "samples", cfg.samples_per_pixel, "spheres", len(wd.value))
+}
+
+main()

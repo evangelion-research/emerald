@@ -1,0 +1,60 @@
+# hittable.rald — primitives as a tagged sum with never-checked dispatch
+# (PLAN.md §5.3, Encoding 2).
+#
+# The book's `virtual hittable::hit` is an open set; we make the primitive
+# set a finite, closed union and pay for it with a `never` obligation at
+# every dispatch site: add a primitive and the build breaks in exactly the
+# named places (PLAN.md §6 #1).
+#
+# Hit = Contact & { t, mat }: material.rald defines the narrow Contact
+# record, and this module extends it by intersection — the layering that C++
+# gets from a forward declaration (PLAN.md §4).
+
+from vec import Pt, Dir, Unit, ddot, dscale, dlen_sq, psub, unit, uneg
+from ray import Ray, ray_at
+from interval import Interval
+from material import Contact, Material
+
+type Sphere = { kind: "sphere", center: Pt, radius: float, mat: Material }
+type Prim = Sphere
+type Hit = Contact & { t: float, mat: Material }
+
+def _hit_sphere(s: Sphere, r: Ray, t: Interval) -> Hit | None {
+    oc = psub(r.orig, s.center)
+    a = dlen_sq(r.dir)
+    half_b = ddot(oc, r.dir)
+    c = dlen_sq(oc) - s.radius * s.radius
+    disc = half_b * half_b - a * c
+    if disc < 0.0 { return None }
+    sqrtd = sqrt(disc)
+    root = (-half_b - sqrtd) / a
+    # pairwise comparisons only — `t.lo < root < t.hi` would be a bug
+    if root < t.lo or t.hi < root {
+        root = (-half_b + sqrtd) / a
+        if root < t.lo or t.hi < root { return None }
+    }
+    p = ray_at(r, root)
+    outward = dscale(psub(p, s.center), 1.0 / s.radius)
+    front = ddot(r.dir, outward) < 0.0
+    normal = unit(outward)
+    if not front { normal = uneg(normal) }
+    return { p: p, normal: normal, front: front, t: root, mat: s.mat }
+}
+
+def hit_prim(p: Prim, r: Ray, t: Interval) -> Hit | None {
+    if p.kind == "sphere" { return _hit_sphere(p, r, t) }
+    impossible: never = p      # exhaustiveness proof; reopens if Prim grows
+    return None
+}
+
+def hit_world(w: list[Prim], r: Ray, t: Interval) -> Hit | None {
+    best: Hit | None = None
+    for p in w {
+        h = hit_prim(p, r, t)
+        if h != None {
+            if best == None { best = h }
+            else { if h.t < best.t { best = h } }
+        }
+    }
+    return best
+}

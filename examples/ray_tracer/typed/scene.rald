@@ -1,0 +1,54 @@
+# scene.rald — the book's final scene (ch. 13) as data.
+#
+# Every random choice (sphere placement, albedo, fuzz) is an explicit draw
+# that threads the Rng, so the same seed rebuilds the identical world.
+# The world is a list[Prim] — a heterogeneous collection dispatched by the
+# tagged sum in hittable.rald.
+
+from rng import Rng, Draw, next_float, draw_range
+from vec import pt, vlen, psub, dmul, random_vec, random_vec_range
+from color import color, from_dir
+from hittable import Prim
+from material import lambertian, metal, dielectric
+
+def build_world(g: Rng) -> Draw[list[Prim]] {
+    world: list[Prim] = []
+    world = world + [{ kind: "sphere", center: pt(0.0, -1000.0, 0.0),
+                       radius: 1000.0, mat: lambertian(color(0.5, 0.5, 0.5)) }]
+    a = -11
+    while a < 11 {
+        b = -11
+        while b < 11 {
+            d1 = next_float(g); g = d1.rng; choose = d1.value
+            d2 = next_float(g); g = d2.rng; cx = d2.value
+            d3 = next_float(g); g = d3.rng; cz = d3.value
+            center = pt(a + 0.9 * cx, 0.2, b + 0.9 * cz)
+            if vlen(psub(center, pt(4.0, 0.2, 0.0))) > 0.9 {
+                if choose < 0.8 {
+                    d4 = random_vec(g); g = d4.rng
+                    d5 = random_vec(g); g = d5.rng
+                    albedo = from_dir(dmul(d4.value, d5.value))
+                    world = world + [{ kind: "sphere", center: center, radius: 0.2,
+                                       mat: lambertian(albedo) }]
+                } elif choose < 0.95 {
+                    d6 = random_vec_range(g, 0.5, 1.0); g = d6.rng
+                    d7 = draw_range(g, 0.0, 0.5); g = d7.rng
+                    world = world + [{ kind: "sphere", center: center, radius: 0.2,
+                                       mat: metal(from_dir(d6.value), d7.value) }]
+                } else {
+                    world = world + [{ kind: "sphere", center: center, radius: 0.2,
+                                       mat: dielectric(1.5) }]
+                }
+            }
+            b = b + 1
+        }
+        a = a + 1
+    }
+    world = world + [{ kind: "sphere", center: pt(0.0, 1.0, 0.0), radius: 1.0,
+                       mat: dielectric(1.5) }]
+    world = world + [{ kind: "sphere", center: pt(-4.0, 1.0, 0.0), radius: 1.0,
+                       mat: lambertian(color(0.4, 0.2, 0.1)) }]
+    world = world + [{ kind: "sphere", center: pt(4.0, 1.0, 0.0), radius: 1.0,
+                       mat: metal(color(0.7, 0.6, 0.5), 0.0) }]
+    return { value: world, rng: g }
+}

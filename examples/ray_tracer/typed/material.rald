@@ -1,0 +1,72 @@
+# material.rald — materials as a coalgebra (PLAN.md §5.4).
+#
+# A material is a transition kernel: state -> observation + next state.
+# We encode it existentially as a record of closures — the state (albedo,
+# fuzz, index of refraction) is captured in the closure environment and is
+# genuinely hidden, which is the abstraction barrier structural records
+# don't give us (PLAN.md §5.3, Encoding 1).
+#
+# Two deliberate changes from one_weekend.rald:
+#   * the four positional (Ray, Vec3, Vec3, bool) collapse into one Contact
+#     record — naming the fields kills the swap bug;
+#   * scatter returns Scatter | None instead of { ok: bool, ... }: a miss
+#     carries NO fake attenuation or ray, and the caller cannot read them
+#     without narrowing first (PLAN.md §6 #7).
+#
+# Deviation from the PLAN.md §5.4 sketch: scatter threads Rng explicitly
+# (Ray, Contact, Rng) -> Draw[Scatter | None], because sampling needs
+# randomness and there are no effects — the state monad again, and the
+# alternative (global rand()) would break determinism (PLAN.md §5.6).
+
+from vec import Pt, Dir, Unit, dadd, dscale, ddot, dnear_zero, reflect, refract, random_unit_vector, random_in_unit_sphere, unit
+from ray import Ray
+from color import Color, color
+from rng import Rng, Draw, next_float
+from math import reflectance
+
+type Contact = { p: Pt, normal: Unit, front: bool }
+type Scatter = { atten: Color, ray: Ray }
+type Material = { scatter: (Ray, Contact, Rng) -> Draw[Scatter | None] }
+
+def lambertian(albedo: Color) -> Material {
+    def sc(r: Ray, c: Contact, g: Rng) -> Draw[Scatter | None] {
+        d = random_unit_vector(g)
+        dir2 = dadd(c.normal, d.value)
+        if dnear_zero(dir2) { dir2 = c.normal }
+        return { value: { atten: albedo, ray: { orig: c.p, dir: dir2 } }, rng: d.rng }
+    }
+    return { scatter: sc }
+}
+
+def metal(albedo: Color, fuzz: float) -> Material {
+    def sc(r: Ray, c: Contact, g: Rng) -> Draw[Scatter | None] {
+        d = random_in_unit_sphere(g)
+        reflected = reflect(unit(r.dir), c.normal)
+        dir2 = dadd(reflected, dscale(d.value, fuzz))
+        if ddot(dir2, c.normal) > 0.0 {
+            return { value: { atten: albedo, ray: { orig: c.p, dir: dir2 } }, rng: d.rng }
+        }
+        return { value: None, rng: d.rng }
+    }
+    return { scatter: sc }
+}
+
+def dielectric(ir: float) -> Material {
+    def sc(r: Ray, c: Contact, g: Rng) -> Draw[Scatter | None] {
+        d = next_float(g)
+        ratio = ir
+        if c.front { ratio = 1.0 / ir }
+        unit_dir = unit(r.dir)
+        ct = -ddot(unit_dir, c.normal)
+        st = sqrt(1.0 - ct * ct)
+        if ratio * st > 1.0 or reflectance(ct, ratio) > d.value {
+            return { value: { atten: color(1.0, 1.0, 1.0),
+                              ray: { orig: c.p, dir: reflect(unit_dir, c.normal) } },
+                     rng: d.rng }
+        }
+        return { value: { atten: color(1.0, 1.0, 1.0),
+                          ray: { orig: c.p, dir: refract(unit_dir, c.normal, ratio) } },
+                 rng: d.rng }
+    }
+    return { scatter: sc }
+}

@@ -1,0 +1,139 @@
+# vec.rald — the affine space, typed (PLAN.md §5.1, Option C).
+#
+# Points, directions, and unit vectors are all structurally Vec3, but carry
+# a discriminant tag so the checker can tell them apart:
+#
+#   Pt   = { x, y, z, tag: "pt"   }     point in affine space
+#   Dir  = { x, y, z, tag: "dir"  }     free vector (a direction)
+#   Unit = { x, y, z, tag: "dir",
+#            unit: "unit" }             a *unit-length* direction
+#
+# Unit is a subtype of Dir (extra field, width subtyping), so a Unit flows
+# into any operation that wants a Dir; but a plain Dir does NOT satisfy a
+# Unit requirement, so reflect()/refract() — which are only correct on unit
+# input (book ch. 6/10) — reject non-unit vectors at compile time.
+# Pt is not a Dir at all: padd(p, p) is a compile error (PLAN.md §6 #8).
+#
+# The one hole: the brand is forgeable — anyone can write the literal by
+# hand, and nothing enforces ‖unit(v)‖ = 1 at runtime (no assert statement,
+# no refinement types; PLAN.md §6 #9/#10, §10.1).  unit() is the intended
+# producer and normalizes, so the tag is honest.
+
+from math import abs
+from rng import Rng, Draw, next_float
+
+type Vec3 = { x: float, y: float, z: float }
+type Dir  = Vec3 & { tag: "dir" }
+type Unit = Vec3 & { tag: "dir", unit: "unit" }   # Unit <: Dir
+type Pt   = Vec3 & { tag: "pt" }
+
+# --- constructors (never write a vector literal) --------------------------
+
+def pt(x: float, y: float, z: float) -> Pt {
+    return { x: x, y: y, z: z, tag: "pt" }
+}
+
+def dir(x: float, y: float, z: float) -> Dir {
+    return { x: x, y: y, z: z, tag: "dir" }
+}
+
+# normalize and brand.  The runtime invariant ‖result‖ = 1 is not statable;
+# this is the named boundary where the claim is made good (PLAN.md §5.1).
+def unit(v: Vec3) -> Unit {
+    l = vlen(v)
+    return { x: v.x / l, y: v.y / l, z: v.z / l, tag: "dir", unit: "unit" }
+}
+
+# negation preserves unit length, so it can stay inside the brand
+def uneg(a: Unit) -> Unit {
+    return unit(dir(-a.x, -a.y, -a.z))
+}
+
+# --- affine ops: the point/direction distinction is load-bearing ----------
+
+def padd(p: Pt, d: Dir) -> Pt { return pt(p.x + d.x, p.y + d.y, p.z + d.z) }
+def psub(a: Pt, b: Pt) -> Dir { return dir(a.x - b.x, a.y - b.y, a.z - b.z) }
+def psubd(p: Pt, d: Dir) -> Pt { return padd(p, dir(-d.x, -d.y, -d.z)) }
+
+# --- direction ops --------------------------------------------------------
+
+def dadd(a: Dir, b: Dir) -> Dir { return dir(a.x + b.x, a.y + b.y, a.z + b.z) }
+def dsub(a: Dir, b: Dir) -> Dir { return dir(a.x - b.x, a.y - b.y, a.z - b.z) }
+def dmul(a: Dir, b: Dir) -> Dir { return dir(a.x * b.x, a.y * b.y, a.z * b.z) }
+def dscale(a: Dir, t: float) -> Dir { return dir(a.x * t, a.y * t, a.z * t) }
+def dneg(a: Dir) -> Dir { return dir(-a.x, -a.y, -a.z) }
+def ddot(a: Dir, b: Dir) -> float { return a.x * b.x + a.y * b.y + a.z * b.z }
+def dcross(a: Dir, b: Dir) -> Dir {
+    return dir(a.y * b.z - a.z * b.y,
+               a.z * b.x - a.x * b.z,
+               a.x * b.y - a.y * b.x)
+}
+def dlen_sq(a: Dir) -> float { return ddot(a, a) }
+
+# length of any Vec3 (Dir / Unit / Pt all qualify)
+def vlen(v: Vec3) -> float { return sqrt(v.x * v.x + v.y * v.y + v.z * v.z) }
+
+def dnear_zero(a: Dir) -> bool {
+    return abs(a.x) < 1e-8 and abs(a.y) < 1e-8 and abs(a.z) < 1e-8
+}
+
+# reflect and refract are ONLY correct on unit input — hence the Unit brand.
+# Output is a plain Dir (it is unit by construction, but nothing downstream
+# demands the brand, and re-branding would be noise).
+def reflect(v: Unit, n: Unit) -> Dir {
+    return dsub(v, dscale(n, 2.0 * ddot(v, n)))
+}
+
+def refract(uv: Unit, n: Unit, eta_ratio: float) -> Dir {
+    ct = -ddot(uv, n)
+    if ct > 1.0 { ct = 1.0 }
+    rp = dscale(dadd(uv, dscale(n, ct)), eta_ratio)
+    sq = 1.0 - dlen_sq(rp)
+    if sq < 0.0 { sq = 0.0 }
+    return dadd(rp, dscale(n, -sqrt(sq)))
+}
+
+# --- samplers: every draw threads and returns the next state --------------
+
+def random_vec(g: Rng) -> Draw[Dir] {
+    d1 = next_float(g)
+    d2 = next_float(d1.rng)
+    d3 = next_float(d2.rng)
+    return { value: dir(d1.value, d2.value, d3.value), rng: d3.rng }
+}
+
+def random_vec_range(g: Rng, lo: float, hi: float) -> Draw[Dir] {
+    d1 = next_float(g); r1 = lo + (hi - lo) * d1.value
+    d2 = next_float(d1.rng); r2 = lo + (hi - lo) * d2.value
+    d3 = next_float(d2.rng); r3 = lo + (hi - lo) * d3.value
+    return { value: dir(r1, r2, r3), rng: d3.rng }
+}
+
+def random_in_unit_sphere(g: Rng) -> Draw[Dir] {
+    while True {
+        d = random_vec_range(g, -1.0, 1.0)
+        g = d.rng
+        if dlen_sq(d.value) < 1.0 { return { value: d.value, rng: g } }
+    }
+}
+
+def random_unit_vector(g: Rng) -> Draw[Dir] {
+    while True {
+        d = random_vec_range(g, -1.0, 1.0)
+        g = d.rng
+        if dlen_sq(d.value) < 1.0 {
+            return { value: unit(d.value), rng: g }
+        }
+    }
+}
+
+def random_in_unit_disk(g: Rng) -> Draw[Dir] {
+    while True {
+        d1 = next_float(g); x = -1.0 + 2.0 * d1.value
+        d2 = next_float(d1.rng); y = -1.0 + 2.0 * d2.value
+        if x * x + y * y < 1.0 {
+            return { value: dir(x, y, 0.0), rng: d2.rng }
+        }
+        g = d2.rng
+    }
+}
