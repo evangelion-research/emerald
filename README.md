@@ -149,7 +149,7 @@ manager driving it. See [`docs/modules.md`](docs/modules.md).
 |-----------------|---------------------------------------------------------|
 | `include/`      | compiler headers (`.h` files)                           |
 | `src/`          | compiler implementation (`.c` files: `lexer` → `parser` → `module` → `check` → `codegen` → `main`) and `runtime.c` (Value model + GC, compiled into every program) |
-| `docs/`         | grammar, plan, `type-system.md`, `proofs.md`, `gc.md`, `diagnostics.md`, `modules.md` |
+| `docs/`         | grammar, plan, `type-system.md`, `proofs.md`, `gc.md`, `diagnostics.md`, `modules.md`, `research-directions.md` (where the language is headed) |
 | `tests/`        | golden tests per stage + `run_tests.sh`                 |
 | `examples/`     | runnable programs (`shapes.rald` shows structural typing, `proofs.rald` the proof features, `gc_stress.rald` the collector) |
 | `Taskfile.yml`  | build/test/examples/bless/clean                         |
