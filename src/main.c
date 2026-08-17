@@ -82,7 +82,7 @@ static char *default_output(const char *path) {
 
 static void usage(void) {
     fputs("usage: emeraldc [--emit-tokens|--emit-ast|--check|--emit-c]\n"
-          "                [--json] [--keep-c] [-I DIR]... [-o OUT] file.rald\n",
+          "                [--json] [--proof] [--keep-c] [-I DIR]... [-o OUT] file.rald\n",
           stderr);
     exit(2);
 }
@@ -92,6 +92,7 @@ int main(int argc, char **argv) {
     enum { MODE_BUILD, MODE_TOKENS, MODE_AST, MODE_CHECK, MODE_C } mode = MODE_BUILD;
     bool keep_c = false;
     bool json_errors = false;
+    bool proof = false;
     const char **inc = malloc(sizeof(char *) * (size_t)argc);
     size_t ninc = 0;
     if (!inc) return 1;
@@ -102,6 +103,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--check") == 0) mode = MODE_CHECK;
         else if (strcmp(argv[i], "--emit-c") == 0) mode = MODE_C;
         else if (strcmp(argv[i], "--json") == 0) json_errors = true;
+        else if (strcmp(argv[i], "--proof") == 0) proof = true;
         else if (strcmp(argv[i], "--keep-c") == 0) keep_c = true;
         else if (strcmp(argv[i], "-o") == 0) {
             if (++i == argc) usage();
@@ -140,7 +142,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    errors = check_program(prog, file, &diags);
+    errors = check_program(prog, file, &diags, proof);
     if (mode == MODE_CHECK) {
         if (diags.json) diag_render(&diags, stdout);
         else if (errors == 0) printf("ok\n");

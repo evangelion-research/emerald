@@ -113,6 +113,22 @@ etc.
 | `E_TYPE_INTERSECTION`         | `&` on non-record types                  |
 | `E_TYPE_REDEFINE`             | redefining a builtin or function         |
 | `E_TYPE_BREAK` / `E_TYPE_CONTINUE` | control flow outside a loop          |
+| `E_TYPE_PURE_CALL`            | a `pure` function calls an impure builtin or function |
+| `E_TYPE_PURE_NESTED`          | an impure nested `def` inside a `pure` function |
+| `E_TYPE_TERMINATION`          | recursive call does not descend structurally; declare `partial` to opt out |
+| `E_TYPE_CONST`                | assigning to a `const` binding          |
+| `E_TYPE_MATCH`                | `match` not exhaustive (no arm covers every remaining value) |
+| `E_TYPE_BIND`                 | pattern binding already defined in scope / duplicate binding |
+
+### Proof-mode errors (`E_PROOF_*`)
+
+Produced only under `emeraldc --check --proof`. A clean proof-mode check is
+the claim that every value is statically typed and every function is total:
+
+| code                          | meaning                                  |
+|-------------------------------|------------------------------------------|
+| `E_PROOF_ANY`                 | `any` appears (annotation, signature, or inferred value); banned in proof mode |
+| `E_PROOF_PARTIAL`             | a `partial` function is declared; banned in proof mode |
 
 ### Import errors (`E_IMPORT_*`)
 

@@ -17,7 +17,7 @@ from rng import Rng, Draw, next_float
 type Config = { image_width: int, aspect: float,
                 samples_per_pixel: int, max_depth: int }
 
-def ray_color(r: Ray, w: list[Prim], depth: int, g: Rng) -> Draw[Color] {
+def ray_color(r: Ray, w: list[Prim], depth: int, g: Rng) -> Draw[Color] partial {
     if depth <= 0 { return { value: color(0.0, 0.0, 0.0), rng: g } }
     t0 = interval(0.001, 1000000.0)      # 0.001 avoids self-shadowing
     if t0 == None { return { value: color(0.0, 0.0, 0.0), rng: g } }

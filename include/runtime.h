@@ -121,9 +121,10 @@ bool  em_truthy(Value v);
 
 /* indexing / attributes */
 Value em_index(Value seq, Value idx);
-void  em_setindex(Value seq, Value idx, Value v);
-Value em_getattr(Value rec, const char *name);
-void  em_setattr(Value rec, const char *name, Value v);
+void  em_setindex(Value seq, Value idx, Value v);Value em_getattr(Value rec, const char *name);
+void em_setattr(Value rec, const char *name, Value v);
+bool em_is_record(Value v); /* is `v` a record? (for match tests) */
+bool em_rec_has(Value rec, const char *name); /* record has the field? (safe) */
 
 /* `for x in seq`: fetch element i of a list/string; false when exhausted */
 bool rt_iter_get(Value seq, int64_t i, Value *out);
@@ -150,5 +151,13 @@ Value em_call(Value fn, size_t argc, ...);
 Value em_cell(Value v);        /* heap-box a value (mutable capture cell) */
 Value em_cell_get(Value cell);
 void  em_cell_set(Value cell, Value v);
+
+/* higher-order list builtins (fn must be a closure of the right arity) */
+Value em_map(Value fn, Value xs);
+Value em_filter(Value fn, Value xs);
+Value em_reduce(Value fn, Value acc, Value xs);
+
+/* `f >> g`: a closure h(x) = g(f(x)) */
+Value em_compose(Value f, Value g);
 
 #endif

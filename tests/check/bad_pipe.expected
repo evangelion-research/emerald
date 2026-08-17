@@ -1,0 +1,5 @@
+error[E_TYPE_OPERAND]: right side of '|>' must be a unary function, got int
+  --> tests/check/bad_pipe.rald:1:9
+    |
+ 1 | print(5 |> 42)
+   |         ^

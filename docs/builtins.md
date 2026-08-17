@@ -83,9 +83,15 @@ Park–Miller LCG in ~30 lines of Emerald and returns a `Draw[T] = { value: T,
 rng: Rng }` from every draw, making randomness a visible dataflow rather than
 an ambient effect.
 
-That is a language gap, not an oversight: Emerald has no effect system, so
-"this function is a pure function of its inputs" cannot be stated. See
-[`research-directions.md`](research-directions.md) §3 (Track B).
+That is still a gap worth noting: there is no *seeded* RNG builtin. But the
+ambient effect itself is now tracked. Emerald has a `pure` declaration
+(`def f(...) -> T pure`, see [`type-system.md`](type-system.md)); a pure
+function may call only the **pure builtins** — `len`, `range`, `str`, `int`,
+`sqrt`, `tan`, `gc_stats` — and calling `print`, `rand`, `read_file`,
+`write_file`, `append_file`, or `run` from one is a compile error
+(`E_TYPE_PURE_CALL`). So "this function is a pure function of its inputs"
+*is* statable now, which is the precondition for every proof obligation about
+a model (see [`research-directions.md`](research-directions.md) §3, Track B).
 
 ## Files and processes
 
@@ -129,6 +135,44 @@ This is how [`examples/gc_stress.rald`](../examples/gc_stress.rald) and
 `tests/e2e/gc_generational.rald` assert collector behaviour from inside the
 language rather than by reading `/usr/bin/time`. See [`gc.md`](gc.md) for what
 the numbers mean.
+
+---
+
+## Higher-order list functions
+
+These are the one place where a builtin is *generic*: each call site
+instantiates fresh type variables, so they compose with each other and with
+lambdas. They take a function *value* — a lambda, a named `def`, or a
+pipeline — so they are the heart of the functional core (see
+type-system.md).
+
+### `map(f: (T) -> U, xs: list[T]) -> list[U]`
+
+Applies `f` to every element, in order, building a new list.
+
+```
+print(map((x: int) => x * 2, [1, 2, 3]))   # [2, 4, 6]
+```
+
+### `filter(f: (T) -> bool, xs: list[T]) -> list[T]`
+
+Keeps the elements for which `f` is truthy, in order.
+
+```
+print(filter((x: int) => x % 2 == 0, [1, 2, 3, 4]))   # [2, 4]
+```
+
+### `reduce(f: (U, T) -> U, acc: U, xs: list[T]) -> U`
+
+Left fold: `f(f(...f(acc, x0), x1), ...)`. `acc` and the fold result share
+one type variable `U`.
+
+```
+print(reduce((a: int, b: int) => a + b, 0, [1, 2, 3]))   # 6
+```
+
+`map`, `filter`, and `reduce` are pure builtins, so they may be called from
+`pure` functions (when their function argument is pure too).
 
 ---
 

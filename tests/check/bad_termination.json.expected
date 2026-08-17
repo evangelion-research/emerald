@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_TERMINATION",
+    "file": "tests/check/bad_termination.rald",
+    "line": 3,
+    "column": 32,
+    "message": "recursive call to 'loop' does not decrease a recursive-alias argument; declare the function 'partial' to opt out of termination checking",
+    "source_line": "def loop() -> int { return loop() }"
+  }
+]

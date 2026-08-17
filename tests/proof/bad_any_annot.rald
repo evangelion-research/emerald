@@ -1,0 +1,8 @@
+# An explicit `any` annotation is banned in proof mode even when the value
+# flowing into it is concrete.
+def f(x: int) -> int {
+    y: any = x
+    return 5
+}
+
+print(f(1))

@@ -21,7 +21,7 @@ typedef enum {
     TE_FUNC,   /* (A, B) -> C  (function type) */
 } TypeExprKind;
 
-typedef enum { LIT_INT, LIT_STR, LIT_BOOL } LitKind;
+typedef enum { LIT_INT, LIT_STR, LIT_BOOL, LIT_NONE } LitKind;
 
 typedef struct TypeExpr TypeExpr;
 struct TypeExpr {
@@ -56,12 +56,15 @@ typedef enum {
     E_INT, E_FLOAT, E_STR, E_TRUE, E_FALSE, E_NONE,
     E_NAME, E_LIST, E_REC,
     E_BINOP, E_UNOP, E_CALL, E_INDEX, E_ATTR,
+    E_LAMBDA,   /* (a: int, b) => body: anonymous function value */
 } ExprKind;
 
 typedef enum {
     B_ADD, B_SUB, B_MUL, B_DIV, B_MOD,
     B_EQ, B_NE, B_LT, B_LE, B_GT, B_GE,
     B_AND, B_OR,
+    B_PIPE,     /* x |> f  ==  f(x) */
+    B_COMPOSE,  /* f >> g  ==  x -> g(f(x)) */
 } BinOp;
 
 typedef enum { U_NEG, U_NOT } UnOp;
@@ -87,7 +90,33 @@ struct Expr {
         struct { Expr *fn; Expr **args; size_t count; } call; /* fn is E_NAME */
         struct { Expr *seq, *idx; } index;
         struct { Expr *obj; char *name; } attr;
+        struct {                            /* E_LAMBDA */
+            char **params;
+            TypeExpr **param_types;          /* entries may be NULL (=any) */
+            size_t param_count;
+            Expr *body;                      /* single-expression body */
+        } lam;
     } as;
+};
+
+/* --- patterns (match statement) ----------------------------------------- */
+
+typedef enum {
+    P_WILD,   /* _ */
+    P_BIND,   /* name */
+    P_LIT,    /* 42, "red", True, None */
+    P_REC,    /* { kind: "circle", r } */
+} PatKind;
+
+typedef struct Pat Pat;
+struct Pat {
+    PatKind kind;
+    int line;
+    int col;
+    char *name;   /* P_REC: field name; otherwise unused */
+    char *bind;   /* P_BIND: the bound variable name */
+    struct { LitKind kind; int64_t ival; char *sval; } lit; /* P_LIT */
+    struct { Pat **items; size_t count; } rec;              /* P_REC: field sub-patterns */
 };
 
 /* --- statements --------------------------------------------------------- */
@@ -96,6 +125,7 @@ typedef enum {
     S_EXPR, S_ASSIGN, S_IF, S_WHILE, S_FOR,
     S_RETURN, S_BREAK, S_CONTINUE, S_PASS,
     S_BLOCK, S_FUNC, S_TYPEDEF, S_IMPORT,
+    S_MATCH,  /* match e { pat -> { ... } } */
 } StmtKind;
 
 /* one entry of `from <path> import a, b as c` */
@@ -118,6 +148,7 @@ struct Stmt {
         struct {                                      /* S_ASSIGN */
             Expr *target;      /* E_NAME | E_INDEX | E_ATTR */
             TypeExpr *ann;     /* optional, E_NAME targets only */
+            bool is_const;     /* `const x = v` / `const x: T = v` */
             Expr *value;
         } assign;
         struct {                                      /* S_IF */
@@ -129,6 +160,12 @@ struct Stmt {
         } ifs;
         struct { Expr *cond; Block body; } wh;        /* S_WHILE */
         struct { char *var; Expr *seq; Block body; } fr; /* S_FOR */
+        struct {                                      /* S_MATCH */
+            Expr *subject;
+            Pat **pats;
+            Block *blocks;     /* same count as pats; blocks[i] matches pats[i] */
+            size_t count;
+        } mtch;
         Expr *ret;                                    /* S_RETURN, may be NULL */
         Block block;                                  /* S_BLOCK */
         struct {                                      /* S_FUNC */
@@ -140,6 +177,8 @@ struct Stmt {
             TypeExpr **param_types; /* entries may be NULL (=any) */
             size_t param_count;
             TypeExpr *ret_type;     /* NULL = any */
+            bool pure;              /* `def f(...) -> T pure`: may only call pure code */
+            bool partial;           /* `def f(...) -> T partial`: opts out of termination checking */
             Block body;
         } func;
         struct {                                      /* S_TYPEDEF */

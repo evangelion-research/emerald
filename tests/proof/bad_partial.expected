@@ -1,0 +1,5 @@
+error[E_PROOF_PARTIAL]: 'partial' functions are banned in proof mode: 'fib' must terminate structurally
+  --> tests/proof/bad_partial.rald:2:1
+    |
+ 2 | def fib(n: int) -> int partial { return 0 }
+   | ^

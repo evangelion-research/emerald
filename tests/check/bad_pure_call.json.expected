@@ -1,0 +1,22 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_PURE_CALL",
+    "file": "tests/check/bad_pure_call.rald",
+    "line": 5,
+    "column": 10,
+    "message": "pure function calls impure builtin 'print'",
+    "source_line": "    print(s)              # impure builtin"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_PURE_CALL",
+    "file": "tests/check/bad_pure_call.rald",
+    "line": 6,
+    "column": 17,
+    "message": "pure function calls impure function 'shout'",
+    "source_line": "    return shout(s)       # impure user function"
+  }
+]

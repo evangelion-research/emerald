@@ -196,7 +196,8 @@ def get_ray(cam: Camera, su: float, sv: float) -> Ray {
 }
 
 # --- ray color (recursive, capped at max_depth) -----------------------------
-def ray_color(r: Ray, world: list[Sphere], depth: int) -> Color {
+# recursion is on `depth` (an int), not structural, so it is `partial`
+def ray_color(r: Ray, world: list[Sphere], depth: int) -> Color partial {
     if depth <= 0 { return v(0.0, 0.0, 0.0) }
     rec = hit_world(world, r, 0.001, 1000000.0)
     if rec == None {

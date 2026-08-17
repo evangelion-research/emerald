@@ -132,7 +132,7 @@ Requires a C compiler and [go-task](https://taskfile.dev) (`brew install go-task
 
 ```sh
 task                 # build bin/emeraldc
-task test            # 71 golden tests across 5 stage suites
+task test            # 87 golden tests across 6 stage suites (incl. proof mode)
 task examples        # compile & run every example
 
 bin/emeraldc examples/fib.rald && ./examples/fib

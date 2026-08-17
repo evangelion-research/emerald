@@ -1,0 +1,12 @@
+# `--proof`: every value has a static type (no `any`), every function is
+# total (no `partial`), and purity is enforced where declared.
+type Nat = None | { v: int, next: Nat }
+
+def sum_nats(n: Nat) -> int pure {
+    if n == None { return 0 }
+    return n.v + sum_nats(n.next)
+}
+
+def double(x: int) -> int pure { return x * 2 }
+
+print(sum_nats({ v: 1, next: { v: 2, next: None } }), double(21))

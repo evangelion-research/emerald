@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARG",
+    "file": "tests/check/bad_compose.rald",
+    "line": 3,
+    "column": 9,
+    "message": "composed functions do not chain: int feeds (str) -> int, which expects str",
+    "expected": "str",
+    "actual": "int",
+    "source_line": "print(f >> g)"
+  }
+]

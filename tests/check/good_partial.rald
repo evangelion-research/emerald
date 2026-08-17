@@ -1,0 +1,8 @@
+# `partial` opts out of termination checking: recursion on an int counter
+# is fine when the function declares it may not terminate structurally.
+def countdown(n: int) -> int partial {
+    if n <= 0 { return 0 }
+    return countdown(n - 1)
+}
+
+print(countdown(3))

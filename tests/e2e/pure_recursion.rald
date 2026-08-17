@@ -1,0 +1,15 @@
+# Pure functions, structural recursion on a recursive alias (total), and an
+# explicit `partial` recursion on an int counter — all together, end to end.
+type Nat = None | { v: int, next: Nat }
+
+def sum_nats(n: Nat) -> int pure {
+    if n == None { return 0 }
+    return n.v + sum_nats(n.next)
+}
+
+def fib(n: int) -> int pure partial {
+    if n < 2 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+
+print(sum_nats({ v: 1, next: { v: 2, next: None } }), fib(10))

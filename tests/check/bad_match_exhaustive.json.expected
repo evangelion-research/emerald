@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_MATCH",
+    "file": "tests/check/bad_match_exhaustive.rald",
+    "line": 1,
+    "column": 1,
+    "message": "match is not exhaustive: add a catch-all arm ('_')",
+    "source_line": "match 3 {"
+  }
+]

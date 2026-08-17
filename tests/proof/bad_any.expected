@@ -1,0 +1,10 @@
+error[E_PROOF_ANY]: parameter 'x' has no type annotation ('any' is banned in proof mode)
+  --> tests/proof/bad_any.rald:3:1
+    |
+ 3 | def f(x) -> int { return x }
+   | ^
+error[E_PROOF_ANY]: returning a value of type 'any', which is banned in proof mode
+  --> tests/proof/bad_any.rald:3:19
+    |
+ 3 | def f(x) -> int { return x }
+   |                   ^

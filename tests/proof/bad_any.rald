@@ -1,0 +1,5 @@
+# In proof mode an unannotated parameter is `any`, which is banned — both
+# at the signature and where the value is used.
+def f(x) -> int { return x }
+
+print(f(1))

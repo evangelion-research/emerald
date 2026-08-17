@@ -1,0 +1,32 @@
+# Functional core: consts, lambdas, higher-order builtins, pipe, compose, match.
+const xs = [1, 2, 3, 4, 5]
+const double = (x: int) => x * 2
+
+type Shape = { kind: "circle", r: float } | { kind: "square", side: float }
+
+def area(s: Shape) -> float {
+    match s {
+        { kind: "circle", r } -> { return 3.14159 * r * r }
+        { kind: "square", side } -> { return side * side }
+    }
+}
+
+def classify(n: int) -> str {
+    match n {
+        0 -> { return "zero" }
+        x -> {
+            if x > 0 { return "pos" }
+            return "neg"
+        }
+    }
+}
+
+print(map(double, xs))
+print(map((x: int) => x * x, xs))
+print(filter((x: int) => x % 2 == 0, xs))
+print(reduce((a: int, b: int) => a + b, 0, xs))
+print(5 |> double)
+const double_inc = double >> (x: int) => x + 1
+print(double_inc(3))
+print(area({ kind: "circle", r: 2.0 }))
+print(classify(7))

@@ -81,7 +81,7 @@ def hit_world(world: list[Sphere], r: Ray) -> Hit | None {
     return best
 }
 
-def ray_color(r: Ray, world: list[Sphere], depth: int) -> Color {
+def ray_color(r: Ray, world: list[Sphere], depth: int) -> Color partial {
     if depth <= 0 { return v(0.0, 0.0, 0.0) }
     rec = hit_world(world, r)
     if rec == None {

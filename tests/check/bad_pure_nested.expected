@@ -1,0 +1,5 @@
+error[E_TYPE_PURE_NESTED]: nested function 'helper' inside a pure function must be declared pure
+  --> tests/check/bad_pure_nested.rald:4:5
+    |
+ 4 |     def helper() -> None { print("x") }
+   |     ^

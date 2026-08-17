@@ -1,0 +1,3 @@
+const f = (x: int) => x + 1
+const g = (s: str) => len(s)
+print(f >> g)

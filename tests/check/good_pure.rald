@@ -1,0 +1,10 @@
+# `pure` functions may only call pure functions and pure builtins.
+def double(x: int) -> int pure { return x * 2 }
+
+def sum_to(n: int) -> int pure {
+    total = 0
+    for i in range(n) { total = total + double(i) }
+    return total
+}
+
+print(sum_to(5))

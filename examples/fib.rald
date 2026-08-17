@@ -1,4 +1,4 @@
-def fib(n: int) -> int {
+def fib(n: int) -> int partial {
     if n < 2 { return n }
     return fib(n - 1) + fib(n - 2)
 }

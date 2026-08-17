@@ -4,7 +4,7 @@ How `emeraldc` is built: ~7,000 lines of C11, warning-clean under
 `-Wall -Wextra`, no dependencies beyond libc and a C compiler to shell out to.
 
 Everything described here is implemented and covered by `task test`
-(71 golden tests across five suites).
+(87 golden tests across six suites).
 
 ## The pipeline
 
@@ -80,9 +80,10 @@ find them precisely — see [`gc.md`](gc.md).
 
 ```
 tests/lexer/    3 suites   token streams              (--emit-tokens)
-tests/parser/   4 suites   AST dumps                  (--emit-ast)
-tests/check/   12 suites   diagnostics, human + JSON  (--check, --check --json)
-tests/e2e/     17 suites   compile, run, compare stdout
+tests/parser/   5 suites   AST dumps                  (--emit-ast)
+tests/check/   17 suites   diagnostics, human + JSON  (--check, --check --json)
+tests/proof/    4 suites   proof mode                 (--check --proof)
+tests/e2e/     18 suites   compile, run, compare stdout
 tests/imports/ 23 suites   module resolution and linking errors
 ```
 
@@ -100,8 +101,8 @@ language.
 
 ```
 task              # build bin/emeraldc
-task test         # every suite (71 golden tests) + runtime-check
-task test:lexer / test:parser / test:check / test:e2e / test:imports
+task test         # every suite (87 golden tests) + runtime-check
+task test:lexer / test:parser / test:check / test:proof / test:e2e / test:imports
 task examples     # compile & run examples/*.rald and examples/*/main.rald
 task bless        # regenerate golden files (review the diff!)
 task clean
@@ -119,6 +120,7 @@ emeraldc [-I <dir>]... [--json] [-o OUT] <entry>.rald
 emeraldc examples/fib.rald && ./examples/fib
 emeraldc -o out prog.rald        # choose output path
 emeraldc --check prog.rald       # typecheck only
+emeraldc --check --proof prog.rald  # proof mode: ban `any` and `partial`
 emeraldc --keep-c prog.rald      # keep prog.gen.c for inspection
 emeraldc --emit-c prog.rald      # print generated C to stdout
 ```

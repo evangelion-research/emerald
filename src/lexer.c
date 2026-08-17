@@ -19,7 +19,8 @@ static const struct { const char *word; TokKind kind; } keywords[] = {
     {"and", TK_AND}, {"or", TK_OR}, {"not", TK_NOT},
     {"True", TK_TRUE}, {"False", TK_FALSE}, {"None", TK_NONE},
     {"break", TK_BREAK}, {"continue", TK_CONTINUE}, {"pass", TK_PASS},
-    {"type", TK_TYPE},
+    {"type", TK_TYPE}, {"const", TK_CONST}, {"match", TK_MATCH},
+    {"pure", TK_PURE}, {"partial", TK_PARTIAL},
     {"import", TK_IMPORT}, {"from", TK_FROM}, {"as", TK_AS},
 };
 
@@ -111,7 +112,9 @@ Token lexer_next(Lexer *lx) {
     case '.': return make(lx, TK_DOT, start, start_col);
     case ':': return make(lx, TK_COLON, start, start_col);
     case ';': return make(lx, TK_SEMI, start, start_col);
-    case '|': return make(lx, TK_PIPE, start, start_col);
+    case '|':
+        if (*lx->cur == '>') { lx->col++; lx->cur++; return make(lx, TK_PIPE_GT, start, start_col); }
+        return make(lx, TK_PIPE, start, start_col);
     case '&': return make(lx, TK_AMP, start, start_col);
     case '+': return make(lx, TK_PLUS, start, start_col);
     case '*': return make(lx, TK_STAR, start, start_col);
@@ -122,6 +125,7 @@ Token lexer_next(Lexer *lx) {
         return make(lx, TK_MINUS, start, start_col);
     case '=':
         if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_EQ, start, start_col); }
+        if (*lx->cur == '>') { lx->col++; lx->cur++; return make(lx, TK_FAT_ARROW, start, start_col); }
         return make(lx, TK_ASSIGN, start, start_col);
     case '!':
         if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_NE, start, start_col); }
@@ -130,6 +134,7 @@ Token lexer_next(Lexer *lx) {
         if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_LE, start, start_col); }
         return make(lx, TK_LT, start, start_col);
     case '>':
+        if (*lx->cur == '>') { lx->col++; lx->cur++; return make(lx, TK_GTGT, start, start_col); }
         if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_GE, start, start_col); }
         return make(lx, TK_GT, start, start_col);
     }
@@ -146,7 +151,9 @@ const char *token_kind_name(TokKind k) {
         [TK_RETURN] = "RETURN", [TK_AND] = "AND", [TK_OR] = "OR",
         [TK_NOT] = "NOT", [TK_TRUE] = "TRUE", [TK_FALSE] = "FALSE",
         [TK_NONE] = "NONE", [TK_BREAK] = "BREAK", [TK_CONTINUE] = "CONTINUE",
-        [TK_PASS] = "PASS", [TK_TYPE] = "TYPE",
+        [TK_PASS] = "PASS", [TK_TYPE] = "TYPE", [TK_CONST] = "CONST",
+        [TK_MATCH] = "MATCH",
+        [TK_PURE] = "PURE", [TK_PARTIAL] = "PARTIAL",
         [TK_IMPORT] = "IMPORT", [TK_FROM] = "FROM", [TK_AS] = "AS",
         [TK_LBRACE] = "LBRACE", [TK_RBRACE] = "RBRACE",
         [TK_LPAREN] = "LPAREN", [TK_RPAREN] = "RPAREN",
@@ -157,7 +164,8 @@ const char *token_kind_name(TokKind k) {
         [TK_PLUS] = "PLUS", [TK_MINUS] = "MINUS", [TK_STAR] = "STAR",
         [TK_SLASH] = "SLASH", [TK_PERCENT] = "PERCENT",
         [TK_EQ] = "EQ", [TK_NE] = "NE", [TK_LT] = "LT", [TK_LE] = "LE",
-        [TK_GT] = "GT", [TK_GE] = "GE",
+        [TK_GT] = "GT", [TK_GE] = "GE", [TK_FAT_ARROW] = "FAT_ARROW",
+        [TK_PIPE_GT] = "PIPE_GT", [TK_GTGT] = "GTGT",
     };
     return names[k] ? names[k] : "?";
 }

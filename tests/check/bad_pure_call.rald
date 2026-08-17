@@ -1,0 +1,9 @@
+# A pure function cannot call impure builtins (print, rand, file IO, ...).
+def shout(s: str) -> str { return s + "!" }
+
+def bad(s: str) -> str pure {
+    print(s)              # impure builtin
+    return shout(s)       # impure user function
+}
+
+print(bad("hi"))

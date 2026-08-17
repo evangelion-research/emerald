@@ -1,0 +1,4 @@
+# `partial` functions are banned in proof mode: a proof must be total.
+def fib(n: int) -> int partial { return 0 }
+
+print(fib(1))

@@ -37,7 +37,7 @@ tasks:
       - '{{.CC}} {{.CFLAGS}} -c src/runtime.c -o /dev/null -Iinclude'
 
   test:
-    desc: Run all stage test suites (lexer, parser, check, e2e, imports)
+    desc: Run all stage test suites (lexer, parser, check, json, proof, e2e, imports)
     deps: [build]
     cmds:
       - task: runtime-check
@@ -60,6 +60,12 @@ tasks:
     deps: [build]
     cmds:
       - ./tests/run_tests.sh check
+
+  test:proof:
+    desc: Golden tests for proof mode (--check --proof)
+    deps: [build]
+    cmds:
+      - ./tests/run_tests.sh proof
 
   test:e2e:
     desc: Compile-and-run golden tests (full pipeline through cc)
@@ -96,9 +102,10 @@ tasks:
       - for f in tests/parser/*.rald; do ./bin/emeraldc --emit-ast "$f" > "${f%.rald}.expected"; done
       - for f in tests/check/*.rald; do ./bin/emeraldc --check "$f" > "${f%.rald}.expected" 2>&1 || true; done
       - for f in tests/check/*.rald; do ./bin/emeraldc --check --json "$f" > "${f%.rald}.json.expected" 2>&1 || true; done
+      - for f in tests/proof/*.rald; do ./bin/emeraldc --check --proof "$f" > "${f%.rald}.expected" 2>&1 || true; done
       - |
         for f in tests/e2e/*.rald; do
-          ./bin/emeraldc -o "${f%.rald}" "$f" && "${f%.rald}" > "${f%.rald}.expected"
+          ./bin/emeraldc -o "${f%.rald}" "$f" && "${f%.rald}" > "${f%.rald}.expected" 2>&1 || true
           rm -f "${f%.rald}"
         done
       - |

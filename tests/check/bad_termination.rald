@@ -1,0 +1,5 @@
+# Functions are total by default: a recursive call must descend through a
+# recursive alias. `loop` recurses with no argument, so it must be `partial`.
+def loop() -> int { return loop() }
+
+print(loop())

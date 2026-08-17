@@ -1,0 +1,5 @@
+error[E_TYPE_MATCH]: match is not exhaustive: add a catch-all arm ('_')
+  --> tests/check/bad_match_exhaustive.rald:1:1
+    |
+ 1 | match 3 {
+   | ^

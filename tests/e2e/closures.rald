@@ -21,7 +21,7 @@ print(c(1), c(2), c(3))
 
 # recursion through a nested function
 def make_fact() -> (int) -> int {
-    def fact(n: int) -> int {
+    def fact(n: int) -> int partial {
         if n <= 1 { return 1 }
         return n * fact(n - 1)
     }

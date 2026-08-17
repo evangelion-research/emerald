@@ -26,9 +26,12 @@ type layer is structural rather than dependent, so the dictionary is:
 A function that typechecks is a proof of its signature: from *any* values of
 the parameter types it always produces a value of the return type.
 
-The correspondence is not exact. Emerald has no termination checker, so a
-deliberately non-terminating function inhabits any return type — including
-`never`:
+The correspondence is not exact. Emerald now checks **termination by
+structural descent** (see below), so a *recursive* function cannot inhabit
+`never` by diverging — the checker rejects recursion that does not descend
+through a recursive alias unless the function is explicitly `partial`, and
+`partial` functions are banned in proof mode. Two escapes remain outside
+proof mode: an infinite `while True` loop, and a `partial` function:
 
 ```
 def loop() -> never { while True { pass } }   # accepted: it never finishes
@@ -42,9 +45,39 @@ must return on every path, and the checker enforces it:
   cheat() can finish without returning a value, but is declared to return never
 ```
 
-So the only way to inhabit `never` is to diverge. Treat proofs as claims about
-*well-formed data*, checked structurally, not as constructive proofs in a
-consistent logic.
+So the only way to inhabit `never` is to diverge (or to declare `partial`,
+which proof mode then rejects). Treat proofs as claims about *well-formed
+data*, checked structurally, not as constructive proofs in a consistent
+logic.
+
+## Totality, purity, and proof mode
+
+Three things make a proof claim *honest* rather than merely well-typed:
+
+- **Termination.** Functions are total by default: every recursive call must
+descend structurally — an argument that is a projection chain from a
+parameter of recursive-alias type (`n.succ`, `xs.tail`), staying inside the
+same inductive structure. A function whose recursion cannot be shown to
+descend must declare `partial`, which marks it as *not* a proof. Mutual
+recursion and descent through `list` elements are not recognized yet, so
+those functions must declare `partial` too.
+
+- **Purity.** `def forward(x: T) -> U pure` promises the function calls
+nothing impure: no `print`, no `rand`, no file or process IO, no impure
+helper (a nested `def` inside a pure function must be pure). Every
+commuting-square argument about a model needs "this is a pure function of
+its inputs" to be statable — now it is.
+
+- **`--proof`.** `emeraldc --check --proof f.rald` bans `any` and `partial`.
+Because `any` is assignable in both directions, a proof that mentions it
+proves nothing; proof mode makes that a compile error at every `any` that
+surfaces — unannotated parameters and returns, explicit `any` annotations,
+and any expression whose inferred type is `any`. A clean `--check --proof`
+run is a claim you can defend: every value is statically typed, every
+function terminates structurally, and purity is enforced where declared.
+(The element type of an empty `[]` literal is still `any` underneath, so
+proof mode is a strict first cut rather than a complete soundness
+guarantee.)
 
 ## Proof by exhaustive case analysis
 
@@ -120,7 +153,8 @@ def swap[A, B](p: Pair[A, B]) -> Pair[B, A] {
 `return { first: 5, second: 5 }` would be rejected: `5` is not an `A`. The
 one escape is `any`, which is assignable in both directions and silently
 discharges any obligation. **A proof that mentions `any` proves nothing** —
-keep annotations complete in code you intend as a proof.
+keep annotations complete in code you intend as a proof, or run
+`--check --proof`, which makes `any` a compile error.
 
 ## Proof of impossibility
 
@@ -194,9 +228,12 @@ These are real limits, not omissions to work around:
 - **Higher-order proofs are limited.** Functions are values and closures
   exist, so a lemma can be passed as an argument; there is still no way to
   state a proposition *about* a function's behavior.
-- **No termination checking.** An intentionally diverging function inhabits
-  `never`, so the logic is not consistent the way a proof assistant's is.
-  Every terminating path is checked; the infinite loop is the one escape.
+- **Termination is partial.** Recursive calls must descend structurally
+  through a recursive alias, but the check does not cover `while True`
+  loops, mutual recursion, or descent through list elements — those need
+  `partial`, and outside proof mode a diverging function can still inhabit
+  `never`. The logic is therefore not consistent the way a proof
+  assistant's is.
 - **Unsound covariant lists.** `list[int]` is assignable to
   `list[int | None]`, and mutating through the alias defeats the element-type
   claim. Do not build a proof on the element type of a shared list.

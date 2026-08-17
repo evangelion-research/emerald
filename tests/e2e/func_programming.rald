@@ -1,0 +1,46 @@
+# The functional core, end to end: consts, lambdas, map/filter/reduce,
+# pipe/compose, pattern matching, and tail recursion (constant stack).
+
+const double = (x: int) => x * 2
+const is_even = (x: int) => x % 2 == 0
+
+xs = [1, 2, 3, 4, 5]
+print(map(double, xs))                        # [2, 4, 6, 8, 10]
+print(filter(is_even, xs))                    # [2, 4]
+print(reduce((a: int, b: int) => a + b, 0, xs))  # 15
+print(xs |> (ys: list[int]) => map((x: int) => x * 10, ys))  # [10, 20, 30, 40, 50]
+print(7 |> double |> (x: int) => x + 1)       # 15
+print(3 |> double >> (x: int) => x + 1)       # 7
+
+# closures capturing and mutating an enclosing local
+def make_counter() -> () -> int {
+    c = 0
+    def bump() -> int {
+        c = c + 1
+        return c
+    }
+    return bump
+}
+counter = make_counter()
+print(counter(), counter(), counter())        # 1 2 3
+
+# pattern matching on tagged records
+type Shape = { kind: "circle", r: float } | { kind: "square", side: float }
+def area(s: Shape) -> float {
+    match s {
+        { kind: "circle", r } -> { return 3.14159 * r * r }
+        { kind: "square", side } -> { return side * side }
+    }
+}
+print(area({ kind: "circle", r: 2.0 }))       # 12.56636
+print(area({ kind: "square", side: 3.0 }))    # 9.0
+
+# tail recursion: 10 million iterations on a constant stack
+def sum_to(n: int, acc: int) -> int partial {
+    if n == 0 {
+        return acc
+    } else {
+        return sum_to(n - 1, acc + n)
+    }
+}
+print(sum_to(10000000, 0))                    # 50000005000000

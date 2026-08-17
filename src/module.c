@@ -462,8 +462,36 @@ static void rw_expr(RW *rw, Expr *e, const RScope *sc) {
         rw_expr(rw, e->as.index.seq, sc);
         rw_expr(rw, e->as.index.idx, sc);
         break;
+    case E_LAMBDA: {
+        /* lambda parameters bind like function parameters */
+        RScope lsc;
+        memset(&lsc, 0, sizeof(lsc));
+        lsc.parent = sc;
+        for (size_t i = 0; i < e->as.lam.param_count; i++)
+            names_add(&lsc.bound, e->as.lam.params[i]);
+        for (size_t i = 0; i < e->as.lam.param_count; i++)
+            rw_type(rw, e->as.lam.param_types[i], &lsc);
+        rw_expr(rw, e->as.lam.body, &lsc);
+        free(lsc.bound.items);
+        break;
+    }
     default:
         break; /* literals carry no names */
+    }
+}
+
+/* every name a pattern binds (recursively through record patterns) */
+static void pat_binds(const Pat *p, Names *out) {
+    switch (p->kind) {
+    case P_BIND:
+        names_add(out, p->bind);
+        break;
+    case P_REC:
+        for (size_t i = 0; i < p->rec.count; i++)
+            pat_binds(p->rec.items[i], out);
+        break;
+    default:
+        break;
     }
 }
 
@@ -541,6 +569,18 @@ static void rw_stmt(RW *rw, Stmt *s, const RScope *sc) {
     }
     case S_RETURN: rw_expr(rw, s->as.ret, sc); break;
     case S_BLOCK:  rw_block(rw, &s->as.block, sc); break;
+    case S_MATCH:
+        rw_expr(rw, s->as.mtch.subject, sc);
+        for (size_t i = 0; i < s->as.mtch.count; i++) {
+            /* each arm's bindings shadow, like a function's parameters */
+            RScope asc;
+            memset(&asc, 0, sizeof(asc));
+            asc.parent = sc;
+            pat_binds(s->as.mtch.pats[i], &asc.bound);
+            rw_block(rw, &s->as.mtch.blocks[i], &asc);
+            free(asc.bound.items);
+        }
+        break;
     case S_FUNC:   rw_func(rw, s, sc); break;
     case S_TYPEDEF: {
         size_t mark = rw->tvars.count;
@@ -575,6 +615,10 @@ static void collect_nested_defs(const Block *b, Names *out) {
         case S_WHILE: collect_nested_defs(&s->as.wh.body, out); break;
         case S_FOR:   collect_nested_defs(&s->as.fr.body, out); break;
         case S_BLOCK: collect_nested_defs(&s->as.block, out); break;
+        case S_MATCH:
+            for (size_t j = 0; j < s->as.mtch.count; j++)
+                collect_nested_defs(&s->as.mtch.blocks[j], out);
+            break;
         default: break;
         }
     }

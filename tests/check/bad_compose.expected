@@ -1,0 +1,7 @@
+error[E_TYPE_ARG]: composed functions do not chain: int feeds (str) -> int, which expects str
+  --> tests/check/bad_compose.rald:3:9
+    |
+ 3 | print(f >> g)
+   |         ^
+   = expected: str
+   = actual:   int

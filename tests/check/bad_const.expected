@@ -1,0 +1,5 @@
+error[E_TYPE_CONST]: cannot assign to const 'LIMIT'
+  --> tests/check/bad_const.rald:2:1
+    |
+ 2 | LIMIT = 20
+   | ^

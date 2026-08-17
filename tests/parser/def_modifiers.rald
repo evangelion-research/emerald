@@ -1,0 +1,7 @@
+def pure_fn(x: int) -> int pure { return x }
+def partial_fn(n: int) -> int partial {
+    if n <= 0 { return 0 }
+    return partial_fn(n - 1)
+}
+def both(n: int) -> int pure partial { return n }
+print(pure_fn(1), partial_fn(2), both(3))

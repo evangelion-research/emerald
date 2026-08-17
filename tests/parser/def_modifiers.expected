@@ -1,0 +1,17 @@
+(program
+  (def pure_fn (x:int) -> int pure
+    (return x)
+  )
+  (def partial_fn (n:int) -> int partial
+    (if
+      (arm (<= n 0)
+        (return 0)
+      )
+    )
+    (return (call partial_fn (- n 1)))
+  )
+  (def both (n:int) -> int pure partial
+    (return n)
+  )
+  (expr (call print (call pure_fn 1) (call partial_fn 2) (call both 3)))
+)

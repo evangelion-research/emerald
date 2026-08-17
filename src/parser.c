@@ -59,6 +59,22 @@ static bool match(Parser *p, TokKind k) {
     return true;
 }
 
+/* snapshot/restore the parser+lexer position, for the one ambiguous case in
+ * the grammar: `(x) => ...` is a lambda but `(x) + 1` is a grouping. */
+typedef struct { Token cur; Lexer lx; } PSave;
+
+static PSave psave(Parser *p) {
+    PSave s;
+    s.cur = p->cur;
+    s.lx = p->lx;
+    return s;
+}
+
+static void prestore(Parser *p, PSave s) {
+    p->cur = s.cur;
+    p->lx = s.lx;
+}
+
 static Token expect(Parser *p, TokKind k, const char *what) {
     if (!check(p, k))
         perror_at(p, p->cur.line, p->cur.col, "expected %s, got '%.*s'", what,
@@ -309,6 +325,28 @@ static TypeExpr *parse_type(Parser *p) {
 
 static Expr *parse_expr(Parser *p);
 
+/* `(a: int, b) => body`: the caller has already consumed `(`. Returns NULL
+ * when the tokens are not a lambda, so the caller can backtrack. */
+static Expr *try_parse_lambda(Parser *p, int line, int col) {
+    PtrVec params = {0}, ptypes = {0};
+    for (;;) {
+        if (!check(p, TK_IDENT)) return NULL;
+        Token pn = p->cur;
+        advance(p);
+        vec_push(&params, tok_text(pn));
+        vec_push(&ptypes, match(p, TK_COLON) ? parse_type(p) : NULL);
+        if (!match(p, TK_COMMA)) break;
+    }
+    if (!match(p, TK_RPAREN)) return NULL;
+    if (!match(p, TK_FAT_ARROW)) return NULL;
+    Expr *e = new_expr(E_LAMBDA, line, col);
+    e->as.lam.params = (char **)params.items;
+    e->as.lam.param_types = (TypeExpr **)ptypes.items;
+    e->as.lam.param_count = params.count;
+    e->as.lam.body = parse_expr(p);
+    return e;
+}
+
 static Expr *parse_primary(Parser *p) {
     int line = p->cur.line, col = p->cur.col;
     switch (p->cur.kind) {
@@ -340,6 +378,16 @@ static Expr *parse_primary(Parser *p) {
         return e;
     }
     case TK_LPAREN: {
+        /* `(a: int, b) => body` is a lambda; `(expr)` is a grouping. The two
+         * only overlap on `(x) => ...` vs `(x) + 1`, which we resolve by
+         * tentatively parsing a lambda and backtracking if there is no `=>`. */
+        PSave save = psave(p);
+        advance(p);
+        if (check(p, TK_IDENT)) {
+            Expr *lam = try_parse_lambda(p, line, col);
+            if (lam) return lam;
+        }
+        prestore(p, save);
         advance(p);
         bool saved = p->no_rec;
         p->no_rec = false; /* parens re-allow record literals */
@@ -519,7 +567,7 @@ static Expr *parse_and(Parser *p) {
     return e;
 }
 
-static Expr *parse_expr(Parser *p) {
+static Expr *parse_or(Parser *p) {
     Expr *e = parse_and(p);
     while (check(p, TK_OR)) {
         int line = p->cur.line, col = p->cur.col;
@@ -527,6 +575,32 @@ static Expr *parse_expr(Parser *p) {
         e = bin(p, B_OR, line, col, e, parse_and(p));
     }
     return e;
+}
+
+/* `f >> g`: composition (binds tighter than `|>`), left-associative */
+static Expr *parse_compose(Parser *p) {
+    Expr *e = parse_or(p);
+    while (check(p, TK_GTGT)) {
+        int line = p->cur.line, col = p->cur.col;
+        advance(p);
+        e = bin(p, B_COMPOSE, line, col, e, parse_or(p));
+    }
+    return e;
+}
+
+/* `x |> f`: pipe (lowest precedence), left-associative */
+static Expr *parse_pipe(Parser *p) {
+    Expr *e = parse_compose(p);
+    while (check(p, TK_PIPE_GT)) {
+        int line = p->cur.line, col = p->cur.col;
+        advance(p);
+        e = bin(p, B_PIPE, line, col, e, parse_compose(p));
+    }
+    return e;
+}
+
+static Expr *parse_expr(Parser *p) {
+    return parse_pipe(p);
 }
 
 /* a header expression: record literals need parens here */
@@ -574,6 +648,9 @@ static Stmt *parse_func(Parser *p) {
     }
     expect(p, TK_RPAREN, "')' closing parameter list");
     if (match(p, TK_ARROW)) s->as.func.ret_type = parse_type(p);
+    /* optional declarations after the return type: `pure`, `partial` */
+    if (match(p, TK_PURE)) s->as.func.pure = true;
+    if (match(p, TK_PARTIAL)) s->as.func.partial = true;
     s->as.func.params = (char **)params.items;
     s->as.func.param_types = (TypeExpr **)ptypes.items;
     s->as.func.param_count = params.count;
@@ -612,6 +689,136 @@ static Stmt *parse_if(Parser *p) {
     s->as.ifs.conds = (Expr **)conds.items;
     s->as.ifs.blocks = blocks;
     s->as.ifs.count = conds.count;
+    return s;
+}
+
+/* --- patterns and match ---------------------------------------------------
+ * pattern     := "_" | IDENT | literal | "{" pattern_field ("," pattern_field)* "}"
+ * pattern_field := IDENT [":" pattern]      (* `{ x }` binds x to field x *)
+ * match_stmt  := "match" expr "{" pattern "->" block (pattern "->" block)* "}"
+ */
+
+static Pat *parse_pattern(Parser *p) {
+    int line = p->cur.line, col = p->cur.col;
+    if (check(p, TK_IDENT)) {
+        Token t = p->cur;
+        advance(p);
+        char *name = tok_text(t);
+        Pat *q = xmalloc(sizeof(Pat));
+        q->line = line;
+        q->col = col;
+        if (strcmp(name, "_") == 0) {
+            q->kind = P_WILD;
+        } else {
+            q->kind = P_BIND;
+            q->bind = name;
+        }
+        return q;
+    }
+    if (check(p, TK_INT)) {
+        Token t = p->cur;
+        advance(p);
+        Pat *q = xmalloc(sizeof(Pat));
+        q->kind = P_LIT;
+        q->line = line;
+        q->col = col;
+        q->lit.kind = LIT_INT;
+        q->lit.ival = strtoll(tok_text(t), NULL, 10);
+        return q;
+    }
+    if (check(p, TK_STR)) {
+        Token t = p->cur;
+        advance(p);
+        Pat *q = xmalloc(sizeof(Pat));
+        q->kind = P_LIT;
+        q->line = line;
+        q->col = col;
+        q->lit.kind = LIT_STR;
+        q->lit.sval = unescape_string(p, t);
+        return q;
+    }
+    if (check(p, TK_TRUE) || check(p, TK_FALSE)) {
+        Pat *q = xmalloc(sizeof(Pat));
+        q->kind = P_LIT;
+        q->line = line;
+        q->col = col;
+        q->lit.kind = LIT_BOOL;
+        q->lit.ival = check(p, TK_TRUE) ? 1 : 0;
+        advance(p);
+        return q;
+    }
+    if (check(p, TK_NONE)) {
+        advance(p);
+        Pat *q = xmalloc(sizeof(Pat));
+        q->kind = P_LIT;
+        q->line = line;
+        q->col = col;
+        q->lit.kind = LIT_NONE;
+        return q;
+    }
+    if (check(p, TK_LBRACE)) {
+        advance(p);
+        Pat *q = xmalloc(sizeof(Pat));
+        q->kind = P_REC;
+        q->line = line;
+        q->col = col;
+        PtrVec items = {0};
+        while (!check(p, TK_RBRACE)) {
+            Token n = expect(p, TK_IDENT, "field name in pattern");
+            Pat *it = xmalloc(sizeof(Pat));
+            it->line = n.line;
+            it->col = n.col;
+            it->name = tok_text(n);
+            if (match(p, TK_COLON)) {
+                Pat *sub = parse_pattern(p);
+                it->kind = sub->kind;
+                it->bind = sub->bind;
+                it->lit = sub->lit;
+                it->rec = sub->rec;
+            } else {
+                it->kind = P_BIND;   /* `{ x }` binds the field x to x */
+                it->bind = it->name;
+            }
+            vec_push(&items, it);
+            if (!match(p, TK_COMMA)) break;
+        }
+        expect(p, TK_RBRACE, "'}' closing pattern");
+        q->rec.items = (Pat **)items.items;
+        q->rec.count = items.count;
+        return q;
+    }
+    perror_at(p, line, col,
+              "expected a pattern (literal, name, '_', or { field: pattern }), "
+              "got '%.*s'", p->cur.len ? p->cur.len : 5,
+              p->cur.kind == TK_EOF ? "<eof>" : p->cur.start);
+    return NULL; /* unreachable */
+}
+
+static Stmt *parse_match(Parser *p) {
+    int line = p->cur.line, col = p->cur.col;
+    advance(p); /* match */
+    Stmt *s = new_stmt(p, S_MATCH, line, col);
+    s->as.mtch.subject = parse_header_expr(p);
+    expect(p, TK_LBRACE, "'{' opening match arms");
+    PtrVec pats = {0};
+    Block *blocks = NULL;
+    size_t nblocks = 0, capblocks = 0;
+    while (!check(p, TK_RBRACE) && !check(p, TK_EOF)) {
+        vec_push(&pats, parse_pattern(p));
+        expect(p, TK_ARROW, "'->' after pattern");
+        if (nblocks == capblocks) {
+            capblocks = capblocks ? capblocks * 2 : 4;
+            blocks = realloc(blocks, sizeof(Block) * capblocks);
+            if (!blocks) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        }
+        blocks[nblocks++] = parse_block(p);
+    }
+    expect(p, TK_RBRACE, "'}' closing match");
+    if (pats.count == 0)
+        perror_at(p, line, col, "match needs at least one arm");
+    s->as.mtch.pats = (Pat **)pats.items;
+    s->as.mtch.blocks = blocks;
+    s->as.mtch.count = pats.count;
     return s;
 }
 
@@ -731,6 +938,24 @@ static Stmt *parse_stmt(Parser *p) {
     case TK_BREAK:    advance(p); return new_stmt(p, S_BREAK, line, col);
     case TK_CONTINUE: advance(p); return new_stmt(p, S_CONTINUE, line, col);
     case TK_PASS:     advance(p); return new_stmt(p, S_PASS, line, col);
+    case TK_CONST: {
+        /* `const x = v` / `const x: T = v`: an immutable binding */
+        advance(p);
+        Token name = expect(p, TK_IDENT, "name after 'const'");
+        Expr *target = new_expr(E_NAME, line, col);
+        target->as.sval = tok_text(name);
+        TypeExpr *ann = NULL;
+        if (match(p, TK_COLON)) ann = parse_type(p);
+        expect(p, TK_ASSIGN, "'=' in const declaration");
+        Stmt *s = new_stmt(p, S_ASSIGN, line, col);
+        s->as.assign.target = target;
+        s->as.assign.ann = ann;
+        s->as.assign.is_const = true;
+        s->as.assign.value = parse_expr(p);
+        return s;
+    }
+    case TK_MATCH:
+        return parse_match(p);
     case TK_TYPE: {
         advance(p);
         Token name = expect(p, TK_IDENT, "type alias name after 'type'");

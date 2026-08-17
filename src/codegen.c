@@ -76,7 +76,9 @@ static bool is_builtin(const char *name) {
            strcmp(name, "range") == 0 || strcmp(name, "gc_stats") == 0 ||
            strcmp(name, "read_file") == 0 || strcmp(name, "write_file") == 0 ||
            strcmp(name, "run") == 0 || strcmp(name, "sqrt") == 0 ||
-           strcmp(name, "tan") == 0 || strcmp(name, "rand") == 0;
+           strcmp(name, "tan") == 0 || strcmp(name, "rand") == 0 ||
+           strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
+           strcmp(name, "reduce") == 0;
 }
 
 /* --- function info (closure conversion) ---------------------------------- */
@@ -86,6 +88,7 @@ struct FuncInfo {
     char *cname;         /* mangled C name, e.g. "emf_foo_3" */
     const char *name;    /* source-level name */
     const Stmt *node;
+    const Expr *lamb;    /* non-NULL when this is a lambda (E_LAMBDA) */
     FuncInfo *parent;
     FuncInfo **children; size_t child_count, child_cap;
 
@@ -119,11 +122,12 @@ typedef struct {
     SB body;
     int indent;
     Names *globals;
-    FuncInfo *fi;        /* current function; NULL at top level */
+    FuncInfo *fi;        /* current function (the top-level root at main) */
     FuncInfo **top;      /* top-level functions (for direct calls / values) */
     size_t top_count;
     int ntemps;          /* temporaries currently live */
     int max_temps;
+    bool in_tco;         /* function body is wrapped in a tail-call loop */
     int last_line;       /* last emitted source line (for rt_cur_line) */
     const char *last_file; /* last emitted source file (linked programs span several) */
 } Cg;
@@ -283,7 +287,7 @@ static int gen_call(Cg *cg, const Expr *e) {
         args[i] = gen_expr(cg, e->as.call.args[i]);
 
     int t = new_temp(cg);
-    char tb[32], ab[32], bb[32];
+    char tb[32], ab[32], bb[32], cb[32];
     SB call = {0};
 
     const Expr *fn = e->as.call.fn;
@@ -329,6 +333,15 @@ static int gen_call(Cg *cg, const Expr *e) {
             emit(cg, "%s = em_tan(%s);", slotref(t, tb), slotref(args[0], ab));
         } else if (strcmp(name, "rand") == 0) {
             emit(cg, "%s = em_rand();", slotref(t, tb));
+        } else if (strcmp(name, "map") == 0) {
+            emit(cg, "%s = em_map(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "filter") == 0) {
+            emit(cg, "%s = em_filter(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "reduce") == 0) {
+            emit(cg, "%s = em_reduce(%s, %s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb), slotref(args[2], cb));
         } else {
             Access kind;
             int slot;
@@ -464,6 +477,22 @@ static int gen_expr(Cg *cg, const Expr *e) {
     }
     case E_BINOP: {
         BinOp op = e->as.bin.op;
+        if (op == B_PIPE) { /* x |> f == f(x) */
+            int l = gen_expr(cg, e->as.bin.lhs);
+            int f = gen_expr(cg, e->as.bin.rhs);
+            int t = new_temp(cg);
+            emit(cg, "%s = em_call(%s, 1, %s);", slotref(t, tb),
+                 slotref(f, ab), slotref(l, bb));
+            return t;
+        }
+        if (op == B_COMPOSE) { /* f >> g == x -> g(f(x)) */
+            int f = gen_expr(cg, e->as.bin.lhs);
+            int g = gen_expr(cg, e->as.bin.rhs);
+            int t = new_temp(cg);
+            emit(cg, "%s = em_compose(%s, %s);", slotref(t, tb),
+                 slotref(f, ab), slotref(g, bb));
+            return t;
+        }
         if (op == B_AND || op == B_OR) {
             /* short-circuit; Python semantics: the result is one operand */
             int lhs = gen_expr(cg, e->as.bin.lhs);
@@ -497,6 +526,40 @@ static int gen_expr(Cg *cg, const Expr *e) {
     }
     case E_CALL:
         return gen_call(cg, e);
+    case E_LAMBDA: {
+        /* find the FuncInfo built for this lambda and emit its closure */
+        FuncInfo *child = NULL;
+        if (cg->fi) {
+            for (size_t i = 0; i < cg->fi->child_count; i++)
+                if (cg->fi->children[i]->lamb == e) {
+                    child = cg->fi->children[i];
+                    break;
+                }
+        }
+        if (!child) {
+            fprintf(stderr,
+                    "emeraldc: internal error: missing lambda function\n");
+            exit(1);
+        }
+        size_t n = child->captures.count;
+        size_t arity = e->as.lam.param_count;
+        int t = new_temp(cg);
+        if (n == 0) {
+            emit(cg, "%s = em_mkclosure(%s_tramp, %zu, NULL, 0);",
+                 slotref(t, tb), child->cname, arity);
+        } else {
+            emit(cg, "{ Value __cap[%zu];", n);
+            for (size_t k = 0; k < n; k++) {
+                char cb[32];
+                emit(cg, "  __cap[%zu] = %s;", k,
+                     cellref(cg, child->captures.names[k], cb));
+            }
+            emit(cg, "  %s = em_mkclosure(%s_tramp, %zu, __cap, %zu);",
+                 slotref(t, tb), child->cname, arity, n);
+            emit(cg, "}");
+        }
+        return t;
+    }
     case E_INDEX: {
         int seq = gen_expr(cg, e->as.index.seq);
         int idx = gen_expr(cg, e->as.index.idx);
@@ -546,6 +609,128 @@ static void gen_if_arms(Cg *cg, const Stmt *s, size_t arm) {
         emit(cg, "}");
     }
 }
+
+/* --- pattern matching ---------------------------------------------------- */
+
+/* Append a C boolean expression testing whether `subj` (a C expression)
+ * matches pattern `p`. `subj` may itself be an `em_getattr(...)` chain; the
+ * tests short-circuit, so no getattr runs unless the record/field checks
+ * before it have already passed.
+ */
+static void gen_pat_test(const Pat *p, const char *subj, SB *out) {
+    switch (p->kind) {
+    case P_WILD:
+    case P_BIND:
+        sb_printf(out, "true");
+        break;
+    case P_LIT:
+        switch (p->lit.kind) {
+        case LIT_INT:
+            sb_printf(out, "em_truthy(em_eq(%s, em_int(%lldLL)))", subj,
+                      (long long)p->lit.ival);
+            break;
+        case LIT_STR:
+            sb_printf(out, "em_truthy(em_eq(%s, em_str_new(", subj);
+            sb_c_string(out, p->lit.sval);
+            sb_printf(out, ")))");
+            break;
+        case LIT_BOOL:
+            sb_printf(out, "em_truthy(em_eq(%s, em_bool(%s)))", subj,
+                      p->lit.ival ? "true" : "false");
+            break;
+        case LIT_NONE:
+            sb_printf(out, "em_truthy(em_eq(%s, em_none()))", subj);
+            break;
+        }
+        break;
+    case P_REC: {
+        sb_printf(out, "(em_is_record(%s)", subj);
+        for (size_t i = 0; i < p->rec.count; i++) {
+            const Pat *it = p->rec.items[i];
+            if (it->kind == P_WILD) continue;
+            sb_printf(out, " && em_rec_has(%s, ", subj);
+            sb_c_string(out, it->name);
+            sb_printf(out, ")");
+            if (it->kind == P_LIT) {
+                SB f = {0};
+                sb_printf(&f, "em_getattr(%s, ", subj);
+                sb_c_string(&f, it->name);
+                sb_printf(&f, ")");
+                sb_printf(out, " && ");
+                gen_pat_test(it, f.buf, out);
+                free(f.buf);
+            } else if (it->kind == P_REC) {
+                SB f = {0};
+                sb_printf(&f, "em_getattr(%s, ", subj);
+                sb_c_string(&f, it->name);
+                sb_printf(&f, ")");
+                sb_printf(out, " && ");
+                gen_pat_test(it, f.buf, out);
+                free(f.buf);
+            }
+        }
+        sb_printf(out, ")");
+        break;
+    }
+    }
+}
+
+/* Emit variable bindings for the names pattern `p` matches, from the value
+ * `subj` (a C expression). Only runs once the arm's test has passed, so
+ * em_getattr is safe here. */
+static void gen_pat_binds(Cg *cg, const Pat *p, const char *subj) {
+    char ab[32];
+    switch (p->kind) {
+    case P_BIND:
+        gen_var_write(cg, p->bind, subj);
+        break;
+    case P_REC:
+        for (size_t i = 0; i < p->rec.count; i++) {
+            const Pat *it = p->rec.items[i];
+            if (it->kind != P_BIND && it->kind != P_REC) continue;
+            SB f = {0};
+            sb_printf(&f, "em_getattr(%s, ", subj);
+            sb_c_string(&f, it->name);
+            sb_printf(&f, ")");
+            gen_pat_binds(cg, it, f.buf);
+            free(f.buf);
+        }
+        break;
+    case P_LIT:
+    case P_WILD:
+        (void)ab;
+        break;
+    }
+}
+
+static void gen_match_arms(Cg *cg, const Stmt *s, int subj, size_t arm) {
+    char ab[32];
+    SB cond = {0};
+    gen_pat_test(s->as.mtch.pats[arm], slotref(subj, ab), &cond);
+    emit(cg, "if (%s) {", cond.buf);
+    free(cond.buf);
+    cg->indent++;
+    gen_pat_binds(cg, s->as.mtch.pats[arm], slotref(subj, ab));
+    gen_block(cg, &s->as.mtch.blocks[arm]);
+    cg->indent--;
+    if (arm + 1 < s->as.mtch.count) {
+        emit(cg, "} else {");
+        cg->indent++;
+        gen_match_arms(cg, s, subj, arm + 1);
+        cg->indent--;
+        emit(cg, "}");
+    } else {
+        /* unreachable: the checker proves exhaustiveness */
+        emit(cg, "} else {");
+        cg->indent++;
+        emit(cg, "rt_fatal(\"match: no pattern matched (exhaustiveness check "
+                  "failed)\");");
+        cg->indent--;
+        emit(cg, "}");
+    }
+}
+
+/* --- statements ---------------------------------------------------------- */
 
 /* Emit the closure creation for a nested `def` statement, binding the parent
  * function's local slot for the function name. */
@@ -665,7 +850,22 @@ static void gen_stmt(Cg *cg, const Stmt *s) {
         break;
     }
     case S_RETURN: {
-        if (s->as.ret) {
+        if (cg->in_tco && s->as.ret && s->as.ret->kind == E_CALL &&
+            s->as.ret->as.call.fn->kind == E_NAME &&
+            strcmp(s->as.ret->as.call.fn->as.sval, cg->fi->name) == 0) {
+            /* self tail call: evaluate the arguments, reassign the parameter
+             * slots, and jump back to the loop header (see gen_function) */
+            size_t argc = s->as.ret->as.call.count;
+            int *args = malloc(sizeof(int) * (argc ? argc : 1));
+            if (!args) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+            for (size_t i = 0; i < argc; i++)
+                args[i] = gen_expr(cg, s->as.ret->as.call.args[i]);
+            for (size_t i = 0; i < argc && i < cg->fi->node->as.func.param_count; i++)
+                gen_var_write(cg, cg->fi->node->as.func.params[i],
+                              slotref(args[i], ab));
+            free(args);
+            emit(cg, "goto __tail;");
+        } else if (s->as.ret) {
             int v = gen_expr(cg, s->as.ret);
             emit(cg, "{ Value __r = %s; rt_pop_frame(); return __r; }",
                  slotref(v, ab));
@@ -674,6 +874,9 @@ static void gen_stmt(Cg *cg, const Stmt *s) {
         }
         break;
     }
+    case S_MATCH:
+        gen_match_arms(cg, s, gen_expr(cg, s->as.mtch.subject), 0);
+        break;
     case S_BREAK:
         emit(cg, "break;");
         break;
@@ -746,6 +949,10 @@ static void collect_used_expr(const Expr *e, Names *out) {
     case E_ATTR:
         collect_used_expr(e->as.attr.obj, out);
         break;
+    case E_LAMBDA:
+        /* a lambda is its own function: its free variables are captured by
+         * its own FuncInfo, not by the enclosing scope */
+        break;
     default:
         break;
     }
@@ -787,6 +994,11 @@ static void collect_used_stmt(const Stmt *s, Names *out) {
     case S_BLOCK:
         collect_used_block(&s->as.block, out);
         break;
+    case S_MATCH:
+        collect_used_expr(s->as.mtch.subject, out);
+        for (size_t i = 0; i < s->as.mtch.count; i++)
+            collect_used_block(&s->as.mtch.blocks[i], out);
+        break;
     default:
         break; /* S_FUNC: nested body analyzed on its own */
     }
@@ -826,23 +1038,179 @@ static void collect_child_defs(const Block *b, Stmt ***defs, size_t *count,
         case S_BLOCK:
             collect_child_defs(&s->as.block, defs, count, cap);
             break;
+        case S_MATCH:
+            for (size_t j = 0; j < s->as.mtch.count; j++)
+                collect_child_defs(&s->as.mtch.blocks[j], defs, count, cap);
+            break;
         default:
             break;
         }
     }
 }
 
+/* collect every lambda expression in a block and its nested statements,
+ * without descending into nested `def` bodies (those are collected as their
+ * own functions) — lambdas become FuncInfo children so their captures get
+ * the same closure treatment as nested defs. */
+static void collect_lambdas_expr(const Expr *e, Expr ***lams, size_t *count,
+                                 size_t *cap);
+
+static void collect_lambdas_block(const Block *b, Expr ***lams, size_t *count,
+                                  size_t *cap) {
+    for (size_t i = 0; i < b->count; i++) {
+        const Stmt *s = b->items[i];
+        switch (s->kind) {
+        case S_EXPR:
+            collect_lambdas_expr(s->as.expr, lams, count, cap);
+            break;
+        case S_ASSIGN:
+            collect_lambdas_expr(s->as.assign.value, lams, count, cap);
+            if (s->as.assign.target->kind == E_INDEX)
+                collect_lambdas_expr(s->as.assign.target->as.index.seq,
+                                     lams, count, cap);
+            else if (s->as.assign.target->kind == E_ATTR)
+                collect_lambdas_expr(s->as.assign.target->as.attr.obj,
+                                     lams, count, cap);
+            break;
+        case S_IF:
+            for (size_t j = 0; j < s->as.ifs.count; j++) {
+                collect_lambdas_expr(s->as.ifs.conds[j], lams, count, cap);
+                collect_lambdas_block(&s->as.ifs.blocks[j], lams, count, cap);
+            }
+            if (s->as.ifs.has_else)
+                collect_lambdas_block(&s->as.ifs.else_block, lams, count, cap);
+            break;
+        case S_WHILE:
+            collect_lambdas_expr(s->as.wh.cond, lams, count, cap);
+            collect_lambdas_block(&s->as.wh.body, lams, count, cap);
+            break;
+        case S_FOR:
+            collect_lambdas_expr(s->as.fr.seq, lams, count, cap);
+            collect_lambdas_block(&s->as.fr.body, lams, count, cap);
+            break;
+        case S_RETURN:
+            if (s->as.ret)
+                collect_lambdas_expr(s->as.ret, lams, count, cap);
+            break;
+        case S_BLOCK:
+            collect_lambdas_block(&s->as.block, lams, count, cap);
+            break;
+        case S_MATCH:
+            collect_lambdas_expr(s->as.mtch.subject, lams, count, cap);
+            for (size_t j = 0; j < s->as.mtch.count; j++)
+                collect_lambdas_block(&s->as.mtch.blocks[j], lams, count, cap);
+            break;
+        default:
+            break; /* S_FUNC: nested defs collected separately */
+        }
+    }
+}
+
+static void collect_lambdas_expr(const Expr *e, Expr ***lams, size_t *count,
+                                 size_t *cap) {
+    switch (e->kind) {
+    case E_LAMBDA:
+        if (*count == *cap) {
+            *cap = *cap ? *cap * 2 : 4;
+            *lams = realloc(*lams, sizeof(Expr *) * *cap);
+            if (!*lams) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        }
+        (*lams)[(*count)++] = (Expr *)e;
+        collect_lambdas_expr(e->as.lam.body, lams, count, cap);
+        break;
+    case E_LIST:
+        for (size_t i = 0; i < e->as.list.count; i++)
+            collect_lambdas_expr(e->as.list.items[i], lams, count, cap);
+        break;
+    case E_REC:
+        for (size_t i = 0; i < e->as.rec.count; i++)
+            collect_lambdas_expr(e->as.rec.values[i], lams, count, cap);
+        break;
+    case E_BINOP:
+        collect_lambdas_expr(e->as.bin.lhs, lams, count, cap);
+        collect_lambdas_expr(e->as.bin.rhs, lams, count, cap);
+        break;
+    case E_UNOP:
+        collect_lambdas_expr(e->as.un.operand, lams, count, cap);
+        break;
+    case E_CALL:
+        collect_lambdas_expr(e->as.call.fn, lams, count, cap);
+        for (size_t i = 0; i < e->as.call.count; i++)
+            collect_lambdas_expr(e->as.call.args[i], lams, count, cap);
+        break;
+    case E_INDEX:
+        collect_lambdas_expr(e->as.index.seq, lams, count, cap);
+        collect_lambdas_expr(e->as.index.idx, lams, count, cap);
+        break;
+    case E_ATTR:
+        collect_lambdas_expr(e->as.attr.obj, lams, count, cap);
+        break;
+    default:
+        break;
+    }
+}
+
 static void collect_local_cb(const char *name, int line, void *ud);
 
-typedef struct { Names *globals; FuncInfo *fi; } LocalCtx;
-
-static void collect_local_cb(const char *name, int line, void *ud) {
-    (void)line;
-    LocalCtx *lc = ud;
-    /* the docs rule: assigning a global's name updates the global */
-    if (names_find(lc->globals, name) < 0)
-        add_local(lc->fi, name);
+/* every name a match pattern binds, recursively (needs an F/G slot: codegen
+ * writes the bound value into it when an arm matches) */
+static void pat_bind_names(const Pat *p, void (*fn)(const char *, int line, void *),
+                           void *ud) {
+    switch (p->kind) {
+    case P_BIND:
+        fn(p->bind, p->line, ud);
+        break;
+    case P_REC:
+        for (size_t i = 0; i < p->rec.count; i++)
+            pat_bind_names(p->rec.items[i], fn, ud);
+        break;
+    default:
+        break;
+    }
 }
+
+static void collect_match_pats_stmt(const Stmt *s,
+                                    void (*fn)(const char *, int line, void *),
+                                    void *ud);
+
+static void collect_match_pats_block(const Block *b,
+                                     void (*fn)(const char *, int line, void *),
+                                     void *ud) {
+    for (size_t i = 0; i < b->count; i++)
+        collect_match_pats_stmt(b->items[i], fn, ud);
+}
+
+static void collect_match_pats_stmt(const Stmt *s,
+                                    void (*fn)(const char *, int line, void *),
+                                    void *ud) {
+    switch (s->kind) {
+    case S_MATCH:
+        for (size_t j = 0; j < s->as.mtch.count; j++) {
+            pat_bind_names(s->as.mtch.pats[j], fn, ud);
+            collect_match_pats_block(&s->as.mtch.blocks[j], fn, ud);
+        }
+        break;
+    case S_IF:
+        for (size_t j = 0; j < s->as.ifs.count; j++)
+            collect_match_pats_block(&s->as.ifs.blocks[j], fn, ud);
+        if (s->as.ifs.has_else)
+            collect_match_pats_block(&s->as.ifs.else_block, fn, ud);
+        break;
+    case S_WHILE:
+        collect_match_pats_block(&s->as.wh.body, fn, ud);
+        break;
+    case S_FOR:
+        collect_match_pats_block(&s->as.fr.body, fn, ud);
+        break;
+    case S_BLOCK:
+        collect_match_pats_block(&s->as.block, fn, ud);
+        break;
+    default:
+        break; /* S_FUNC: nested bodies are separate scopes */
+    }
+}
+
+typedef struct { Names *globals; FuncInfo *fi; } LocalCtx;
 
 /* does `name` resolve to a local of some enclosing function? */
 static bool bound_in_ancestor(FuncInfo *fi, const char *name) {
@@ -851,9 +1219,19 @@ static bool bound_in_ancestor(FuncInfo *fi, const char *name) {
     return false;
 }
 
-static void compute_captures(Ctx *ctx, FuncInfo *fi) {
+static void collect_local_cb(const char *name, int line, void *ud) {
+    (void)line;
+    LocalCtx *lc = ud;
+    /* the docs rule: assigning a global's name updates the global; and an
+     * assignment to an enclosing function's local is a capture, not a new
+     * local — it updates the shared cell, so closures observe the mutation */
+    if (names_find(lc->globals, name) < 0 && !bound_in_ancestor(lc->fi, name))
+        add_local(lc->fi, name);
+}
+
+static void compute_captures(Ctx *ctx, FuncInfo *fi, const Block *body) {
     Names used = {0};
-    collect_used_block(&fi->node->as.func.body, &used);
+    collect_used_block(body, &used);
     for (size_t i = 0; i < used.count; i++) {
         const char *n = used.names[i];
         if (names_find(&fi->locals, n) >= 0) continue;   /* bound here */
@@ -875,6 +1253,67 @@ static void compute_captures(Ctx *ctx, FuncInfo *fi) {
         }
     }
     free(used.names);
+}
+
+static FuncInfo *build_func(Ctx *ctx, const Stmt *node, FuncInfo *parent);
+static void compute_boxing(FuncInfo *fi);
+
+/* Build the FuncInfo for a lambda expression: the lambda is lowered to a
+ * synthetic `def __lamN(x, ...) { return body }` so it flows through the
+ * exact same closure machinery as nested defs (captures, boxing, env). */
+static FuncInfo *build_lambda(Ctx *ctx, const Expr *lam, FuncInfo *parent) {
+    char name[32];
+    snprintf(name, sizeof(name), "__lam%d", ctx->counter);
+    Stmt *ret = calloc(1, sizeof(Stmt));
+    if (!ret) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    ret->kind = S_RETURN;
+    ret->line = lam->line;
+    ret->col = lam->col;
+    ret->as.ret = (Expr *)lam->as.lam.body;
+    Stmt *func = calloc(1, sizeof(Stmt));
+    if (!func) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    func->kind = S_FUNC;
+    func->line = lam->line;
+    func->col = lam->col;
+    func->as.func.name = strdup(name);
+    func->as.func.dispname = name;
+    func->as.func.params = lam->as.lam.params;
+    func->as.func.param_types = lam->as.lam.param_types;
+    func->as.func.param_count = lam->as.lam.param_count;
+    func->as.func.body.count = 1;
+    func->as.func.body.items = malloc(sizeof(Stmt *));
+    if (!func->as.func.body.items) {
+        fputs("emeraldc: out of memory\n", stderr);
+        exit(1);
+    }
+    func->as.func.body.items[0] = ret;
+    FuncInfo *fi = build_func(ctx, func, parent);
+    fi->lamb = lam;
+    return fi;
+}
+
+/* The implicit top-level function: the program body generated into main().
+ * It owns the top-level lambdas as children (so they get closure treatment)
+ * but has no locals of its own — everything at the top level is a global. */
+static FuncInfo *make_top_root(Ctx *ctx, const Block *body) {
+    FuncInfo *fi = calloc(1, sizeof(FuncInfo));
+    if (!fi) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    fi->parent = NULL;
+    fi->name = "<top>";
+    fi->node = NULL;
+    Expr **lams = NULL;
+    size_t n = 0, cap = 0;
+    collect_lambdas_block(body, &lams, &n, &cap);
+    fi->child_cap = n ? n : 1;
+    fi->children = calloc(fi->child_cap, sizeof(FuncInfo *));
+    if (!fi->children) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    fi->child_count = n;
+    for (size_t i = 0; i < n; i++)
+        fi->children[i] = build_lambda(ctx, lams[i], fi);
+    free(lams);
+    compute_captures(ctx, fi, body);
+    compute_boxing(fi);
+    return fi;
 }
 
 static void compute_boxing(FuncInfo *fi) {
@@ -906,11 +1345,13 @@ static FuncInfo *build_func(Ctx *ctx, const Stmt *node, FuncInfo *parent) {
     }
     ctx->all[ctx->all_count++] = fi;
 
-    /* locals: params, then assigned names, then nested function names */
+    /* locals: params, then assigned names + match-pattern bindings, then
+     * nested function names */
     for (size_t i = 0; i < node->as.func.param_count; i++)
         add_local(fi, node->as.func.params[i]);
     LocalCtx lc = { ctx->globals, fi };
     ast_collect_assigned(&node->as.func.body, collect_local_cb, &lc);
+    collect_match_pats_block(&node->as.func.body, collect_local_cb, &lc);
 
     Stmt **defs = NULL;
     size_t ndefs = 0, defcap = 0;
@@ -918,15 +1359,22 @@ static FuncInfo *build_func(Ctx *ctx, const Stmt *node, FuncInfo *parent) {
     for (size_t i = 0; i < ndefs; i++)
         add_local(fi, defs[i]->as.func.name);
 
-    fi->child_cap = ndefs ? ndefs : 1;
+    Expr **lams = NULL;
+    size_t nlams = 0, lamcap = 0;
+    collect_lambdas_block(&node->as.func.body, &lams, &nlams, &lamcap);
+
+    fi->child_cap = (ndefs + nlams) ? (ndefs + nlams) : 1;
     fi->children = calloc(fi->child_cap, sizeof(FuncInfo *));
     if (!fi->children) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
-    fi->child_count = ndefs;
+    fi->child_count = 0;
     for (size_t i = 0; i < ndefs; i++)
-        fi->children[i] = build_func(ctx, defs[i], fi);
+        fi->children[fi->child_count++] = build_func(ctx, defs[i], fi);
+    for (size_t i = 0; i < nlams; i++)
+        fi->children[fi->child_count++] = build_lambda(ctx, lams[i], fi);
     free(defs);
+    free(lams);
 
-    compute_captures(ctx, fi);
+    compute_captures(ctx, fi, &node->as.func.body);
     compute_boxing(fi);
     return fi;
 }
@@ -936,6 +1384,52 @@ static FuncInfo *build_func(Ctx *ctx, const Stmt *node, FuncInfo *parent) {
 static void collect_name_cb(const char *name, int line, void *ud) {
     (void)line;
     names_add((Names *)ud, name);
+}
+
+/* --- tail-call optimization ---------------------------------------------- */
+
+/* is `e` a direct call to the function named `name`? */
+static bool is_self_call(const Expr *e, const char *name) {
+    return e->kind == E_CALL && e->as.call.fn->kind == E_NAME &&
+           strcmp(e->as.call.fn->as.sval, name) == 0;
+}
+
+/* Does the block contain a `return f(...)` self-call? Such a return is a
+ * tail call: the function's result is exactly f's result, so it can be
+ * rewritten as "reassign params, loop" — constant stack, real tail
+ * recursion. Only the body of the function itself is scanned: a self-call
+ * inside a nested `def` belongs to that nested function.
+ */
+static bool has_tail_call_stmt(const Stmt *s, const char *name);
+
+static bool has_tail_call_block(const Block *b, const char *name) {
+    for (size_t i = 0; i < b->count; i++)
+        if (has_tail_call_stmt(b->items[i], name)) return true;
+    return false;
+}
+
+static bool has_tail_call_stmt(const Stmt *s, const char *name) {
+    switch (s->kind) {
+    case S_RETURN:
+        return s->as.ret && is_self_call(s->as.ret, name);
+    case S_BLOCK:
+        return has_tail_call_block(&s->as.block, name);
+    case S_IF:
+        for (size_t i = 0; i < s->as.ifs.count; i++)
+            if (has_tail_call_block(&s->as.ifs.blocks[i], name)) return true;
+        return s->as.ifs.has_else &&
+               has_tail_call_block(&s->as.ifs.else_block, name);
+    case S_MATCH:
+        for (size_t i = 0; i < s->as.mtch.count; i++)
+            if (has_tail_call_block(&s->as.mtch.blocks[i], name)) return true;
+        return false;
+    case S_WHILE:
+        return has_tail_call_block(&s->as.wh.body, name);
+    case S_FOR:
+        return has_tail_call_block(&s->as.fr.body, name);
+    default:
+        return false;
+    }
 }
 
 static void gen_function(FILE *out, FuncInfo *fi, Names *globals,
@@ -948,7 +1442,25 @@ static void gen_function(FILE *out, FuncInfo *fi, Names *globals,
     cg.top_count = top_count;
     cg.indent = 1;
 
+    bool tco = has_tail_call_block(&fi->node->as.func.body, fi->name);
+    cg.in_tco = tco;
+    if (tco) {
+        /* the whole body runs inside `for (;;)`: a self tail call becomes
+         * "reassign params; goto __tail", re-entering the body with the new
+         * arguments in place. Real returns (and the implicit fall-through
+         * return) pop the frame and exit; the frame is pushed once at entry
+         * and the loop never nests it. */
+        emit(&cg, "for (;;) {");
+        cg.indent++;
+        emit(&cg, "__tail:;");
+    }
     gen_block(&cg, &fi->node->as.func.body);
+    if (tco) {
+        emit(&cg, "rt_pop_frame();");
+        emit(&cg, "return em_none();");
+        cg.indent--;
+        emit(&cg, "}");
+    }
 
     size_t nparams = fi->node->as.func.param_count;
     size_t nlocals = fi->locals.count;
@@ -976,8 +1488,10 @@ static void gen_function(FILE *out, FuncInfo *fi, Names *globals,
             fprintf(out, "    F[%zu] = em_cell(em_none());\n", i);
 
     fwrite(cg.body.buf ? cg.body.buf : "", 1, cg.body.len, out);
-    fprintf(out, "    rt_pop_frame();\n");
-    fprintf(out, "    return em_none();\n");
+    if (!tco) {
+        fprintf(out, "    rt_pop_frame();\n");
+        fprintf(out, "    return em_none();\n");
+    }
     fprintf(out, "}\n\n");
 
     /* uniform entry point used for first-class function values */
@@ -994,6 +1508,7 @@ static void gen_function(FILE *out, FuncInfo *fi, Names *globals,
 void codegen_program(FILE *out, const Program *prog, const char *filename) {
     Names globals = {0};
     ast_collect_assigned(&prog->body, collect_name_cb, &globals);
+    collect_match_pats_block(&prog->body, collect_name_cb, &globals);
 
     /* top-level function names */
     Names top_names = {0};
@@ -1015,6 +1530,10 @@ void codegen_program(FILE *out, const Program *prog, const char *filename) {
         }
         top[top_count++] = build_func(&ctx, s, NULL);
     }
+
+    /* the implicit top-level function, owning top-level lambdas. Built before
+     * the emit loops so its lambda functions get prototypes and bodies too. */
+    FuncInfo *root = make_top_root(&ctx, &prog->body);
 
     fprintf(out, "/* generated by emeraldc; compile with src/runtime.c */\n");
     fprintf(out, "#include \"runtime.h\"\n\n");
@@ -1041,11 +1560,12 @@ void codegen_program(FILE *out, const Program *prog, const char *filename) {
     for (size_t i = 0; i < ctx.all_count; i++)
         gen_function(out, ctx.all[i], &globals, top, top_count);
 
-    /* top level: names are globals (G); temporaries live in a local F */
+    /* top level: names are globals (G); temporaries live in a local F. The
+     * root FuncInfo gives top-level lambdas their own closure functions. */
     Cg cg;
     memset(&cg, 0, sizeof(cg));
     cg.globals = &globals;
-    cg.fi = NULL;
+    cg.fi = root;
     cg.top = top;
     cg.top_count = top_count;
     cg.indent = 1;

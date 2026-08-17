@@ -1,0 +1,15 @@
+(program
+  (const double (lambda (x:int) -> (* x 2)))
+  (const inc (lambda (x:int) -> (+ x 1)))
+  (expr (call print (|> 5 double)))
+  (expr (call print (>> double inc)))
+  (const total (call reduce (lambda (a:int b:int) -> (+ a b)) 0 (call map double (list 1 2))))
+  (match (record (kind "c"))
+    (arm {kind: "c", r: r}
+      (expr (call print r))
+    )
+    (arm _
+      (expr (call print "other"))
+    )
+  )
+)

@@ -239,7 +239,8 @@ Inference notes:
 - Return-type mismatches; `return` outside a function.
 - Paths that fall off the end of a function whose return type rejects `None`
   (falling off returns `None`). A `while True` with no `break` counts as
-  never finishing, which is the only way to inhabit `never`.
+  never finishing, which (together with a `partial` function) is the only
+  way to inhabit `never` without recursion.
 - `break`/`continue` outside a loop; nested `def` (unsupported).
 - Redefining or shadowing builtins; using a function name as a value.
 - Non-iterables in `for`, non-indexables under `[]`, `str` item assignment.
@@ -247,6 +248,97 @@ Inference notes:
 Errors carry `file:line:` and don't stop the checker — you get the full
 list. (Top-level errors print before function-body errors, because bodies
 are checked in a later pass once global types are known.)
+
+## Purity, totality, and proof mode
+
+Three declarations on a `def` turn the checker from a type checker into a
+*claim* checker, in the sense that matters for [`proofs.md`](proofs.md):
+
+- **`pure`** — `def f(x: int) -> int pure { ... }`. A pure function may only
+  call other pure functions and the pure builtins (`len`, `range`, `str`,
+  `int`, `sqrt`, `tan`, `gc_stats`). Calling `print`, `rand`, or the
+  file/process builtins is a compile error (`E_TYPE_PURE_CALL`), and a
+  nested `def` inside a pure function must itself be pure
+  (`E_TYPE_PURE_NESTED`). "This function is a pure function of its inputs"
+  is now statable — the precondition for any proof obligation about a model.
+  Purity is deliberately shallow: it is enforced on *calls*, not on global
+  state or function values, so `pure` is a promise about what the function
+  invokes, not a full effect system.
+
+- **`partial`** — `def f(n: int) -> int partial { ... }`. Functions are
+  **total by default**: a recursive call must descend structurally, i.e. at
+  least one argument must be a projection chain from a parameter whose
+  declared type is a recursive alias (`n.succ`, `xs.tail`), with every step
+  landing back on that same alias. A recursive call that does not descend is
+  an error (`E_TYPE_TERMINATION`) unless the function is declared `partial`.
+  Mutual recursion and descent through list elements (`t.kids[0]`) are not
+  recognized yet, so those also need `partial`.
+
+- **`--proof`** — `emeraldc --check --proof f.rald`. Proof mode bans `any`
+  (in annotations, in signatures, and wherever a value's inferred type is
+  `any`) and bans `partial`. A clean `--check --proof` therefore means every
+  value has a static type and every function terminates structurally — the
+  minimal meaning of "this is a proof" (see `proofs.md`). `[]` literals
+  still have element type `any` inside, and `any` hidden inside a type is
+  not yet tainted through, so proof mode is a strict first cut, not a
+  complete soundness guarantee.
+
+Both `pure` and `partial` may appear on the same function (`pure partial`),
+and neither changes code generation — they are checker-only.
+
+## The functional core
+
+Emerald's functional core is a small, typed layer on top of the same value
+model: functions are values, lists are the main data structure, and records
+serve as tagged sum types for pattern matching.
+
+- **`const`** — `const x = v` / `const x: T = v` binds `x` immutably.
+  Reassigning a `const` is `E_TYPE_CONST`. Prefer `const` for bindings that
+  never change; it is the honest spelling of "this is a value".
+
+- **Lambdas** — `(a: int, b) => body` is an anonymous function value with
+  type `(int, any) -> ...`. Unannotated parameters are typed contextually:
+  inside `map(f, xs)`, `filter(f, xs)` or `reduce(f, acc, xs)` the lambda's
+  parameters take the instantiated element types, so `map((x) => x * 2,
+  [1, 2, 3])` checks even though `x` has no annotation. A lambda captures
+  enclosing locals by reference (shared cell), so closures can carry state:
+  `c = 0; def bump() -> int { c = c + 1; return c }; return bump`.
+
+- **Higher-order builtins** — typed with fresh type variables at each call
+  site (so nested use composes):
+
+  ```
+  map(f: (T) -> U, xs: list[T]) -> list[U]
+  filter(f: (T) -> bool, xs: list[T]) -> list[T]
+  reduce(f: (U, T) -> U, acc: U, xs: list[T]) -> U
+  ```
+
+- **Pipe and compose** — `x |> f` is `f(x)` (right side must be a unary
+  function), and `f >> g` is `x -> g(f(x))`; `>>` binds tighter than `|>`.
+  `>>` builds a closure at runtime (`em_compose`), so composed pipelines are
+  ordinary function values.
+
+- **`match`** — `match e { pat -> { ... } }` with patterns `_`, a binding
+  name, a literal, or a record shape `{ kind: "circle", r }` (which binds
+  `r`). The checker proves exhaustiveness (`E_TYPE_MATCH`), so a `match`
+  over a tagged union replaces the manual `if e.kind == ...` chains:
+
+  ```
+  type Shape = { kind: "circle", r: float } | { kind: "square", side: float }
+  def area(s: Shape) -> float {
+      match s {
+          { kind: "circle", r } -> { return 3.14159 * r * r }
+          { kind: "square", side } -> { return side * side }
+      }
+  }
+  ```
+
+- **Tail calls** — a `return f(...)` that calls the enclosing function
+  directly is compiled to a jump (reassign parameters, loop) instead of a
+  recursive call, so tail recursion runs in constant stack: `sum_to(n - 1,
+  acc + n)` for `n = 10_000_000` is fine. Tail calls inside `if`/`match`
+  arms are recognized; mutual recursion is not (it needs a trampoline), and
+  a self-call inside a nested `def` belongs to that nested function.
 
 ## Deliberate omissions
 

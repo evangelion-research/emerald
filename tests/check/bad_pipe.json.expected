@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_OPERAND",
+    "file": "tests/check/bad_pipe.rald",
+    "line": 1,
+    "column": 9,
+    "message": "right side of '|>' must be a unary function, got int",
+    "source_line": "print(5 |> 42)"
+  }
+]

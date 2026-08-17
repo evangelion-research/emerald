@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_PURE_NESTED",
+    "file": "tests/check/bad_pure_nested.rald",
+    "line": 4,
+    "column": 5,
+    "message": "nested function 'helper' inside a pure function must be declared pure",
+    "source_line": "    def helper() -> None { print(\"x\") }"
+  }
+]

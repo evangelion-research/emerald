@@ -650,6 +650,16 @@ void em_setindex(Value seq, Value idx, Value v) {
     gc_write_barrier(seq.as.o, v);
 }
 
+bool em_is_record(Value v) { return is_rec(v); }
+
+bool em_rec_has(Value rec, const char *name) {
+    if (!is_rec(rec)) return false;
+    Obj *o = rec.as.o;
+    for (size_t i = 0; i < o->as.rec.len; i++)
+        if (strcmp(o->as.rec.keys[i], name) == 0) return true;
+    return false;
+}
+
 Value em_getattr(Value rec, const char *name) {
     if (!is_rec(rec)) rt_fatal("%s has no fields (looking for .%s)", type_name(rec), name);
     Obj *o = rec.as.o;
@@ -904,4 +914,100 @@ Value em_call(Value fn, size_t argc, ...) {
     rt_pop_frame();
     free(args);
     return r;
+}
+
+/* call a closure with `n` arguments packed into `args` (rooted by the caller) */
+static Value call_closure_n(Value fn, Value *args, size_t n) {
+    if (!(fn.tag == V_OBJ && fn.as.o->tag == O_FUNC))
+        rt_fatal("attempt to call a value of type %s", type_name(fn));
+    Obj *c = fn.as.o;
+    if (c->as.func.arity != n)
+        rt_fatal("function expects %zu argument(s), got %zu", c->as.func.arity, n);
+    return c->as.func.fn(c->as.func.env, args);
+}
+
+/* --- higher-order list builtins ------------------------------------------ */
+
+Value em_map(Value fn, Value xs) {
+    if (!(xs.tag == V_OBJ && xs.as.o->tag == O_LIST))
+        rt_fatal("map() expects a list, got %s", type_name(xs));
+    Obj *src = xs.as.o;
+    Value result = em_list_litn(src->as.list.len);
+    RootFrame fr;
+    rt_push_frame(&fr, &result, 1); /* root the result while fn may allocate */
+    Obj *dst = result.as.o;
+    for (size_t i = 0; i < src->as.list.len; i++) {
+        Value a[1] = { src->as.list.items[i] };
+        RootFrame af;
+        rt_push_frame(&af, a, 1);
+        Value r = call_closure_n(fn, a, 1);
+        rt_pop_frame();
+        dst->as.list.items[i] = r;
+    }
+    rt_pop_frame();
+    return result;
+}
+
+Value em_filter(Value fn, Value xs) {
+    if (!(xs.tag == V_OBJ && xs.as.o->tag == O_LIST))
+        rt_fatal("filter() expects a list, got %s", type_name(xs));
+    Obj *src = xs.as.o;
+    Value result = em_list_litn(0);
+    RootFrame fr;
+    rt_push_frame(&fr, &result, 1);
+    Obj *dst = result.as.o;
+    for (size_t i = 0; i < src->as.list.len; i++) {
+        Value a[1] = { src->as.list.items[i] };
+        RootFrame af;
+        rt_push_frame(&af, a, 1);
+        Value keep = call_closure_n(fn, a, 1);
+        rt_pop_frame();
+        if (em_truthy(keep)) {
+            if (dst->as.list.len == dst->as.list.cap) {
+                dst->as.list.cap = dst->as.list.cap ? dst->as.list.cap * 2 : 4;
+                dst->as.list.items =
+                    realloc(dst->as.list.items, sizeof(Value) * dst->as.list.cap);
+                if (!dst->as.list.items) {
+                    fputs("emerald: out of memory\n", stderr);
+                    exit(1);
+                }
+            }
+            dst->as.list.items[dst->as.list.len++] = a[0];
+        }
+    }
+    rt_pop_frame();
+    return result;
+}
+
+Value em_reduce(Value fn, Value acc, Value xs) {
+    if (!(xs.tag == V_OBJ && xs.as.o->tag == O_LIST))
+        rt_fatal("reduce() expects a list, got %s", type_name(xs));
+    Obj *src = xs.as.o;
+    RootFrame fr;
+    rt_push_frame(&fr, &acc, 1);
+    for (size_t i = 0; i < src->as.list.len; i++) {
+        Value args[2] = { acc, src->as.list.items[i] };
+        RootFrame af;
+        rt_push_frame(&af, args, 2);
+        Value r = call_closure_n(fn, args, 2);
+        rt_pop_frame();
+        acc = r;
+    }
+    rt_pop_frame();
+    return acc;
+}
+
+/* `f >> g`: a closure h(x) = g(f(x)) */
+static Value compose_tramp(Value *env, Value *args) {
+    Value fx = call_closure_n(env[0], args, 1);
+    RootFrame fr;
+    rt_push_frame(&fr, &fx, 1); /* root fx while g may allocate */
+    Value r = call_closure_n(env[1], &fx, 1);
+    rt_pop_frame();
+    return r;
+}
+
+Value em_compose(Value f, Value g) {
+    Value env[2] = { f, g };
+    return em_mkclosure(compose_tramp, 1, env, 2);
 }

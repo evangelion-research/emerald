@@ -91,7 +91,11 @@ static Type *ty_list(Type *elem) {
 
 static Type *ty_func(Type **params, size_t count, Type *ret) {
     Type *t = ty_new(TY_FUNC);
-    t->fun.params = params;
+    /* own a copy: callers may pass stack arrays (e.g. {t} in a local), and
+     * the func type outlives them */
+    t->fun.params = xmalloc(sizeof(Type *) * (count ? count : 1));
+    for (size_t i = 0; i < count; i++)
+        t->fun.params[i] = params[i];
     t->fun.count = count;
     t->fun.ret = ret;
     return t;
@@ -469,6 +473,7 @@ typedef struct {
     Type *type;     /* current flow-narrowed type: reads see this */
     bool annotated; /* explicit annotations are enforced; inferred ones widen */
     bool bound;     /* false until the first assignment executes */
+    bool is_const;  /* declared `const`: reassignment is an error */
     int gen;        /* bumped on assignment; invalidates stale narrowings */
 } Var;
 
@@ -482,6 +487,8 @@ typedef struct {
     Type **params;       /* may contain TY_VAR when generic */
     size_t param_count;
     Type *ret;
+    bool pure;           /* declared `pure`: may only call pure functions/builtins */
+    bool partial;        /* declared `partial`: exempt from termination checking */
     const Stmt *node;
 } FuncSig;
 
@@ -497,6 +504,7 @@ typedef struct Scope {
     FuncSig *funcs;        /* nested `def`s registered in this scope */
     size_t func_count, func_cap;
     struct Scope *parent;  /* enclosing function scope; NULL for a top def */
+    bool pure;             /* purity of the enclosing def; nested defs must match */
 } Scope;
 
 typedef struct {
@@ -511,6 +519,9 @@ typedef struct {
     VarEnv globals;
     Scope *scope;     /* current function scope; NULL at top level */
     Type *cur_ret;    /* declared return type of the current function */
+    bool cur_pure;    /* purity of the function whose body is being checked */
+    bool proof;       /* --proof: `any` and `partial` are banned */
+    bool in_sig;      /* resolving a function signature: proof `any` reports here */
     int loop_depth;
 } Ck;
 
@@ -560,6 +571,7 @@ static Var *env_add(VarEnv *env, const char *name, Type *t, bool annotated) {
     v->type = t;
     v->annotated = annotated;
     v->bound = false;
+    v->is_const = false;
     v->gen = 0;
     return v;
 }
@@ -579,7 +591,21 @@ static bool is_builtin(const char *name) {
            strcmp(name, "read_file") == 0 || strcmp(name, "write_file") == 0 ||
            strcmp(name, "append_file") == 0 || strcmp(name, "run") == 0 ||
            strcmp(name, "sqrt") == 0 ||
-           strcmp(name, "tan") == 0 || strcmp(name, "rand") == 0;
+           strcmp(name, "tan") == 0 || strcmp(name, "rand") == 0 ||
+           strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
+           strcmp(name, "reduce") == 0;
+}
+
+/* which builtins are pure (no IO, no randomness, no ambient state)? A pure
+ * function may call exactly these. `print`, the file/process builtins, and
+ * `rand` are the impure ones. */
+static bool builtin_pure(const char *name) {
+    return strcmp(name, "len") == 0 || strcmp(name, "range") == 0 ||
+           strcmp(name, "str") == 0 || strcmp(name, "int") == 0 ||
+           strcmp(name, "gc_stats") == 0 ||
+           strcmp(name, "sqrt") == 0 || strcmp(name, "tan") == 0 ||
+           strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
+           strcmp(name, "reduce") == 0;
 }
 
 static FuncSig *find_func(Ck *ck, const char *name) {
@@ -608,8 +634,12 @@ static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
                 return env->types[i];
             }
     Type *builtin = NULL;
-    if (strcmp(te->name, "any") == 0) builtin = &t_any;
-    else if (strcmp(te->name, "never") == 0) builtin = &t_never;
+    if (strcmp(te->name, "any") == 0) {
+        if (ck->proof && ck->in_sig)
+            ck_error(ck, "E_PROOF_ANY", te->line, te->col,
+                     "'any' is banned in proof mode: annotate this type");
+        builtin = &t_any;
+    } else if (strcmp(te->name, "never") == 0) builtin = &t_never;
     else if (strcmp(te->name, "None") == 0) builtin = &t_none;
     else if (strcmp(te->name, "bool") == 0) builtin = &t_bool;
     else if (strcmp(te->name, "int") == 0) builtin = &t_int;
@@ -680,6 +710,7 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
         case LIT_INT:  return ty_lit_int(te->lit.ival);
         case LIT_STR:  return ty_lit_str(te->lit.sval);
         case LIT_BOOL: return ty_lit_bool(te->lit.ival);
+        case LIT_NONE: return &t_none;
         }
         return &t_any;
     case TE_LIST:
@@ -738,6 +769,46 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
     }
     }
     return &t_any;
+}
+
+/* --- lambda inference ---------------------------------------------------- */
+
+static Type *infer(Ck *ck, const Expr *e);
+
+static Type *infer_lambda_with(Ck *ck, const Expr *e, Type **ptypes) {
+    Scope sc;
+    memset(&sc, 0, sizeof(sc));
+    sc.parent = ck->scope; /* the body may capture enclosing locals */
+    for (size_t i = 0; i < e->as.lam.param_count; i++) {
+        Var *v = env_add(&sc.locals, e->as.lam.params[i], ptypes[i],
+                         e->as.lam.param_types[i] != NULL);
+        v->bound = true;
+    }
+    Scope *saved = ck->scope;
+    ck->scope = &sc;
+    Type *ret = infer(ck, e->as.lam.body);
+    ck->scope = saved;
+    free(sc.locals.items);
+    return ty_func(ptypes, e->as.lam.param_count, ret);
+}
+
+/* infer a lambda against an expected function type: unannotated parameters
+ * take the expected parameter types (contextual typing); with no expected
+ * type they fall back to `any`. */
+static Type *infer_lambda(Ck *ck, const Expr *e, const Type *expected) {
+    const Type *ex = expected ? ty_resolve(expected) : NULL;
+    Type **ptypes = xmalloc(sizeof(Type *) *
+                            (e->as.lam.param_count ? e->as.lam.param_count : 1));
+    for (size_t i = 0; i < e->as.lam.param_count; i++) {
+        if (e->as.lam.param_types[i] == NULL && ex && ex->k == TY_FUNC &&
+            i < ex->fun.count)
+            ptypes[i] = ex->fun.params[i];
+        else
+            ptypes[i] = e->as.lam.param_types[i]
+                            ? resolve_type(ck, e->as.lam.param_types[i], NULL)
+                            : &t_any;
+    }
+    return infer_lambda_with(ck, e, ptypes);
 }
 
 /* --- generic call-site inference ----------------------------------------- */
@@ -863,6 +934,12 @@ static void unify(Type *param, Type *arg, Subst *sub) {
         }
         return;
     }
+    case TY_FUNC: /* invariant params, covariant return */
+        if (arg->k != TY_FUNC || arg->fun.count != param->fun.count) return;
+        for (size_t i = 0; i < param->fun.count; i++)
+            unify(param->fun.params[i], arg->fun.params[i], sub);
+        unify(param->fun.ret, arg->fun.ret, sub);
+        return;
     default:
         return;
     }
@@ -900,6 +977,40 @@ static Type *infer_binop(Ck *ck, const Expr *e) {
                      "cannot order %s and %s", type_str(l), type_str(r));
         return &t_bool;
     }
+    case B_PIPE: { /* x |> f == f(x) */
+        Type *fnt = ty_resolve(r);
+        if (fnt->k != TY_FUNC || fnt->fun.count != 1) {
+            ck_error(ck, "E_TYPE_OPERAND", e->line, e->col,
+                     "right side of '|>' must be a unary function, got %s",
+                     type_str(fnt));
+            return &t_any;
+        }
+        if (!assignable(fnt->fun.params[0], l))
+            ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
+                       fnt->fun.params[0], l,
+                       "cannot pipe %s into a function expecting %s",
+                       type_str(l), type_str(fnt->fun.params[0]));
+        return fnt->fun.ret;
+    }
+    case B_COMPOSE: { /* f >> g == x -> g(f(x)) */
+        Type *fl = ty_resolve(l);
+        Type *fr = ty_resolve(r);
+        if (fl->k != TY_FUNC || fl->fun.count != 1 ||
+            fr->k != TY_FUNC || fr->fun.count != 1) {
+            ck_error(ck, "E_TYPE_OPERAND", e->line, e->col,
+                     "'>>' composes two unary functions, got %s and %s",
+                     type_str(fl), type_str(fr));
+            return &t_any;
+        }
+        if (!assignable(fr->fun.params[0], fl->fun.ret))
+            ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
+                       fr->fun.params[0], fl->fun.ret,
+                       "composed functions do not chain: %s feeds %s, which "
+                       "expects %s", type_str(fl->fun.ret), type_str(fr),
+                       type_str(fr->fun.params[0]));
+        Type *pt = fl->fun.params[0];
+        return ty_func(&pt, 1, fr->fun.ret);
+    }
     case B_ADD:
         if (l->k == TY_ANY || r->k == TY_ANY) return &t_any;
         if (l->k == TY_STR && r->k == TY_STR) return &t_str;
@@ -931,16 +1042,107 @@ static Type *infer_binop(Ck *ck, const Expr *e) {
     return &t_any;
 }
 
+/* the generic signatures of the higher-order list builtins, instantiated
+ * with fresh type variables at each call site:
+ *   map(f: (T) -> U, xs: list[T]) -> list[U]
+ *   filter(f: (T) -> bool, xs: list[T]) -> list[T]
+ *   reduce(f: (U, T) -> U, acc: U, xs: list[T]) -> U
+ */
+static Type *infer_map_like(Ck *ck, const Expr *e, const char *name,
+                            Type **argt, const bool *islam) {
+    size_t argc = e->as.call.count;
+    Type *t = ty_var("T");
+    Type *u = ty_var("U");
+    Type *f1[] = { t };
+    Type *xs = ty_list(t);
+    Type *params[3];
+    Type *ret;
+    size_t want;
+    if (strcmp(name, "map") == 0) {
+        params[0] = ty_func(f1, 1, u);
+        params[1] = xs;
+        ret = ty_list(u);
+        want = 2;
+    } else if (strcmp(name, "filter") == 0) {
+        params[0] = ty_func(f1, 1, &t_bool);
+        params[1] = xs;
+        ret = xs;
+        want = 2;
+    } else { /* reduce */
+        Type *f2[] = { u, t };
+        params[0] = ty_func(f2, 2, u);
+        params[1] = u;
+        params[2] = xs;
+        ret = u;
+        want = 3;
+    }
+    if (argc != want) {
+        ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                 "%s() takes %zu argument%s, got %zu", name, want,
+                 want == 1 ? "" : "s", argc);
+        return &t_any;
+    }
+    char *tvnames[] = { "T", "U" };
+    Subst sub;
+    sub.names = tvnames;
+    sub.count = 2;
+    sub.types = xmalloc(sizeof(Type *) * 2);
+    memset(sub.types, 0, sizeof(Type *) * 2);
+    /* bind what we can from the non-lambda arguments, then give the
+     * lambdas the instantiated parameter types, then bind the rest */
+    for (size_t i = 0; i < argc; i++)
+        if (!islam[i]) unify(params[i], argt[i], &sub);
+    /* note: do not pre-fill unbound slots with `any` here — ty_subst already
+     * treats NULL as any, and pre-filling would poison the slots: a later
+     * unify could never narrow them (ty_join(any, int) is any), so the
+     * lambda's inferred types would fail to bind the remaining variables */
+    for (size_t i = 0; i < argc; i++)
+        if (islam[i])
+            argt[i] = infer_lambda(ck, e->as.call.args[i],
+                                   ty_subst(params[i], &sub));
+    for (size_t i = 0; i < argc; i++)
+        unify(params[i], argt[i], &sub);
+    for (size_t j = 0; j < 2; j++)
+        if (!sub.types[j]) sub.types[j] = &t_any;
+    for (size_t i = 0; i < argc; i++) {
+        Type *pi = ty_subst(params[i], &sub);
+        if (!assignable(pi, argt[i]))
+            ck_error_t(ck, "E_TYPE_ARG", e->line, e->col, pi, argt[i],
+                       "argument %zu of %s(): expected %s, got %s",
+                       i + 1, name, type_str(pi), type_str(argt[i]));
+    }
+    Type *r = ty_subst(ret, &sub);
+    free(sub.types);
+    return r;
+}
+
 static Type *infer_call(Ck *ck, const Expr *e) {
     const Expr *fn = e->as.call.fn;
     size_t argc = e->as.call.count;
     Type **argt = xmalloc(sizeof(Type *) * (argc ? argc : 1));
-    for (size_t i = 0; i < argc; i++)
-        argt[i] = infer(ck, e->as.call.args[i]);
+    bool *islam = xmalloc(sizeof(bool) * (argc ? argc : 1));
+    for (size_t i = 0; i < argc; i++) {
+        /* lambdas are inferred lazily so unannotated parameters can take the
+         * expected type from the callee's signature (contextual typing) */
+        islam[i] = e->as.call.args[i]->kind == E_LAMBDA;
+        if (!islam[i]) argt[i] = infer(ck, e->as.call.args[i]);
+    }
 
     if (fn->kind == E_NAME) {
         const char *name = fn->as.sval;
         const char *dname = fn->disp ? fn->disp : name;
+        /* purity: a pure function may only call pure builtins */
+        if (ck->cur_pure && is_builtin(name) && !builtin_pure(name))
+            ck_error(ck, "E_TYPE_PURE_CALL", e->line, e->col,
+                     "pure function calls impure builtin '%s'", dname);
+        if (strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
+            strcmp(name, "reduce") == 0)
+            return infer_map_like(ck, e, name, argt, islam);
+        FuncSig *f = find_func(ck, name);
+        if (!f) /* plain builtins have no typed signature: lambdas are free */
+            for (size_t i = 0; i < argc; i++)
+                if (islam[i])
+                    argt[i] = infer_lambda(ck, e->as.call.args[i], NULL);
         if (strcmp(name, "print") == 0) return &t_none;
         if (strcmp(name, "len") == 0) {
             if (argc != 1)
@@ -1025,8 +1227,11 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             return &t_float;
         }
 
-        FuncSig *f = find_func(ck, name);
         if (f) {
+            /* purity: a pure function may only call other pure functions */
+            if (ck->cur_pure && !f->pure)
+                ck_error(ck, "E_TYPE_PURE_CALL", e->line, e->col,
+                         "pure function calls impure function '%s'", dname);
             if (argc != f->param_count) {
                 ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
                          "%s() takes %zu argument%s, got %zu", dname,
@@ -1034,6 +1239,11 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                 return f->tparam_count ? &t_any : f->ret;
             }
             if (f->tparam_count == 0) {
+                /* infer deferred lambdas against the declared parameter types */
+                for (size_t i = 0; i < argc; i++)
+                    if (islam[i])
+                        argt[i] = infer_lambda(ck, e->as.call.args[i],
+                                               f->params[i]);
                 for (size_t i = 0; i < argc; i++)
                     if (!assignable(f->params[i], argt[i]))
                         ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
@@ -1049,6 +1259,16 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             sub.count = f->tparam_count;
             sub.types = xmalloc(sizeof(Type *) * f->tparam_count);
             memset(sub.types, 0, sizeof(Type *) * f->tparam_count);
+            for (size_t i = 0; i < argc; i++)
+                if (!islam[i]) unify(f->params[i], argt[i], &sub);
+            for (size_t j = 0; j < f->tparam_count; j++)
+                if (!sub.types[j]) sub.types[j] = &t_any;
+            /* deferred lambdas get the partially-instantiated param types */
+            for (size_t i = 0; i < argc; i++)
+                if (islam[i])
+                    argt[i] = infer_lambda(ck, e->as.call.args[i],
+                                           ty_subst(f->params[i], &sub));
+            /* now unify everything, so lambda return types bind the rest */
             for (size_t i = 0; i < argc; i++)
                 unify(f->params[i], argt[i], &sub);
             for (size_t j = 0; j < f->tparam_count; j++)
@@ -1086,6 +1306,9 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                  ft->fun.count, ft->fun.count == 1 ? "" : "s", argc);
         return ft->fun.ret;
     }
+    for (size_t i = 0; i < argc; i++)
+        if (islam[i])
+            argt[i] = infer_lambda(ck, e->as.call.args[i], ft->fun.params[i]);
     for (size_t i = 0; i < argc; i++)
         if (!assignable(ft->fun.params[i], argt[i]))
             ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
@@ -1172,6 +1395,15 @@ static Type *infer(Ck *ck, const Expr *e) {
     }
     case E_CALL:
         return infer_call(ck, e);
+    case E_LAMBDA: {
+        Type **ptypes = xmalloc(sizeof(Type *) *
+                                (e->as.lam.param_count ? e->as.lam.param_count : 1));
+        for (size_t i = 0; i < e->as.lam.param_count; i++)
+            ptypes[i] = e->as.lam.param_types[i]
+                            ? resolve_type(ck, e->as.lam.param_types[i], NULL)
+                            : &t_any;
+        return infer_lambda_with(ck, e, ptypes);
+    }
     case E_INDEX: {
         Type *seq = ty_base(infer(ck, e->as.index.seq));
         Type *idx = infer(ck, e->as.index.idx);
@@ -1439,6 +1671,11 @@ static bool stmt_terminates(const Stmt *s) {
             if (!block_terminates(&s->as.ifs.blocks[i])) return false;
         return block_terminates(&s->as.ifs.else_block);
     }
+    case S_MATCH: {
+        for (size_t i = 0; i < s->as.mtch.count; i++)
+            if (!block_terminates(&s->as.mtch.blocks[i])) return false;
+        return true;
+    }
     default:
         return false;
     }
@@ -1471,6 +1708,10 @@ static bool stmt_has_break(const Stmt *s) {
             if (block_has_break(&s->as.ifs.blocks[i])) return true;
         return s->as.ifs.has_else && block_has_break(&s->as.ifs.else_block);
     }
+    case S_MATCH:
+        for (size_t i = 0; i < s->as.mtch.count; i++)
+            if (block_has_break(&s->as.mtch.blocks[i])) return true;
+        return false;
     default: /* nested loops capture their own breaks */
         return false;
     }
@@ -1500,6 +1741,11 @@ static bool stmt_returns(const Stmt *s) {
                       (c->kind == E_INT && c->as.ival != 0);
         return always && !block_has_break(&s->as.wh.body);
     }
+    case S_MATCH: {
+        for (size_t i = 0; i < s->as.mtch.count; i++)
+            if (!block_returns(&s->as.mtch.blocks[i])) return false;
+        return true;
+    }
     default:
         return false;
     }
@@ -1509,6 +1755,307 @@ static bool block_returns(const Block *b) {
     for (size_t i = 0; i < b->count; i++)
         if (stmt_returns(b->items[i])) return true;
     return false;
+}
+
+/* --- termination checking ------------------------------------------------ */
+
+/* Emerald functions are total by default: every recursive call must descend
+ * structurally. An argument descends when it is a projection chain from a
+ * parameter whose declared type is a recursive alias (`n.succ`, `xs.tail`),
+ * with every step landing back on that same alias — the standard "one
+ * constructor step smaller" rule, applied to non-generic recursive aliases.
+ * A function that cannot be shown to terminate this way must be declared
+ * `partial` to opt out. Mutual recursion and descent through `list` elements
+ * (`t.kids[0]`) are not recognized yet, so those also need `partial`.
+ */
+
+typedef struct { const Type *items[256]; size_t count; } Vis;
+
+static bool vis_has(const Vis *v, const Type *t) {
+    for (size_t i = 0; i < v->count; i++)
+        if (v->items[i] == t) return true;
+    return false;
+}
+
+static void vis_add(Vis *v, const Type *t) {
+    if (v->count < 256) v->items[v->count++] = t;
+}
+
+/* A type is "recursive" iff its structure contains a TY_ALIAS node. Aliases
+ * resolve eagerly and cross-alias references are inlined, so any surviving
+ * TY_ALIAS node is a self-reference. */
+static bool type_is_recursive(const Type *t0, Vis *v) {
+    if (t0->k == TY_ALIAS) return true;
+    const Type *t = ty_resolve(t0);
+    if (vis_has(v, t)) return false;
+    vis_add(v, t);
+    switch (t->k) {
+    case TY_LIST:
+        return type_is_recursive(t->elem, v);
+    case TY_REC:
+        for (size_t i = 0; i < t->rec.count; i++)
+            if (type_is_recursive(t->rec.types[i], v)) return true;
+        return false;
+    case TY_UNION:
+        for (size_t i = 0; i < t->uni.count; i++)
+            if (type_is_recursive(t->uni.alts[i], v)) return true;
+        return false;
+    case TY_FUNC:
+        for (size_t i = 0; i < t->fun.count; i++)
+            if (type_is_recursive(t->fun.params[i], v)) return true;
+        return type_is_recursive(t->fun.ret, v);
+    default:
+        return false;
+    }
+}
+
+/* the declared type of field `f` inside the resolved structure of `t`
+ * (a record, or a union of records); NULL when absent */
+static const Type *field_type(const Type *t, const char *f) {
+    const Type *r = ty_resolve(t);
+    if (r->k == TY_REC) {
+        for (size_t i = 0; i < r->rec.count; i++)
+            if (strcmp(r->rec.names[i], f) == 0) return r->rec.types[i];
+        return NULL;
+    }
+    if (r->k == TY_UNION)
+        for (size_t i = 0; i < r->uni.count; i++) {
+            const Type *alt = ty_resolve(r->uni.alts[i]);
+            if (alt->k != TY_REC) continue;
+            for (size_t j = 0; j < alt->rec.count; j++)
+                if (strcmp(alt->rec.names[j], f) == 0) return alt->rec.types[j];
+        }
+    return NULL;
+}
+
+/* is `arg` a strict structural subterm of parameter `pname`, whose declared
+ * type resolves to `root` (a recursive alias)? Every projection step must
+ * land back on `root` (pointer equality), so the chain stays one level deep
+ * in the same inductive structure. */
+static bool arg_descends(const Type *root, const char *pname, const Expr *arg) {
+    const char *fields[32];
+    size_t nf = 0;
+    const Expr *e = arg;
+    while (e->kind == E_ATTR && nf < 32) {
+        fields[nf++] = e->as.attr.name;
+        e = e->as.attr.obj;
+    }
+    if (nf == 0 || e->kind != E_NAME || strcmp(e->as.sval, pname) != 0)
+        return false;
+    Vis vis = {0};
+    if (!type_is_recursive(root, &vis)) return false;
+    const Type *cur = ty_resolve(root);
+    for (size_t i = 0; i < nf; i++) {
+        const Type *ft = field_type(cur, fields[i]);
+        if (!ft) return false;
+        cur = ty_resolve(ft);
+        if (cur != ty_resolve(root)) return false;
+    }
+    return true;
+}
+
+static void collect_calls_expr(const Expr *e, const char *fname,
+                               const Expr ***out, size_t *count, size_t *cap);
+
+static void collect_calls_stmt(const Stmt *s, const char *fname,
+                               const Expr ***out, size_t *count, size_t *cap) {
+    switch (s->kind) {
+    case S_EXPR:
+        collect_calls_expr(s->as.expr, fname, out, count, cap);
+        break;
+    case S_ASSIGN:
+        collect_calls_expr(s->as.assign.value, fname, out, count, cap);
+        break;
+    case S_IF:
+        for (size_t i = 0; i < s->as.ifs.count; i++) {
+            collect_calls_expr(s->as.ifs.conds[i], fname, out, count, cap);
+            for (size_t j = 0; j < s->as.ifs.blocks[i].count; j++)
+                collect_calls_stmt(s->as.ifs.blocks[i].items[j], fname,
+                                   out, count, cap);
+        }
+        if (s->as.ifs.has_else)
+            for (size_t j = 0; j < s->as.ifs.else_block.count; j++)
+                collect_calls_stmt(s->as.ifs.else_block.items[j], fname,
+                                   out, count, cap);
+        break;
+    case S_WHILE:
+        collect_calls_expr(s->as.wh.cond, fname, out, count, cap);
+        for (size_t j = 0; j < s->as.wh.body.count; j++)
+            collect_calls_stmt(s->as.wh.body.items[j], fname, out, count, cap);
+        break;
+    case S_FOR:
+        collect_calls_expr(s->as.fr.seq, fname, out, count, cap);
+        for (size_t j = 0; j < s->as.fr.body.count; j++)
+            collect_calls_stmt(s->as.fr.body.items[j], fname, out, count, cap);
+        break;
+    case S_RETURN:
+        collect_calls_expr(s->as.ret, fname, out, count, cap);
+        break;
+    case S_BLOCK:
+        for (size_t j = 0; j < s->as.block.count; j++)
+            collect_calls_stmt(s->as.block.items[j], fname, out, count, cap);
+        break;
+    case S_FUNC:
+        /* a nested def may call the enclosing function (recursion through a
+         * closure); its calls count against the enclosing function */
+        for (size_t j = 0; j < s->as.func.body.count; j++)
+            collect_calls_stmt(s->as.func.body.items[j], fname, out, count, cap);
+        break;
+    case S_MATCH:
+        collect_calls_expr(s->as.mtch.subject, fname, out, count, cap);
+        for (size_t j = 0; j < s->as.mtch.count; j++)
+            for (size_t k = 0; k < s->as.mtch.blocks[j].count; k++)
+                collect_calls_stmt(s->as.mtch.blocks[j].items[k], fname,
+                                   out, count, cap);
+        break;
+    default:
+        break;
+    }
+}
+
+static void collect_calls_expr(const Expr *e, const char *fname,
+                               const Expr ***out, size_t *count, size_t *cap) {
+    if (!e) return;
+    switch (e->kind) {
+    case E_CALL:
+        if (e->as.call.fn->kind == E_NAME &&
+            strcmp(e->as.call.fn->as.sval, fname) == 0) {
+            if (*count == *cap) {
+                *cap = *cap ? *cap * 2 : 8;
+                *out = realloc(*out, sizeof(Expr *) * *cap);
+                if (!*out) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+            }
+            (*out)[(*count)++] = e;
+        }
+        collect_calls_expr(e->as.call.fn, fname, out, count, cap);
+        for (size_t i = 0; i < e->as.call.count; i++)
+            collect_calls_expr(e->as.call.args[i], fname, out, count, cap);
+        break;
+    case E_LIST:
+        for (size_t i = 0; i < e->as.list.count; i++)
+            collect_calls_expr(e->as.list.items[i], fname, out, count, cap);
+        break;
+    case E_REC:
+        for (size_t i = 0; i < e->as.rec.count; i++)
+            collect_calls_expr(e->as.rec.values[i], fname, out, count, cap);
+        break;
+    case E_BINOP:
+        collect_calls_expr(e->as.bin.lhs, fname, out, count, cap);
+        collect_calls_expr(e->as.bin.rhs, fname, out, count, cap);
+        break;
+    case E_UNOP:
+        collect_calls_expr(e->as.un.operand, fname, out, count, cap);
+        break;
+    case E_INDEX:
+        collect_calls_expr(e->as.index.seq, fname, out, count, cap);
+        collect_calls_expr(e->as.index.idx, fname, out, count, cap);
+        break;
+    case E_ATTR:
+        collect_calls_expr(e->as.attr.obj, fname, out, count, cap);
+        break;
+    default:
+        break;
+    }
+}
+
+/* every self-recursive call of a non-`partial` function must descend
+ * structurally (see arg_descends); `ptypes` holds the resolved declared
+ * parameter types */
+static void check_termination(Ck *ck, const Stmt *s, Type **ptypes) {
+    const char *fname = s->as.func.name;
+    const Expr **calls = NULL;
+    size_t n = 0, cap = 0;
+    for (size_t i = 0; i < s->as.func.body.count; i++)
+        collect_calls_stmt(s->as.func.body.items[i], fname, &calls, &n, &cap);
+    if (!n) { free(calls); return; }
+    for (size_t c = 0; c < n; c++) {
+        const Expr *call = calls[c];
+        bool descends = false;
+        for (size_t i = 0; i < s->as.func.param_count &&
+                            i < call->as.call.count && !descends; i++)
+            descends = arg_descends(ptypes[i], s->as.func.params[i],
+                                    call->as.call.args[i]);
+        if (!descends)
+            ck_error(ck, "E_TYPE_TERMINATION", call->line, call->col,
+                     "recursive call to '%s' does not decrease a "
+                     "recursive-alias argument; declare the function "
+                     "'partial' to opt out of termination checking",
+                     s->as.func.dispname);
+    }
+    free(calls);
+}
+
+/* --- pattern matching ---------------------------------------------------- */
+
+static Type *lit_pat_type(const Pat *p) {
+    switch (p->lit.kind) {
+    case LIT_INT:  return ty_lit_int(p->lit.ival);
+    case LIT_STR:  return ty_lit_str(p->lit.sval);
+    case LIT_BOOL: return ty_lit_bool(p->lit.ival);
+    case LIT_NONE: return &t_none;
+    }
+    return &t_any;
+}
+
+/* bind a pattern variable; Emerald has no shadowing, so a collision with an
+ * existing name in the scope is an error */
+static void pat_bind(Ck *ck, VarEnv *env, const char *name, const Type *t,
+                     int line, int col) {
+    if (env_find(env, name))
+        ck_error(ck, "E_TYPE_BIND", line, col,
+                 "pattern binding '%s' is already defined in this scope", name);
+    else
+        env_add(env, name, (Type *)t, true);
+}
+
+/* check one pattern against the subject type, binding its names into `env`;
+ * returns the type of values the pattern covers (for exhaustiveness) */
+static Type *check_pattern(Ck *ck, const Pat *p, const Type *st, VarEnv *env) {
+    switch (p->kind) {
+    case P_WILD:
+        return &t_any;
+    case P_BIND:
+        pat_bind(ck, env, p->bind, st, p->line, p->col);
+        return &t_any;
+    case P_LIT:
+        return lit_pat_type(p);
+    case P_REC: {
+        Type *t = ty_new(TY_REC);
+        t->rec.names = xmalloc(sizeof(char *) *
+                               (p->rec.count ? p->rec.count : 1));
+        t->rec.types = xmalloc(sizeof(Type *) *
+                               (p->rec.count ? p->rec.count : 1));
+        t->rec.count = p->rec.count;
+        for (size_t i = 0; i < p->rec.count; i++) {
+            const Pat *it = p->rec.items[i];
+            const Type *ft = field_type(st, it->name);
+            if (!ft) {
+                ck_error(ck, "E_TYPE_FIELD", it->line, it->col,
+                         "type %s has no field '%s' (in pattern)",
+                         type_str(st), it->name);
+                ft = &t_any;
+            }
+            t->rec.names[i] = it->name;
+            switch (it->kind) {
+            case P_BIND:
+                pat_bind(ck, env, it->bind, ft, it->line, it->col);
+                t->rec.types[i] = (Type *)ft;
+                break;
+            case P_WILD:
+                t->rec.types[i] = (Type *)ft;
+                break;
+            case P_LIT:
+                t->rec.types[i] = lit_pat_type(it);
+                break;
+            case P_REC:
+                t->rec.types[i] = check_pattern(ck, it, ft, env);
+                break;
+            }
+        }
+        return t;
+    }
+    }
+    return &t_any;
 }
 
 /* --- statements ---------------------------------------------------------- */
@@ -1546,6 +2093,9 @@ static void set_flow(Var *v, Type *val) {
 
 static void check_assign(Ck *ck, const Stmt *s) {
     Type *val = infer(ck, s->as.assign.value);
+    if (ck->proof && val->k == TY_ANY)
+        ck_error(ck, "E_PROOF_ANY", s->line, s->col,
+                 "value has type 'any', which is banned in proof mode");
     Expr *target = s->as.assign.target;
 
     if (target->kind == E_NAME) {
@@ -1558,8 +2108,17 @@ static void check_assign(Ck *ck, const Stmt *s) {
         VarEnv *env = ck->scope ? &ck->scope->locals : &ck->globals;
         Var *v = env_find(env, name);
         if (!v && ck->scope) v = env_find(&ck->globals, name); /* docs rule */
+        if (v && v->is_const && !s->as.assign.is_const) {
+            ck_error(ck, "E_TYPE_CONST", s->line, s->col,
+                     "cannot assign to const '%s'", name);
+            return;
+        }
         if (s->as.assign.ann) {
             Type *ann = resolve_type(ck, s->as.assign.ann, NULL);
+            if (ck->proof && ann->k == TY_ANY)
+                ck_error(ck, "E_PROOF_ANY", s->line, s->col,
+                         "'any' is banned in proof mode: annotate '%s' with a "
+                         "concrete type", name);
             if (!assignable(ann, val))
                 ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, ann, val,
                            "cannot assign %s to '%s' declared as %s",
@@ -1567,15 +2126,18 @@ static void check_assign(Ck *ck, const Stmt *s) {
             if (!v) v = env_add(env, name, ann, true);
             v->decl = ann;
             v->annotated = true;
+            v->is_const = s->as.assign.is_const;
             set_flow(v, val);
             return;
         }
         if (!v) {
             v = env_add(env, name, widen(val), false);
+            v->is_const = s->as.assign.is_const;
             set_flow(v, val);
             return;
         }
         if (!v->bound) { /* first assignment fixes the inferred type */
+            v->is_const = s->as.assign.is_const;
             if (!v->annotated) v->decl = widen(val);
             else if (!assignable(v->decl, val))
                 ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, v->decl, val,
@@ -1646,9 +2208,13 @@ static void check_assign(Ck *ck, const Stmt *s) {
 
 static void check_stmt(Ck *ck, const Stmt *s) {
     switch (s->kind) {
-    case S_EXPR:
-        infer(ck, s->as.expr);
+    case S_EXPR: {
+        Type *t = infer(ck, s->as.expr);
+        if (ck->proof && t->k == TY_ANY)
+            ck_error(ck, "E_PROOF_ANY", s->line, s->col,
+                     "expression has type 'any', which is banned in proof mode");
         break;
+    }
     case S_ASSIGN:
         check_assign(ck, s);
         break;
@@ -1679,7 +2245,11 @@ static void check_stmt(Ck *ck, const Stmt *s) {
 
         NSet ns = {.count = 0};
         for (size_t i = 0; i < narms; i++) {
-            infer(ck, s->as.ifs.conds[i]);
+            Type *ct = infer(ck, s->as.ifs.conds[i]);
+            if (ck->proof && ct->k == TY_ANY)
+                ck_error(ck, "E_PROOF_ANY", s->line, s->col,
+                         "condition has type 'any', which is banned in proof "
+                         "mode");
             size_t mark = ns.count;
             narrow_cond(ck, s->as.ifs.conds[i], true, &ns);
             check_block(ck, &s->as.ifs.blocks[i]);
@@ -1710,7 +2280,10 @@ static void check_stmt(Ck *ck, const Stmt *s) {
         break;
     }
     case S_WHILE: {
-        infer(ck, s->as.wh.cond);
+        Type *ct = infer(ck, s->as.wh.cond);
+        if (ck->proof && ct->k == TY_ANY)
+            ck_error(ck, "E_PROOF_ANY", s->line, s->col,
+                     "condition has type 'any', which is banned in proof mode");
         NSet ns = {.count = 0};
         narrow_cond(ck, s->as.wh.cond, true, &ns);
         ck->loop_depth++;
@@ -1721,6 +2294,10 @@ static void check_stmt(Ck *ck, const Stmt *s) {
     }
     case S_FOR: {
         Type *seq = ty_base(infer(ck, s->as.fr.seq));
+        if (ck->proof && seq->k == TY_ANY)
+            ck_error(ck, "E_PROOF_ANY", s->line, s->col,
+                     "iterated value has type 'any', which is banned in proof "
+                     "mode");
         Type *elem = &t_any;
         if (seq->k == TY_LIST) elem = widen(seq->elem);
         else if (seq->k == TY_STR) elem = &t_str;
@@ -1749,6 +2326,10 @@ static void check_stmt(Ck *ck, const Stmt *s) {
             break;
         }
         Type *t = s->as.ret ? infer(ck, s->as.ret) : &t_none;
+        if (ck->proof && t->k == TY_ANY)
+            ck_error(ck, "E_PROOF_ANY", s->line, s->col,
+                     "returning a value of type 'any', which is banned in "
+                     "proof mode");
         if (!assignable(ck->cur_ret, t))
             ck_error_t(ck, "E_TYPE_RETURN", s->line, s->col, ck->cur_ret, t,
                        "returning %s from a function declared to return %s",
@@ -1770,6 +2351,22 @@ static void check_stmt(Ck *ck, const Stmt *s) {
     case S_BLOCK:
         check_block(ck, &s->as.block);
         break;
+    case S_MATCH: {
+        Type *st = ty_resolve(infer(ck, s->as.mtch.subject));
+        VarEnv *env = ck->scope ? &ck->scope->locals : &ck->globals;
+        Type *covered = &t_never;
+        for (size_t i = 0; i < s->as.mtch.count; i++) {
+            size_t mark = env->count; /* bindings are scoped per arm */
+            Type *cov = check_pattern(ck, s->as.mtch.pats[i], st, env);
+            covered = ty_join(covered, cov);
+            check_block(ck, &s->as.mtch.blocks[i]);
+            env->count = mark;
+        }
+        if (!assignable(covered, st))
+            ck_error(ck, "E_TYPE_MATCH", s->line, s->col,
+                     "match is not exhaustive: add a catch-all arm ('_')");
+        break;
+    }
     case S_FUNC:
         if (ck->scope)
             check_func(ck, ck->scope, s); /* nested def: check its body now */
@@ -1825,6 +2422,16 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
                  "cannot redefine builtin '%s'", s->as.func.dispname);
         return;
     }
+    /* a nested def inside a pure function must itself be pure, or a pure
+     * function could smuggle an impure helper past the call check */
+    if (scope && scope->pure && !s->as.func.pure)
+        ck_error(ck, "E_TYPE_PURE_NESTED", s->line, s->col,
+                 "nested function '%s' inside a pure function must be declared "
+                 "pure", s->as.func.dispname);
+    if (ck->proof && s->as.func.partial)
+        ck_error(ck, "E_PROOF_PARTIAL", s->line, s->col,
+                 "'partial' functions are banned in proof mode: '%s' must "
+                 "terminate structurally", s->as.func.dispname);
     FuncSig *f;
     if (scope) {
         for (size_t i = 0; i < scope->func_count; i++)
@@ -1857,10 +2464,23 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
     f->tparams = s->as.func.tparams;
     f->tparam_count = s->as.func.tparam_count;
     f->param_count = s->as.func.param_count;
+    f->pure = s->as.func.pure;
+    f->partial = s->as.func.partial;
     f->params = xmalloc(sizeof(Type *) * (f->param_count ? f->param_count : 1));
-    for (size_t j = 0; j < f->param_count; j++)
+    bool saved_in_sig = ck->in_sig;
+    ck->in_sig = true;
+    for (size_t j = 0; j < f->param_count; j++) {
+        if (ck->proof && s->as.func.param_types[j] == NULL)
+            ck_error(ck, "E_PROOF_ANY", s->line, s->col,
+                     "parameter '%s' has no type annotation ('any' is banned in "
+                     "proof mode)", s->as.func.params[j]);
         f->params[j] = resolve_type(ck, s->as.func.param_types[j], te);
+    }
+    if (ck->proof && s->as.func.ret_type == NULL)
+        ck_error(ck, "E_PROOF_ANY", s->line, s->col,
+                 "missing return type annotation ('any' is banned in proof mode)");
     f->ret = resolve_type(ck, s->as.func.ret_type, te);
+    ck->in_sig = saved_in_sig;
     f->node = s;
     free(tenv.types);
 }
@@ -1889,6 +2509,10 @@ static void register_nested(Ck *ck, Scope *scope, const Block *b) {
         case S_BLOCK:
             register_nested(ck, scope, &s->as.block);
             break;
+        case S_MATCH:
+            for (size_t j = 0; j < s->as.mtch.count; j++)
+                register_nested(ck, scope, &s->as.mtch.blocks[j]);
+            break;
         default:
             break;
         }
@@ -1904,9 +2528,12 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     Scope sc;
     memset(&sc, 0, sizeof(sc));
     sc.parent = parent;
+    sc.pure = s->as.func.pure;
+    Type **ptypes = xmalloc(sizeof(Type *) *
+                            (s->as.func.param_count ? s->as.func.param_count : 1));
     for (size_t i = 0; i < s->as.func.param_count; i++) {
-        Type *pt = resolve_type(ck, s->as.func.param_types[i], te);
-        Var *v = env_add(&sc.locals, s->as.func.params[i], pt,
+        ptypes[i] = resolve_type(ck, s->as.func.param_types[i], te);
+        Var *v = env_add(&sc.locals, s->as.func.params[i], ptypes[i],
                          s->as.func.param_types[i] != NULL);
         v->bound = true;
     }
@@ -1917,8 +2544,10 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
 
     Scope *saved_scope = ck->scope;
     Type *saved_ret = ck->cur_ret;
+    bool saved_pure = ck->cur_pure;
     ck->scope = &sc;
     ck->cur_ret = resolve_type(ck, s->as.func.ret_type, te);
+    ck->cur_pure = sc.pure;
     /* falling off the end returns None, so a stricter return type demands
      * that every path return explicitly */
     if (!assignable(ck->cur_ret, &t_none) && !block_returns(&s->as.func.body))
@@ -1926,20 +2555,26 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
                  "%s() can finish without returning a value, but is declared "
                  "to return %s", s->as.func.dispname, type_str(ck->cur_ret));
     check_block(ck, &s->as.func.body);
+    if (!s->as.func.partial)
+        check_termination(ck, s, ptypes);
     ck->scope = saved_scope;
     ck->cur_ret = saved_ret;
+    ck->cur_pure = saved_pure;
 
+    free(ptypes);
     free(sc.locals.items);
     free(sc.funcs);
     free(tenv.types);
     ck->filename = saved_file;
 }
 
-int check_program(const Program *prog, const char *filename, DiagList *diags) {
+int check_program(const Program *prog, const char *filename, DiagList *diags,
+                  bool proof) {
     Ck ck;
     memset(&ck, 0, sizeof(ck));
     ck.filename = filename;
     ck.diags = diags;
+    ck.proof = proof;
 
     /* pass 1a: type aliases, in file order (use-before-definition is an error).
      * Generic aliases keep their body unresolved and expand at each use. */

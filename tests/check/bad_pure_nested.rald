@@ -1,0 +1,8 @@
+# A nested def inside a pure function must itself be pure, or a pure
+# function could smuggle an impure helper past the call check.
+def outer() -> int pure {
+    def helper() -> None { print("x") }
+    return 0
+}
+
+print(outer())

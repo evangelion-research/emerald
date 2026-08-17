@@ -5,6 +5,7 @@
 
 static void print_expr(FILE *out, const Expr *e);
 static void print_stmt(FILE *out, const Stmt *s, int indent);
+static void print_pat(FILE *out, const Pat *p);
 static void print_str_escaped(FILE *out, const char *s);
 
 static void ind(FILE *out, int n) {
@@ -19,6 +20,7 @@ static const char *binop_name(BinOp op) {
     case B_LT: return "<";   case B_LE: return "<=";
     case B_GT: return ">";   case B_GE: return ">=";
     case B_AND: return "and"; case B_OR: return "or";
+    case B_PIPE: return "|>"; case B_COMPOSE: return ">>";
     }
     return "?";
 }
@@ -42,6 +44,7 @@ static void print_type(FILE *out, const TypeExpr *t) {
         case LIT_INT:  fprintf(out, "%lld", (long long)t->lit.ival); break;
         case LIT_STR:  print_str_escaped(out, t->lit.sval); break;
         case LIT_BOOL: fputs(t->lit.ival ? "True" : "False", out); break;
+        case LIT_NONE: fputs("None", out); break;
         }
         break;
     case TE_LIST:
@@ -159,6 +162,17 @@ static void print_expr(FILE *out, const Expr *e) {
         print_expr(out, e->as.attr.obj);
         fprintf(out, " %s)", e->as.attr.name);
         break;
+    case E_LAMBDA:
+        fputs("(lambda (", out);
+        for (size_t i = 0; i < e->as.lam.param_count; i++) {
+            if (i) fputs(" ", out);
+            fprintf(out, "%s:", e->as.lam.params[i]);
+            print_type(out, e->as.lam.param_types[i]);
+        }
+        fputs(") -> ", out);
+        print_expr(out, e->as.lam.body);
+        fputs(")", out);
+        break;
     }
 }
 
@@ -176,7 +190,7 @@ static void print_stmt(FILE *out, const Stmt *s, int indent) {
         fputs(")\n", out);
         break;
     case S_ASSIGN:
-        fputs("(assign ", out);
+        fputs(s->as.assign.is_const ? "(const " : "(assign ", out);
         print_expr(out, s->as.assign.target);
         if (s->as.assign.ann) {
             fputs(" : ", out);
@@ -240,6 +254,22 @@ static void print_stmt(FILE *out, const Stmt *s, int indent) {
         ind(out, indent);
         fputs(")\n", out);
         break;
+    case S_MATCH:
+        fputs("(match ", out);
+        print_expr(out, s->as.mtch.subject);
+        fputs("\n", out);
+        for (size_t i = 0; i < s->as.mtch.count; i++) {
+            ind(out, indent + 1);
+            fputs("(arm ", out);
+            print_pat(out, s->as.mtch.pats[i]);
+            fputs("\n", out);
+            print_block(out, &s->as.mtch.blocks[i], indent + 2);
+            ind(out, indent + 1);
+            fputs(")\n", out);
+        }
+        ind(out, indent);
+        fputs(")\n", out);
+        break;
     case S_FUNC:
         fprintf(out, "(def %s ", s->as.func.name);
         if (s->as.func.tparam_count) {
@@ -258,6 +288,8 @@ static void print_stmt(FILE *out, const Stmt *s, int indent) {
         }
         fputs(") -> ", out);
         print_type(out, s->as.func.ret_type);
+        if (s->as.func.pure) fputs(" pure", out);
+        if (s->as.func.partial) fputs(" partial", out);
         fputs("\n", out);
         print_block(out, &s->as.func.body, indent + 1);
         ind(out, indent);
@@ -319,9 +351,41 @@ void ast_collect_assigned(const Block *b, void (*fn)(const char *, int line, voi
         case S_BLOCK:
             ast_collect_assigned(&s->as.block, fn, ud);
             break;
+        case S_MATCH:
+            for (size_t j = 0; j < s->as.mtch.count; j++)
+                ast_collect_assigned(&s->as.mtch.blocks[j], fn, ud);
+            break;
         default:
             break;
         }
+    }
+}
+
+static void print_pat(FILE *out, const Pat *p) {
+    switch (p->kind) {
+    case P_WILD:
+        fputs("_", out);
+        break;
+    case P_BIND:
+        fputs(p->bind, out);
+        break;
+    case P_LIT:
+        switch (p->lit.kind) {
+        case LIT_INT:  fprintf(out, "%lld", (long long)p->lit.ival); break;
+        case LIT_STR:  print_str_escaped(out, p->lit.sval); break;
+        case LIT_BOOL: fputs(p->lit.ival ? "True" : "False", out); break;
+        case LIT_NONE: fputs("None", out); break;
+        }
+        break;
+    case P_REC:
+        fputs("{", out);
+        for (size_t i = 0; i < p->rec.count; i++) {
+            if (i) fputs(", ", out);
+            fprintf(out, "%s: ", p->rec.items[i]->name);
+            print_pat(out, p->rec.items[i]);
+        }
+        fputs("}", out);
+        break;
     }
 }
 

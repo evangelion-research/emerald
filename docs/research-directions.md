@@ -37,16 +37,22 @@ What blocks the research program today:
    which is exactly the content of every interesting statement about a network.
 3. **No induction.** Recursive aliases exist, but the checker has no elimination
    principle, so nothing can be proved *about* an inductive structure.
-4. **No termination checking**, so `never` is inhabited by divergence and the
+4. **No termination checking** *(now partially addressed — structural descent
+   plus a `partial` opt-out; `while True` and mutual recursion still escape;
+   see the Status section)*, so `never` is inhabited by divergence and the
    logic is inconsistent. Any "proof" Emerald emits is currently a proof modulo
    "and this function halts".
 5. **`any` is a universal solvent.** `docs/proofs.md` already warns that a proof
    mentioning `any` proves nothing — but nothing *enforces* that. There is no
-   proof-mode, no taint tracking, no vacuity check.
+   proof-mode *(now added: `--proof` bans `any` and `partial`, with taint
+   tracking and vacuity warnings still future work)*, no taint tracking, no
+   vacuity check.
 6. **Unsound covariant lists**, inherited deliberately from TypeScript. Fine for
    scripting, fatal for a proof artifact.
-7. **No effects/purity distinction**, so "this model is a pure function of its
-   inputs" — the precondition for every commuting-square argument — is not
+7. **No effects/purity distinction** *(now partially addressed: a `pure`
+   declaration with call-level enforcement; no effect rows or `!{...}` yet)*,
+   so "this model is a pure function of its inputs" — the precondition for
+   every commuting-square argument — is not
    statable.
 8. **No path to real models.** Without weight loading and a graph importer you
    can only study toy networks you trained inside Emerald.
@@ -468,6 +474,57 @@ Metatheory (§10) and tooling (§12) run continuously alongside, not as a phase.
 
 Each is reachable from a phase above, and each strengthens the language for the
 next.
+
+## Status — what Phase 3's first slice has already landed
+
+The honest gap list in §1 is being worked from the bottom of the proof
+fragment up, because every later track assumes it. Implemented so far
+(checker-only; no runtime changes; `task test` covers all of it):
+
+- **`pure` functions** (§3, Track B, first step): `def f(...) -> T pure` may
+  only call pure functions and the pure builtins; impure nested `def`s inside
+  a pure function are rejected. Purity is enforced on calls, not on global
+  state or function values — a promise about what a function invokes, not a
+  full effect-row system.
+- **Termination checking by structural descent + `partial`** (§6, Track E):
+  functions are total by default; every recursive call must descend through a
+  recursive alias's own fields (`n.succ`, `xs.tail`). `partial` opts out and
+  is required for int-counter recursion, mutual recursion, and list-mediated
+  descent. This makes `never` honest *within* the checked fragment.
+- **`--proof` mode** (§6, Track E): bans `any` and `partial`. A clean
+  `emeraldc --check --proof` run means every value has a static type and
+  every function terminates structurally — the exit criterion of Phase 3 is
+  now meaningful for the structural-recursion fragment.
+- **The functional core** (Track F groundwork; the second slice): `const`
+  immutable bindings, lambdas `(x: int) => body` with contextual typing,
+  `map`/`filter`/`reduce` typed with fresh variables per call site, `|>`
+  pipe and `>>` compose, exhaustive `match` with record/literal/bind
+  patterns, and **tail-call optimization** for direct self-recursion (`return
+  f(...)` compiles to a jump — 10M-deep recursion runs in constant stack).
+  Codegen lowers lambdas through the existing closure machinery (captures
+  share a cell, so closures can carry mutable state); match lowers to
+  guarded if-chains. This is what makes the functional-programming examples
+  in §7 writable.
+
+What is deliberately still open, in each case a strict first cut:
+
+- `any` hidden *inside* a type (`list[any]` from `[]`) is not tainted
+  through yet — no `W_VACUOUS_PROOF` warnings, no `any`-taint propagation.
+- `while True` divergence and mutual recursion still escape termination
+  checking outside proof mode.
+- Purity is not tracked on function types, so a pure function may call a
+  function *value* without the call being checked.
+- `seq[T]` (sound immutable sequences), induction principles, and the full
+  effect-row system (`!{Rand, Mut, IO}`) remain future work.
+- No auto-currying or partial application: `xs |> map(f)` is not (yet)
+  syntax — write `xs |> (ys) => map(f, ys)` or `map(f, xs)`. Zero-argument
+  lambdas `() => ...` are not (yet) syntax.
+- Mutual recursion is not tail-call-optimized (it needs a trampoline), and
+  `match` cannot yet guard on list shapes (`[]` / `x :: xs`); list
+  destruction is still `if len(xs) == 0` plus indexing.
+
+See [`proofs.md`](proofs.md) ("Totality, purity, and proof mode") and
+[`type-system.md`](type-system.md) for the language-level account.
 
 ## References
 

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Emerald test runner: golden tests per compiler stage.
 #
-#   tests/run_tests.sh [lexer|parser|check|json|e2e]...   (default: all stages)
+#   tests/run_tests.sh [lexer|parser|check|json|e2e|proof|imports]...   (default: all stages)
 #
 # Each stage compares tool output against a .expected file:
 #   lexer/   emeraldc --emit-tokens X.rald  vs X.expected
 #   parser/  emeraldc --emit-ast X.rald     vs X.expected
 #   check/   emeraldc --check X.rald        vs X.expected (stdout+stderr)
 #   json/    emeraldc --check --json X.rald vs X.json.expected (machine-readable)
+#   proof/   emeraldc --check --proof X.rald vs X.expected
 #   e2e/     compile X.rald, run the binary vs X.expected (stdout)
 #   imports/ one directory per case; each has a main.rald entry, optional
 #            `flags` (extra emeraldc arguments, e.g. -I roots), and `expected`.
@@ -56,6 +57,13 @@ run_json() {
     echo "== json diagnostics"
     for f in tests/check/*.rald; do
         report "$f" "${f%.rald}.json.expected" "$("$EMERALDC" --check --json "$f" 2>&1)"
+    done
+}
+
+run_proof() {
+    echo "== proof"
+    for f in tests/proof/*.rald; do
+        report "$f" "${f%.rald}.expected" "$("$EMERALDC" --check --proof "$f" 2>&1)"
     done
 }
 
@@ -108,13 +116,14 @@ run_imports() {
     done
 }
 
-stages="${*:-lexer parser check json e2e imports}"
+stages="${*:-lexer parser check json proof e2e imports}"
 for s in $stages; do
     case "$s" in
         lexer) run_lexer ;;
         parser) run_parser ;;
         check) run_check ;;
         json) run_json ;;
+        proof) run_proof ;;
         e2e) run_e2e ;;
         imports) run_imports ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;

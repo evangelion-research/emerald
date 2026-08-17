@@ -1,0 +1,5 @@
+error[E_PROOF_ANY]: 'any' is banned in proof mode: annotate 'y' with a concrete type
+  --> tests/proof/bad_any_annot.rald:4:5
+    |
+ 4 |     y: any = x
+   |     ^

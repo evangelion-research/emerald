@@ -21,8 +21,10 @@ comment    = "#" .* to end of line ;
 - Whitespace (space, tab, newline) separates tokens; newlines are **not significant**.
 - Strings support escapes: `\\`, `\"`, `\'`, `\n`, `\t`, `\r`, `\0`.
 - Keywords: `def if else elif while for in return and or not
-  True False None break continue pass type import from as`.
-- Operators/punct: `{ } ( ) [ ] , . : ; = + - * / % == != < <= > >= | & ->`.
+  True False None break continue pass type pure partial import from as
+  const match`.
+- Operators/punct: `{ } ( ) [ ] , . : ; = + - * / % == != < <= > >= | & ->
+  => |> >>` (`=>` lambda, `|>` pipe, `>>` compose).
 - Semicolons `;` are optional statement separators.
 
 ## Concrete Syntax (EBNF)
@@ -41,6 +43,7 @@ statement     := func_def
                | for_stmt
                | return_stmt
                | break_stmt | continue_stmt | pass_stmt
+               | match_stmt
                | type_def
                | import_stmt
                | block | simple_stmt
@@ -51,7 +54,9 @@ dotted        := IDENT ("." IDENT)*
 alias         := IDENT ["as" IDENT]
 
 func_def      := "def" IDENT [tparams] "(" [param ("," param)*] ")"
-                 ["->" type] block
+                 ["->" type] ["pure"] ["partial"] block
+                 (* `pure`: may only call pure code; `partial`: opts out of
+                    termination checking — see type-system.md *)
 tparams       := "[" IDENT ("," IDENT)* "]"  (* generic type parameters *)
 param         := IDENT [":" type]
 if_stmt       := "if" expr block
@@ -62,11 +67,24 @@ for_stmt      := "for" IDENT "in" expr block
 return_stmt   := "return" [expr]
 type_def      := "type" IDENT [tparams] "=" type
 block         := "{" statement* "}"
-simple_stmt   := IDENT ":" type "=" expr     (* annotated declaration *)
+simple_stmt   := "const" IDENT [":" type] "=" expr  (* immutable binding *)
+               | IDENT ":" type "=" expr     (* annotated declaration *)
                | target "=" expr             (* assignment *)
                | expr                        (* expression statement *)
 target        := IDENT | postfix "[" expr "]" | postfix "." IDENT
+
+match_stmt    := "match" expr "{" (pattern "->" block)+
+                   (pattern "->" block)* "}"
+pattern       := "_" | IDENT | literal | "{" pattern_field ("," pattern_field)* "}"
+pattern_field := IDENT [":" pattern]        (* `{ x }` binds field x to x *)
 ```
+
+- `const x = v` (and `const x: T = v`) binds `x` immutably: any later
+  assignment is `E_TYPE_CONST`. `const` is the default style for the
+  functional core — prefer it over `=` for bindings that never change.
+- `match` is exhaustive: the checker proves the patterns cover the subject's
+  type and rejects a match with no catch-all when it cannot (`E_TYPE_MATCH`).
+  Patterns bind names only in their own arm. `_` matches anything.
 
 ## Type Expressions
 
@@ -76,6 +94,7 @@ inter     := type_atom ("&" type_atom)*      (* intersection / "extends" *)
 type_atom := "int" | "float" | "str" | "bool" | "None" | "any" | "never"
            | "list" "[" type "]"
            | "{" [IDENT ":" type ("," IDENT ":" type)* [","]] "}"
+           | "(" [type ("," type)*] ")" "->" type   (* function type *)
            | IDENT ["[" type ("," type)* "]"]  (* alias, maybe generic *)
            | int_lit | "-" int_lit | string_lit | "True" | "False"
                                              (* literal types *)
@@ -92,13 +111,18 @@ type_atom := "int" | "float" | "str" | "bool" | "None" | "any" | "never"
   Float literals are not valid types.
 - A name followed by `[...]` applies a generic alias (`Pair[int, str]`) —
   except `list[T]`, which is built in.
+- Function types `(T1, T2) -> U` describe first-class functions and lambdas;
+  they are structural, so `def f(x: int) -> int` has type `(int) -> int` and
+  can be passed anywhere a value of that type is expected.
 
 ## Expression Precedence (low → high)
 
 ```
-or             := and ( "or" and )*
-and            := not ( "and" not )*
-not            := "not" not | comparison
+pipe          := compose ( "|>" compose )*         (* x |> f == f(x) *)
+compose       := or ( ">>" or )*                  (* f >> g == x -> g(f(x)) *)
+or            := and ( "or" and )*
+and           := not ( "and" not )*
+not           := "not" not | comparison
 comparison     := additive ( ("=="|"!="|"<"|"<="|">"|">=") additive )*
 additive       := multiplicative ( ("+"|"-") multiplicative )*
 multiplicative := unary ( ("*"|"/"|"%") unary )*
@@ -109,9 +133,19 @@ postfix        := primary ( "(" [expr ("," expr)*] ")"    (* IDENT callee only *
 primary        := int_lit | float_lit | string_lit
                | "True" | "False" | "None"
                | IDENT | "(" expr ")"
+               | "(" [param ("," param)*] ")" "=>" expr   (* lambda *)
                | "[" [expr ("," expr)*] "]"
                | "{" [IDENT ":" expr ("," IDENT ":" expr)* [","]] "}"   (* record *)
 ```
+
+- `|>` pipes a value into a unary function (`x |> f` ≡ `f(x)`), so data flows
+  left to right: `xs |> (ys) => map(f, ys)`.
+- `>>` composes two unary functions (`f >> g` ≡ `x -> g(f(x))`); it binds
+  tighter than `|>` and is left-associative.
+- A lambda `(a: int, b) => body` is an anonymous function value. Parameters
+  may carry optional type annotations; unannotated ones are inferred
+  contextually from the call site (e.g. inside `map(...)`) or fall back to
+  `any`. Lambdas capture their enclosing locals by reference.
 
 `and`/`or` **short-circuit** and return one of their operands, exactly like
 Python (implemented via statement lowering in codegen, so side effects on the

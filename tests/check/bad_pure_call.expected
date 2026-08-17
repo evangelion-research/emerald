@@ -1,0 +1,10 @@
+error[E_TYPE_PURE_CALL]: pure function calls impure builtin 'print'
+  --> tests/check/bad_pure_call.rald:5:10
+    |
+ 5 |     print(s)              # impure builtin
+   |          ^
+error[E_TYPE_PURE_CALL]: pure function calls impure function 'shout'
+  --> tests/check/bad_pure_call.rald:6:17
+    |
+ 6 |     return shout(s)       # impure user function
+   |                 ^
