@@ -120,6 +120,27 @@ run_imports() {
     done
 }
 
+run_shape() {
+    echo "== shape"
+    bin="${TMPDIR:-/tmp}/emerald_dim_unit.$$"
+    if ! cc -std=c11 -Wall -Wextra -O2 -g -Iinclude -o "$bin" \
+           tests/shape/dim_unit.c src/dim.c 2>/tmp/emerald_dim.$$; then
+        FAIL=$((FAIL + 1))
+        echo "  FAIL tests/shape/dim_unit.c (compilation)"
+        sed 's/^/    /' /tmp/emerald_dim.$$
+        rm -f /tmp/emerald_dim.$$
+        return
+    fi
+    rm -f /tmp/emerald_dim.$$
+    report "tests/shape/dim_unit.c" "tests/shape/dim_unit.expected" \
+           "$("$bin" 2>&1)"
+    rm -f "$bin"
+    for f in tests/shape/*.rald; do
+        report "$f" "${f%.rald}.expected" \
+            "$("$EMERALDC" --emit-shapes "$f" 2>&1)"
+    done
+}
+
 run_stdlib() {
     echo "== stdlib"
     for f in tests/stdlib/*.rald; do
@@ -137,7 +158,7 @@ run_stdlib() {
     done
 }
 
-stages="${*:-lexer parser check json proof e2e imports stdlib}"
+stages="${*:-lexer parser check json proof e2e imports stdlib shape}"
 for s in $stages; do
     case "$s" in
         lexer) run_lexer ;;
@@ -148,6 +169,7 @@ for s in $stages; do
         e2e) run_e2e ;;
         imports) run_imports ;;
         stdlib) run_stdlib ;;
+        shape) run_shape ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac
 done

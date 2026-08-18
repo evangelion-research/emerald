@@ -7,6 +7,7 @@
  */
 #include "parser.h"
 #include "diag.h"
+#include "dim.h"
 #include "lexer.h"
 
 #include <stdarg.h>
@@ -168,6 +169,40 @@ static TypeExpr *new_type(TypeExprKind k, int line, int col) {
 static TypeExpr *parse_type(Parser *p);
 static char *unescape_string(Parser *p, Token t);
 
+/* --- dimension expressions (inside a tensor shape) -----------------------
+ * dim_expr := dim_term (("+"|"-") dim_term)*
+ * dim_term := dim_factor ("*" dim_factor)*
+ * dim_factor := IDENT | INT
+ * Only `+` and `*` are supported (SPEC_V2.md D3); a subtraction use case has
+ * not appeared in the target ops. */
+static DimExpr *parse_dim_factor(Parser *p) {
+    if (check(p, TK_INT)) {
+        Token t = p->cur;
+        advance(p);
+        return dim_lit(strtoll(tok_text(t), NULL, 10));
+    }
+    Token n = expect(p, TK_IDENT, "dimension name or literal");
+    return dim_var(tok_text(n));
+}
+
+static DimExpr *parse_dim_term(Parser *p) {
+    DimExpr *e = parse_dim_factor(p);
+    while (check(p, TK_STAR)) {
+        advance(p);
+        e = dim_mul(e, parse_dim_factor(p));
+    }
+    return e;
+}
+
+static DimExpr *parse_dim_expr(Parser *p) {
+    DimExpr *e = parse_dim_term(p);
+    while (check(p, TK_PLUS)) {
+        advance(p);
+        e = dim_add(e, parse_dim_term(p));
+    }
+    return e;
+}
+
 static TypeExpr *parse_type_atom(Parser *p) {
     int line = p->cur.line, col = p->cur.col;
     if (match(p, TK_LPAREN)) {
@@ -256,11 +291,43 @@ static TypeExpr *parse_type_atom(Parser *p) {
         return t;
     }
     Token n = expect(p, TK_IDENT, "type name");
+    if (n.len == 6 && memcmp(n.start, "Tensor", 6) == 0 && check(p, TK_LBRACK)) {
+        /* Tensor[dtype, [dim, ...]] or Tensor[dtype, ?] */
+        advance(p); /* [ */
+        TypeExpr *t = new_type(TE_TENSOR, line, col);
+        t->tensor.dtype = parse_type(p);
+        expect(p, TK_COMMA, "',' after the tensor dtype");
+        if (match(p, TK_QUESTION)) {
+            t->tensor.dynamic = true;
+            t->tensor.shape = NULL;
+            t->tensor.shape_count = 0;
+        } else {
+            expect(p, TK_LBRACK, "'[' opening the tensor shape");
+            PtrVec dims = {0};
+            while (!check(p, TK_RBRACK)) {
+                vec_push(&dims, parse_dim_expr(p));
+                if (!match(p, TK_COMMA)) break;
+            }
+            expect(p, TK_RBRACK, "']' closing the tensor shape");
+            t->tensor.shape = (DimExpr **)dims.items;
+            t->tensor.shape_count = dims.count;
+        }
+        expect(p, TK_RBRACK, "']' closing the tensor type");
+        return t;
+    }
     if (n.len == 4 && memcmp(n.start, "list", 4) == 0 && check(p, TK_LBRACK)) {
         advance(p);
         TypeExpr *t = new_type(TE_LIST, line, col);
         t->elem = parse_type(p);
         expect(p, TK_RBRACK, "']' closing list type");
+        return t;
+    }
+    if (n.len == 3 && memcmp(n.start, "Fin", 3) == 0 && check(p, TK_LBRACK)) {
+        /* Fin[n]: an index provably below the dimension `n` */
+        advance(p);
+        TypeExpr *t = new_type(TE_FIN, line, col);
+        t->fin_dim = parse_dim_expr(p);
+        expect(p, TK_RBRACK, "']' closing Fin[n]");
         return t;
     }
     TypeExpr *t = new_type(TE_NAME, line, col);
@@ -281,17 +348,39 @@ static TypeExpr *parse_type_atom(Parser *p) {
     return t;
 }
 
-/* `[A, B, C]` after a `def` or `type` name: generic parameter list */
-static void parse_type_params(Parser *p, char ***out, size_t *out_count) {
+/* `[A, B, C]` after a `def` or `type` name: generic parameter list. A
+ * parameter may be kinded `name: dim` (a nominal dimension); `out_dims[i]`
+ * is true exactly for those. */
+static void parse_type_params(Parser *p, char ***out, bool **out_dims,
+                              size_t *out_count) {
     PtrVec params = {0};
+    bool *dims = NULL;
+    size_t ndims = 0, capdims = 0;
     if (match(p, TK_LBRACK)) {
         do {
             Token n = expect(p, TK_IDENT, "type parameter name");
             vec_push(&params, tok_text(n));
+            bool is_dim = false;
+            if (match(p, TK_COLON)) {
+                if (!match(p, TK_DIM))
+                    perror_at(p, p->cur.line, p->cur.col,
+                              "expected 'dim' kind, got '%.*s'",
+                              p->cur.len ? p->cur.len : 5,
+                              p->cur.kind == TK_EOF ? "<eof>" : p->cur.start);
+                is_dim = true;
+            }
+            if (ndims == capdims) {
+                capdims = capdims ? capdims * 2 : 4;
+                dims = realloc(dims, sizeof(bool) * capdims);
+                if (!dims) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+            }
+            dims[ndims++] = is_dim;
         } while (match(p, TK_COMMA));
         expect(p, TK_RBRACK, "']' closing type parameter list");
     }
     *out = (char **)params.items;
+    *out_dims = ndims ? dims : NULL;
+    if (!ndims) free(dims);
     *out_count = params.count;
 }
 
@@ -639,7 +728,8 @@ static Stmt *parse_func(Parser *p) {
     Stmt *s = new_stmt(p, S_FUNC, line, col);
     s->as.func.name = tok_text(name);
     s->as.func.dispname = s->as.func.name;
-    parse_type_params(p, &s->as.func.tparams, &s->as.func.tparam_count);
+    parse_type_params(p, &s->as.func.tparams, &s->as.func.tparam_dims,
+                      &s->as.func.tparam_count);
     expect(p, TK_LPAREN, "'(' after function name");
     PtrVec params = {0}, ptypes = {0};
     while (!check(p, TK_RPAREN)) {
@@ -958,13 +1048,27 @@ static Stmt *parse_stmt(Parser *p) {
     }
     case TK_MATCH:
         return parse_match(p);
+    case TK_DIM: {
+        /* `dim Batch, Seq, DModel`: nominal dimension declarations */
+        advance(p);
+        Stmt *s = new_stmt(p, S_DIMDECL, line, col);
+        PtrVec names = {0};
+        do {
+            Token n = expect(p, TK_IDENT, "dimension name after 'dim'");
+            vec_push(&names, tok_text(n));
+        } while (match(p, TK_COMMA));
+        s->as.dim.names = (char **)names.items;
+        s->as.dim.count = names.count;
+        return s;
+    }
     case TK_TYPE: {
         advance(p);
         Token name = expect(p, TK_IDENT, "type alias name after 'type'");
         Stmt *s = new_stmt(p, S_TYPEDEF, line, col);
         s->as.tdef.name = tok_text(name);
         s->as.tdef.dispname = s->as.tdef.name;
-        parse_type_params(p, &s->as.tdef.params, &s->as.tdef.param_count);
+        parse_type_params(p, &s->as.tdef.params, &s->as.tdef.param_dims,
+                          &s->as.tdef.param_count);
         expect(p, TK_ASSIGN, "'=' in type alias");
         s->as.tdef.value = parse_type(p);
         return s;

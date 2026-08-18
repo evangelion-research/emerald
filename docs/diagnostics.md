@@ -120,6 +120,26 @@ etc.
 | `E_TYPE_MATCH`                | `match` not exhaustive (no arm covers every remaining value) |
 | `E_TYPE_BIND`                 | pattern binding already defined in scope / duplicate binding |
 
+### Shape errors (`E_SHAPE_*`)
+
+The Phase 2 tensor shape system (`docs/shapes.md`). The diagnostic is the
+deliverable: shape errors print both shapes (or the mismatching axis) as
+structured notes, so `--json` carries `left` / `right` / `mismatch` fields.
+
+| code                          | meaning                                  |
+|-------------------------------|------------------------------------------|
+| `E_SHAPE_MATMUL`              | `matmul` contraction axes differ (notes: `left`, `right`, `mismatch`) |
+| `E_SHAPE_BROADCAST`           | elementwise/`expand` shapes cannot broadcast |
+| `E_SHAPE_RESHAPE`             | `reshape` changes the number of elements |
+| `E_SHAPE_PERMUTE`             | `permute` axes are not a bijection |
+| `E_SHAPE_AXIS`                | reduction/slice axis out of range        |
+| `E_SHAPE_RANK`                | tensor rank mismatch (e.g. `matmul` of non-2-D) |
+| `E_SHAPE_DTYPE`               | unknown or mismatched tensor dtype       |
+| `E_SHAPE_UNKNOWN_DIM`         | dimension name not declared (`dim`) or bound (`: dim`) |
+| `E_SHAPE_DUP_DIM`             | a `dim` name declared twice              |
+| `E_SHAPE_DIM_ARG`             | `: dim` argument is not a dim name or int literal |
+| `E_SHAPE_INDEX`               | `Fin[n]` index provably out of range for the axis |
+
 ### Proof-mode errors (`E_PROOF_*`)
 
 Produced only under `emeraldc --check --proof`. A clean proof-mode check is
@@ -145,20 +165,6 @@ structured pipeline, so `--json` reports them identically to type errors:
 | `E_IMPORT_AMBIGUOUS`          | one search root offers both `a/b.rald` and `a.b.rald`; notes list both candidates |
 | `E_IMPORT_REDEFINE`           | an import binding collides with a top-level name of the importing module, or with an earlier import |
 | `E_IMPORT_MODULE_VALUE`       | a module object used where a value is expected, or assigned to (use `module.name`; imports are read-only) |
-
-### Import errors (`E_IMPORT_*`)
-
-Raised by the module loader before type checking. See `docs/modules.md`.
-
-| code                          | meaning                                  |
-|-------------------------------|------------------------------------------|
-| `E_IMPORT_NOT_FOUND`          | module path resolved to no file on the search path |
-| `E_IMPORT_CYCLE`              | import graph contains a cycle; a note lists it |
-| `E_IMPORT_PRIVATE`            | imported name exists but is private (leading `_`) |
-| `E_IMPORT_NAME`               | imported name does not exist in that module |
-| `E_IMPORT_AMBIGUOUS`          | two files under one root claim the same module path |
-| `E_IMPORT_MODULE_VALUE`       | module object used as a value (only `m.<name>` is legal) |
-| `E_IMPORT_REDEFINE`           | import binding collides with a local definition or an earlier import |
 
 ## Runtime errors
 

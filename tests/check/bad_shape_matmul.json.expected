@@ -1,0 +1,17 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_SHAPE_MATMUL",
+    "file": "tests/check/bad_shape_matmul.rald",
+    "line": 6,
+    "column": 15,
+    "message": "contracted dimensions do not match",
+    "source_line": "    h = matmul(x, w)",
+    "notes": [
+      { "label": "left", "value": "Tensor[f32, [Batch, DModel]]" },
+      { "label": "right", "value": "Tensor[f32, [DHidden, DOut]]" },
+      { "label": "mismatch", "value": "DModel != DHidden  (contraction axis)" }
+    ]
+  }
+]

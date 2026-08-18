@@ -1,8 +1,10 @@
 # Emerald Phase 2 — Make It a Numeric Language
 
-**Status:** plan, not yet implemented. Phase 1 (the scripting language, the
-proof fragment's first slice, the functional core, modules) is done and green
-at 99/99 tests.
+**Status:** implemented. Phase 1 (the scripting language, the proof fragment's
+first slice, the functional core, modules) plus Phase 2 (tensors, shapes, the
+MLP demo) are green — 123 tests. The exit criterion is met: a shape bug is a
+compile error with both shapes printed (`tests/check/bad_shape_matmul.rald`,
+`examples/mlp/shape_bug.rald`).
 
 **Thesis obligation this phase serves:** you cannot write a neural network in
 Emerald today. Every later track —

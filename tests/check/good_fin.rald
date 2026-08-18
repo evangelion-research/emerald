@@ -1,0 +1,10 @@
+# Fin[n] index safety (W5): an index provably below the axis length is accepted.
+dim N
+
+def get(xs: Tensor[f32, [N]], i: Fin[N]) -> float {
+    return item(xs[i])
+}
+
+def at_fixed(xs: Tensor[f32, [8]], i: Fin[3]) -> float {
+    return item(xs[i])     # 3 <= 8 is decidable
+}

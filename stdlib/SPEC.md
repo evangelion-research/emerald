@@ -43,7 +43,7 @@ Verified against the current compiler:
 | No iterators or generators; `range(n)` materializes a list | Everything is eager. Laziness, where it is wanted, is a thunk (`() => e`) |
 | Nested generic aliases (`list[list[Entry[V]]]`) and `match` over a `Result` union both typecheck | The core data types below are expressible **today** |
 | Recursive *generic* aliases are rejected | A generic linked list / tree cannot be written; use `list[T]` and records |
-| Sixteen builtins, not thirteen — `map`/`filter`/`reduce` joined since `docs/builtins.md` was written | Corrected: that doc now documents twenty-six |
+| Sixteen builtins, not thirteen — `map`/`filter`/`reduce` joined since `docs/builtins.md` was written | Corrected: that doc now documents fifty-two (twenty-seven core, plus the twenty-five Phase 2 tensor primitives) |
 | No bitwise operators at all — `\|` and `&` are type-level only | No xor, so no FNV-1a. `dict.hash_str` is djb2 |
 | `/` is float division and there is no `//` | Exact integer division is not expressible; `math.floor_div` rounds through a double |
 

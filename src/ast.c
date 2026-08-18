@@ -2,11 +2,20 @@
  * and the parser golden tests).
  */
 #include "ast.h"
+#include "dim.h"
+
+#include <stdlib.h>
 
 static void print_expr(FILE *out, const Expr *e);
 static void print_stmt(FILE *out, const Stmt *s, int indent);
 static void print_pat(FILE *out, const Pat *p);
 static void print_str_escaped(FILE *out, const char *s);
+
+static void print_dim(FILE *out, const DimExpr *e) {
+    char *s = dim_str(e);
+    fputs(s, out);
+    free(s);
+}
 
 static void ind(FILE *out, int n) {
     for (int i = 0; i < n; i++) fputs("  ", out);
@@ -83,6 +92,25 @@ static void print_type(FILE *out, const TypeExpr *t) {
         }
         fputs(") ", out);
         print_type(out, t->fun.ret);
+        fputs(")", out);
+        break;
+    case TE_TENSOR:
+        fputs("(tensor ", out);
+        print_type(out, t->tensor.dtype);
+        if (t->tensor.dynamic) {
+            fputs(" ?)", out);
+        } else {
+            fputs(" [", out);
+            for (size_t i = 0; i < t->tensor.shape_count; i++) {
+                if (i) fputs(" ", out);
+                print_dim(out, t->tensor.shape[i]);
+            }
+            fputs("])", out);
+        }
+        break;
+    case TE_FIN:
+        fputs("(fin ", out);
+        print_dim(out, t->fin_dim);
         fputs(")", out);
         break;
     }
@@ -277,6 +305,8 @@ static void print_stmt(FILE *out, const Stmt *s, int indent) {
             for (size_t i = 0; i < s->as.func.tparam_count; i++) {
                 if (i) fputs(" ", out);
                 fputs(s->as.func.tparams[i], out);
+                if (s->as.func.tparam_dims && s->as.func.tparam_dims[i])
+                    fputs(":dim", out);
             }
             fputs("] ", out);
         }
@@ -313,10 +343,18 @@ static void print_stmt(FILE *out, const Stmt *s, int indent) {
             for (size_t i = 0; i < s->as.tdef.param_count; i++) {
                 if (i) fputs(" ", out);
                 fputs(s->as.tdef.params[i], out);
+                if (s->as.tdef.param_dims && s->as.tdef.param_dims[i])
+                    fputs(":dim", out);
             }
             fputs("] ", out);
         }
         print_type(out, s->as.tdef.value);
+        fputs(")\n", out);
+        break;
+    case S_DIMDECL:
+        fputs("(dim", out);
+        for (size_t i = 0; i < s->as.dim.count; i++)
+            fprintf(out, " %s", s->as.dim.names[i]);
         fputs(")\n", out);
         break;
     }

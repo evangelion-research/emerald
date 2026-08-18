@@ -65,8 +65,9 @@ Sections 2–9 are ordered roughly by how much of that they unblock.
 
 Shapes are the *practical* dependent type: enough type-level arithmetic to talk
 about sizes, without a full dependent theory. Prior art to mine: Dex, Futhark,
-`jaxtyping`, Hasktorch, Diesel/Idris-style singletons, and Christiansen's
-"Dependent Types in Practice".
+`jaxtyping`, Hasktorch, Diesel/Idris-style singletons, Xi & Pfenning's
+Dependent ML ("Dependent Types in Practical Programming", POPL 1999), and the
+array-bound-check work that followed it.
 
 ### Surface
 
@@ -527,6 +528,10 @@ See [`proofs.md`](proofs.md) ("Totality, purity, and proof mode") and
 [`type-system.md`](type-system.md) for the language-level account.
 
 ## References
+
+The consolidated, annotated bibliography for the whole project — including every
+entry below plus the surrounding literature, each with a one-line note on its
+relevance to Emerald — is in [`references.md`](references.md).
 
 - Gauderis, Dooms, Homer, Ayonrinde, Wiggins. *From Mechanistic to Compositional
   Interpretability.* arXiv:2605.08934

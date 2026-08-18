@@ -1,0 +1,8 @@
+# The exit criterion for Phase 2 (SPEC_V2.md): a shape bug is a compile error
+# with both shapes printed and the mismatching axis named.
+dim Batch, DModel, DHidden, DOut
+
+def layer(x: Tensor[f32, [Batch, DModel]], w: Tensor[f32, [DHidden, DOut]]) -> Tensor[f32, [Batch, DOut]] {
+    h = matmul(x, w)
+    return h
+}

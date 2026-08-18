@@ -1,10 +1,10 @@
 # Compiler architecture
 
-How `emeraldc` is built: ~7,000 lines of C11, warning-clean under
+How `emeraldc` is built: ~12,000 lines of C11, warning-clean under
 `-Wall -Wextra`, no dependencies beyond libc and a C compiler to shell out to.
 
 Everything described here is implemented and covered by `task test`
-(99 golden tests across six suites).
+(123 tests across seven suites).
 
 ## The pipeline
 
@@ -28,7 +28,8 @@ c.rald ─┘                                        │
 | Lexer    | `src/lexer.c`   | Tokens, keywords, numbers, strings, comments.                          | `--emit-tokens`  |
 | Parser   | `src/parser.c`  | Recursive descent → AST; record/block disambiguation.                  | `--emit-ast`     |
 | Modules  | `src/module.c`  | Import resolution, cycle detection, name mangling, linking.            | `-I <dir>`       |
-| Checker  | `src/check.c`   | Structural type checking, flow narrowing, scope/return validation.     | `--check`        |
+| Shapes   | `src/dim.c`     | Canonical-form dimension solver (`dim_eq`/`dim_le`), escalation log.   | `--emit-shapes`  |
+| Checker  | `src/check.c`   | Structural type checking, flow narrowing, scope/return, tensor shapes. | `--check`        |
 | Codegen  | `src/codegen.c` | AST → C with GC-rooted slot frames; short-circuit lowering.            | `--emit-c`       |
 | Runtime  | `src/runtime.c` | Tagged `Value` model, operators, builtins, generational GC.            | `runtime-check`  |
 | Diags    | `src/diag.c`    | Structured errors: code, location, caret, expected/actual, JSON.       | `--json`         |
@@ -36,10 +37,14 @@ c.rald ─┘                                        │
 
 Every stage is exposed as a driver flag, so every stage has its own golden test
 suite. That is the main structural decision in the compiler: no stage is
-observable only through the stage after it.
+observable only through the stage after it. `--emit-shapes` dumps every `dim`
+declaration and tensor annotation from the linked program; the dimension solver
+it exercises (`src/dim.c`) is a standalone component with the project's first
+**unit** test harness (`tests/shape/dim_unit.c`), rather than a golden file.
 
-`src/check.c` is the largest file (~2,000 lines) and it is where the interesting
-work is — see [`type-system.md`](type-system.md).
+`src/check.c` is the largest file (~3,000 lines) and it is where the interesting
+work is — see [`type-system.md`](type-system.md), [`tensors.md`](tensors.md),
+and [`shapes.md`](shapes.md).
 
 ## Compilation unit
 
@@ -81,17 +86,22 @@ find them precisely — see [`gc.md`](gc.md).
 ```
 tests/lexer/    3 suites   token streams              (--emit-tokens)
 tests/parser/   5 suites   AST dumps                  (--emit-ast)
-tests/check/   17 suites   diagnostics, human + JSON  (--check, --check --json)
+tests/check/   21 suites   diagnostics, human + JSON  (--check, --check --json)
 tests/proof/    4 suites   proof mode                 (--check --proof)
 tests/e2e/     18 suites   compile, run, compare stdout
 tests/imports/ 23 suites   module resolution and linking errors
+tests/stdlib/  12 suites   the standard library        (compile + run)
+tests/shape/    1 unit + 1 golden  dim solver + shape surface  (unit harness, --emit-shapes)
 ```
 
 `tests/check/` holds two golden files per case (`.expected` and
 `.json.expected`) so the JSON diagnostic schema is pinned as tightly as the
-human-readable output. `tests/imports/` cases are directories — a whole
-multi-file program each — with `bad_*` cases asserting the error and the rest
-asserting the linked program's output.
+human-readable output — including the Phase 2 shape errors
+(`bad_shape_matmul`, `bad_fin`), which pin the exit-criterion output. `tests/shape/`
+is different on purpose: `dim_unit.c` is a compiled unit test of the dimension
+solver, and `--emit-shapes` covers the shape surface. `tests/imports/` cases are
+directories — a whole multi-file program each — with `bad_*` cases asserting
+the error and the rest asserting the linked program's output.
 
 `task bless` regenerates every golden file. Review that diff before committing;
 it is the only thing standing between a refactor and a silently changed
@@ -101,7 +111,7 @@ language.
 
 ```
 task              # build bin/emeraldc
-task test         # every suite (99 golden tests) + runtime-check
+task test         # every suite (123 tests) + runtime-check
 task test:lexer / test:parser / test:check / test:proof / test:e2e / test:imports
 task examples     # compile & run examples/*.rald and examples/*/main.rald
 task bless        # regenerate golden files (review the diff!)
@@ -121,6 +131,8 @@ emeraldc examples/fib.rald && ./examples/fib
 emeraldc -o out prog.rald        # choose output path
 emeraldc --check prog.rald       # typecheck only
 emeraldc --check --proof prog.rald  # proof mode: ban `any` and `partial`
+emeraldc --emit-shapes prog.rald # dump dims + tensor annotations
+emeraldc --shape-report --check prog.rald  # static<->dynamic shape crossings
 emeraldc --keep-c prog.rald      # keep prog.gen.c for inspection
 emeraldc --emit-c prog.rald      # print generated C to stdout
 ```

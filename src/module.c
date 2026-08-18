@@ -23,6 +23,7 @@
  * process and the whole graph dies with it.
  */
 #include "module.h"
+#include "dim.h"
 #include "parser.h"
 
 #include <stdarg.h>
@@ -185,6 +186,7 @@ typedef struct Mod {
     Names globals;     /* top-level assigned names */
     Names defs;        /* top-level `def` names */
     Names types;       /* top-level `type` names */
+    Names dims;        /* top-level `dim` names */
 } Mod;
 
 typedef struct {
@@ -229,7 +231,7 @@ static char *read_file(Loader *ld, const char *path) {
 /* Does this module export `name`? (Top-level defs, types, and globals.) */
 static bool mod_exports(const Mod *m, const char *name) {
     return names_has(&m->defs, name) || names_has(&m->types, name) ||
-           names_has(&m->globals, name);
+           names_has(&m->globals, name) || names_has(&m->dims, name);
 }
 
 static bool is_private(const char *name) { return name[0] == '_'; }
@@ -253,6 +255,9 @@ static void index_module(Mod *m) {
         const Stmt *s = m->prog->body.items[i];
         if (s->kind == S_FUNC) names_add(&m->defs, s->as.func.name);
         else if (s->kind == S_TYPEDEF) names_add(&m->types, s->as.tdef.name);
+        else if (s->kind == S_DIMDECL)
+            for (size_t j = 0; j < s->as.dim.count; j++)
+                names_add(&m->dims, s->as.dim.names[j]);
     }
 }
 
@@ -383,6 +388,24 @@ static const char *rw_name(RW *rw, const char *name, const RScope *sc,
     return name;
 }
 
+static void rw_dim(RW *rw, DimExpr *e, const RScope *sc) {
+    if (!e) return;
+    if (e->kind == DE_VAR) {
+        /* a local `B: dim` parameter is not a module name: leave it alone */
+        if (!names_has(&rw->tvars, e->var)) {
+            const char *disp;
+            const char *n = rw_name(rw, e->var, sc, &disp);
+            if (n != e->var) {
+                free(e->var);
+                e->var = xstrdup(n);
+            }
+        }
+        return;
+    }
+    rw_dim(rw, e->lhs, sc);
+    rw_dim(rw, e->rhs, sc);
+}
+
 static void rw_type(RW *rw, TypeExpr *t, const RScope *sc) {
     if (!t) return;
     switch (t->kind) {
@@ -394,6 +417,14 @@ static void rw_type(RW *rw, TypeExpr *t, const RScope *sc) {
         for (size_t i = 0; i < t->arg_count; i++) rw_type(rw, t->args[i], sc);
         break;
     }
+    case TE_TENSOR:
+        rw_type(rw, t->tensor.dtype, sc);
+        for (size_t i = 0; i < t->tensor.shape_count; i++)
+            rw_dim(rw, t->tensor.shape[i], sc);
+        break;
+    case TE_FIN:
+        rw_dim(rw, t->fin_dim, sc);
+        break;
     case TE_LIST: rw_type(rw, t->elem, sc); break;
     case TE_REC:
         for (size_t i = 0; i < t->fields.count; i++)
@@ -609,6 +640,12 @@ static void rw_stmt(RW *rw, Stmt *s, const RScope *sc) {
             s->as.tdef.name = mangle(rw->mod, s->as.tdef.name);
         break;
     }
+    case S_DIMDECL:
+        /* module-level dim declarations are exported names, mangled like types */
+        if (!sc && rw->mod->prefix)
+            for (size_t i = 0; i < s->as.dim.count; i++)
+                s->as.dim.names[i] = mangle(rw->mod, s->as.dim.names[i]);
+        break;
     default:
         break;
     }

@@ -1,0 +1,7 @@
+dim Batch Seq DModel NHeads Dh
+Tensor[f32, [N, H]]
+Tensor[f32, [B, S, D]]
+Tensor[f32, [B, D*S, 1 + D]]
+Tensor[f32, ?]
+Tensor[f32, [Batch, Seq]]
+Tensor[f32, [NHeads, Dh, 2*Dh]]

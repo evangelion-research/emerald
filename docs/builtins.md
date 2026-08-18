@@ -1,8 +1,9 @@
 # Builtins
 
-Emerald has **twenty-six builtins**, compiled directly into calls on the runtime
+Emerald has **fifty-two builtins**, compiled directly into calls on the runtime
 (`src/runtime.c`) rather than resolved through a module. They are always in
-scope in every module.
+scope in every module: twenty-seven core builtins plus the twenty-five tensor
+primitives of Phase 2 (see the [Tensors](#tensors) section).
 
 They are not the standard library — that lives in [`stdlib/`](../stdlib/) and is
 ordinary Emerald. A builtin exists only when it *cannot* be written in Emerald:
@@ -125,7 +126,7 @@ external tools.
 
 ## Introspection
 
-### `gc_stats() -> { collections: int, live: int, young: int, old: int, threshold: int }`
+### `gc_stats() -> { collections: int, live: int, young: int, old: int, threshold: int, bytes_young: int, bytes_old: int }`
 
 Returns a record — a real, typed record, so field access is checked and
 `gc_stats().collectons` is a compile error:
@@ -137,8 +138,20 @@ Returns a record — a real, typed record, so field access is checked and
 | `young`       | objects currently in the young generation             |
 | `old`         | objects promoted to the old generation                |
 | `threshold`   | young-generation size that triggers the next minor GC |
+| `bytes_young` | bytes live in the young generation                    |
+| `bytes_old`   | bytes live in the old generation                      |
 
-This is how [`examples/gc_stress.rald`](../examples/gc_stress.rald) and
+`bytes_young`/`bytes_old` exist because the collector is **byte-aware**
+(tensors.md): a single large tensor must trigger a collection even though it is
+one object.
+
+### `gc_collect() -> None`
+
+Forces a major collection immediately. Deterministic — it is how
+`tests/e2e/gc_bytes.rald` asserts that a dead allocation's bytes are actually
+reclaimed rather than waiting for the threshold.
+
+These are how [`examples/gc_stress.rald`](../examples/gc_stress.rald) and
 `tests/e2e/gc_generational.rald` assert collector behaviour from inside the
 language rather than by reading `/usr/bin/time`. See [`gc.md`](gc.md) for what
 the numbers mean.
@@ -275,6 +288,31 @@ builtins — is impure, and calling one from a `pure` function is
 
 ---
 
+## Tensors
+
+Phase 2 (see [`tensors.md`](tensors.md) and [`shapes.md`](shapes.md)) adds
+**twenty-five** tensor primitives. They are builtins — not a stdlib module —
+because their types are *shape obligations*, not ordinary signatures; the
+checker special-cases them to verify those obligations statically.
+
+**Constructors** — `zeros`, `ones`, `full`, `arange`, `tensor`, `randn`. All
+return a tensor; `randn(shape, seed)` is seeded, so it is deterministic by
+construction (and impure, since randomness is an effect even when seeded).
+
+**Elementwise** — `+ - * /` on tensors (broadcasting) and unary `exp`, `log`,
+`tanh`, `relu`.
+
+**Shape-carrying** — `matmul`, `reshape`, `transpose`, `permute`, `expand`,
+`sum`, `mean`, `max`, `argmax`, `tslice`. These are the operations whose types
+are obligations; the checker emits `E_SHAPE_*` diagnostics when one cannot be
+discharged statically.
+
+**Introspection** — `shape` (`list[int]`), `ndim` (`int`), `dtype` (`str`),
+`astype`, and `item` (`float`).
+
+All of them except `randn` are **pure** and may be called from a `pure`
+function.
+
 ## What is deliberately still missing
 
 No dict type, no string methods, no `sorted`, no `min`/`max`, no `abs`, no math
@@ -292,7 +330,7 @@ Still genuinely absent, with no library answer:
 | Missing | Why it matters |
 |---|---|
 | `read_line` / stdin | No REPLs, no filters. Nothing in the bootstrap needs it yet |
-| a seeded RNG | `rand()` is unseedable, so programs using it are not reproducible. `examples/ray_tracer/typed/rng.rald` threads a Park–Miller LCG explicitly instead, which is the better design and should become `stdlib/random` |
+| a seeded *scalar* RNG | `rand()` is unseedable. The tensor `randn(shape, seed)` is seeded (Phase 2), but the scalar `rand()` remains ambient; `examples/ray_tracer/typed/rng.rald` threads a Park–Miller LCG explicitly, which should become `stdlib/random` |
 | a monotonic clock | `time` and any benchmark harness need one |
 | bitwise operators | `\|` and `&` are type-level only, so there is no xor. `dict.hash_str` is djb2 rather than the FNV-1a the spec called for |
 | integer division | `/` is float division, so `math.floor_div` rounds through a double and is exact only under 2^53 |

@@ -18,6 +18,7 @@
  */
 #include "check.h"
 #include "diag.h"
+#include "dim.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -27,7 +28,19 @@
 typedef enum {
     TY_ANY, TY_NEVER, TY_NONE, TY_BOOL, TY_INT, TY_FLOAT, TY_STR,
     TY_LIT, TY_LIST, TY_REC, TY_UNION, TY_VAR, TY_ALIAS, TY_FUNC,
+    TY_TENSOR, TY_FIN,
 } TyKind;
+
+/* tensor dtype tags used by the checker (the runtime's DType is independent) */
+typedef enum { CDT_F32, CDT_F64 } CDType;
+
+/* A tensor shape: a list of canonical dim expressions, or the dynamic
+ * escape hatch `?` (Tensor[f32, ?]). `dims` is NULL when dynamic. */
+typedef struct Shape {
+    bool dynamic;
+    DimExpr **dims;
+    size_t count;
+} Shape;
 
 typedef struct Type Type;
 struct Alias;
@@ -40,6 +53,8 @@ struct Type {
     struct { TyKind base; int64_t ival; char *sval; } lit;  /* TY_LIT */
     char *var;                                              /* TY_VAR */
     struct { Type **params; Type *ret; size_t count; } fun; /* TY_FUNC */
+    struct { CDType dt; Shape *shape; } tensor;             /* TY_TENSOR */
+    DimExpr *fin;                                            /* TY_FIN */
     /* TY_ALIAS: a reference to a named alias. A self-reference encountered
      * while an alias body is being resolved becomes this node (see resolve_name). */
     struct { const struct Alias *al; Type **args; size_t argc; } ref;
@@ -52,6 +67,7 @@ typedef struct Alias {
     const char *disp;           /* source-level name (linking may mangle `name`) */
     Type *type;                 /* resolved eagerly for non-generic aliases */
     char **params;              /* generic parameters, NULL when non-generic */
+    bool *param_dims;           /* parallel: true when `P: dim` (a dimension) */
     size_t param_count;
     const TypeExpr *body;       /* unresolved body for generic aliases */
     bool resolving;             /* guard: currently resolving this alias's body */
@@ -128,17 +144,96 @@ static Type *ty_var(char *name) {
     return t;
 }
 
+static Shape *shape_dynamic(void) {
+    static Shape s = { .dynamic = true, .dims = NULL, .count = 0 };
+    return &s;
+}
+
+static Shape *shape_of(DimExpr **dims, size_t count) {
+    Shape *s = xmalloc(sizeof(Shape));
+    s->dynamic = false;
+    s->dims = dims;
+    s->count = count;
+    return s;
+}
+
+static Type *ty_tensor(CDType dt, Shape *shape) {
+    Type *t = ty_new(TY_TENSOR);
+    t->tensor.dt = dt;
+    t->tensor.shape = shape;
+    return t;
+}
+
+static Type *ty_fin(DimExpr *bound) {
+    Type *t = ty_new(TY_FIN);
+    t->fin = bound;
+    return t;
+}
+
+/* --- tensor shape obligations (SPEC_V2.md W4) --------------------------- */
+
+/* resolve to the underlying TY_TENSOR type, or NULL */
+static Type *tensor_of(Type *t) {
+    Type *r = ty_resolve(t);
+    return r->k == TY_TENSOR ? r : NULL;
+}
+
+static bool dim_is_one(const DimExpr *e) {
+    return e->kind == DE_LIT && e->lit == 1;
+}
+
+/* product of all axes (1 for a scalar/0-d shape) */
+static DimExpr *shape_prod(const Shape *s) {
+    DimExpr *p = dim_lit(1);
+    for (size_t i = 0; i < s->count; i++)
+        p = dim_mul(p, s->dims[i]);
+    return p;
+}
+
+/* result shape of broadcasting `a` and `b`, or NULL when not decidable/valid.
+ * Equal ranks only (the strict cut from D3's risk table): any axis must match
+ * or be a literal 1. */
+static Shape *broadcast_shapes(const Shape *a, const Shape *b) {
+    if (a->dynamic || b->dynamic) return shape_dynamic();
+    if (a->count != b->count) return NULL;
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * (a->count ? a->count : 1));
+    for (size_t i = 0; i < a->count; i++) {
+        DimExpr *da = a->dims[i], *db = b->dims[i];
+        if (dim_eq(da, db)) dims[i] = da;
+        else if (dim_is_one(da)) dims[i] = db;
+        else if (dim_is_one(db)) dims[i] = da;
+        else { free(dims); return NULL; }
+    }
+    return shape_of(dims, a->count);
+}
+
+/* The static shape of a `list` literal whose elements are all int literals
+ * (e.g. `[2, 3, 4]`); NULL otherwise. The result is a fresh, owned tree. */
+static Shape *literal_shape_of_expr(const Expr *e) {
+    if (!e || e->kind != E_LIST) return NULL;
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * (e->as.list.count ? e->as.list.count : 1));
+    for (size_t i = 0; i < e->as.list.count; i++) {
+        if (e->as.list.items[i]->kind != E_INT) {
+            for (size_t j = 0; j < i; j++) dim_free(dims[j]);
+            free(dims);
+            return NULL;
+        }
+        dims[i] = dim_lit(e->as.list.items[i]->as.ival);
+    }
+    return shape_of(dims, e->as.list.count);
+}
+
 /* Record type returned by the gc_stats() builtin (all counters are ints). */
 static Type *gc_stats_type(void) {
     static Type *t;
     if (!t) {
-        static char *names[] =
-            {"collections", "live", "young", "old", "threshold"};
+        static char *names[] = {"collections", "live", "young", "old",
+                               "threshold", "bytes_young", "bytes_old"};
         t = ty_new(TY_REC);
-        t->rec.count = 5;
-        t->rec.names = xmalloc(sizeof(char *) * 5);
-        t->rec.types = xmalloc(sizeof(Type *) * 5);
-        for (size_t i = 0; i < 5; i++) {
+        t->rec.count = 7;
+        t->rec.names = xmalloc(sizeof(char *) * 7);
+        t->rec.types = xmalloc(sizeof(Type *) * 7);
+        for (size_t i = 0; i < 7; i++) {
             t->rec.names[i] = names[i];
             t->rec.types[i] = &t_int;
         }
@@ -160,6 +255,16 @@ static bool eq_seen_sym(const EqVis *v, const Type *a, const Type *b) {
         if ((v->a[i] == a && v->b[i] == b) || (v->a[i] == b && v->b[i] == a))
             return true;
     return false;
+}
+
+/* two shapes are equal iff both are dynamic, or both static with dim_eq on
+ * each axis (the canonical-form solver decides; see dim.h) */
+static bool shape_eq(const Shape *a, const Shape *b) {
+    if (a->dynamic || b->dynamic) return a->dynamic && b->dynamic;
+    if (a->count != b->count) return false;
+    for (size_t i = 0; i < a->count; i++)
+        if (!dim_eq(a->dims[i], b->dims[i])) return false;
+    return true;
 }
 
 static bool type_eq_rec(const Type *a0, const Type *b0, EqVis *v) {
@@ -211,6 +316,11 @@ static bool type_eq_rec(const Type *a0, const Type *b0, EqVis *v) {
             if (!type_eq_rec(a->fun.params[i], b->fun.params[i], v)) return false;
         return type_eq_rec(a->fun.ret, b->fun.ret, v);
     }
+    case TY_TENSOR:
+        return a->tensor.dt == b->tensor.dt &&
+               shape_eq(a->tensor.shape, b->tensor.shape);
+    case TY_FIN:
+        return dim_eq(a->fin, b->fin);
     default:
         return true;
     }
@@ -249,6 +359,13 @@ static bool assignable_rec(const Type *dst0, const Type *src0, EqVis *v) {
         return src->k == TY_LIT && type_eq(dst, src);
     if (dst->k == TY_VAR || src->k == TY_VAR)
         return dst->k == TY_VAR && src->k == TY_VAR && type_eq(dst, src);
+    /* Fin[n] is inhabited by indices provably below n: Fin[a] <: Fin[b] iff
+     * a <= b (the decidable fragment of dim_le); Fin[n] <: int. */
+    if (dst->k == TY_FIN) {
+        if (src->k != TY_FIN) return false;
+        return dim_le(src->fin, dst->fin) == 1;
+    }
+    if (src->k == TY_FIN) return dst->k == TY_INT;
     TyKind sk = src->k == TY_LIT ? src->lit.base : src->k;
     switch (dst->k) {
     case TY_INT:   return sk == TY_INT || sk == TY_BOOL;
@@ -273,6 +390,10 @@ static bool assignable_rec(const Type *dst0, const Type *src0, EqVis *v) {
         for (size_t i = 0; i < dst->fun.count; i++)
             if (!type_eq(dst->fun.params[i], src->fun.params[i])) return false;
         return assignable_rec(dst->fun.ret, src->fun.ret, v);
+    case TY_TENSOR: /* same dtype; dynamic shapes are the shape-level `any` */
+        if (src->k != TY_TENSOR || dst->tensor.dt != src->tensor.dt) return false;
+        return shape_eq(dst->tensor.shape, src->tensor.shape) ||
+               dst->tensor.shape->dynamic || src->tensor.shape->dynamic;
     default:
         return dst->k == sk;
     }
@@ -452,6 +573,34 @@ static void type_write(char *buf, size_t cap, const Type *t) {
             type_write(buf, cap, t->uni.alts[i]);
         }
         break;
+    case TY_TENSOR: {
+        tw_append(buf, cap, "Tensor[");
+        tw_append(buf, cap, t->tensor.dt == CDT_F64 ? "f64" : "f32");
+        tw_append(buf, cap, ", ");
+        const Shape *sh = t->tensor.shape;
+        if (sh->dynamic) {
+            tw_append(buf, cap, "?");
+        } else {
+            tw_append(buf, cap, "[");
+            for (size_t i = 0; i < sh->count; i++) {
+                if (i) tw_append(buf, cap, ", ");
+                char *s = dim_str(sh->dims[i]);
+                tw_append(buf, cap, s);
+                free(s);
+            }
+            tw_append(buf, cap, "]");
+        }
+        tw_append(buf, cap, "]");
+        break;
+    }
+    case TY_FIN: {
+        tw_append(buf, cap, "Fin[");
+        char *s = dim_str(t->fin);
+        tw_append(buf, cap, s);
+        free(s);
+        tw_append(buf, cap, "]");
+        break;
+    }
     }
 }
 
@@ -529,7 +678,27 @@ typedef struct {
                        * scope for annotations in its body as well as its
                        * signature (`out: list[T] = []` inside def f[T]) */
     int loop_depth;
+    /* --- shape system state (Phase 2 / W4) --- */
+    char **dim_names;          /* module-level `dim` declarations */
+    size_t dim_count, dim_cap;
+    char **dim_params;         /* `B: dim` type parameters in scope */
+    size_t dim_param_count;
+    char **dim_sub_names;      /* active dim-substitution env (generic aliases) */
+    DimExpr **dim_sub_values;
+    size_t dim_sub_count;
 } Ck;
+
+/* D4: how many static<->dynamic shape crossings were inserted this run */
+static size_t shape_dyn_crossings = 0;
+
+static void note_shape_crossing(Ck *ck, const Type *dst, const Type *src) {
+    (void)ck;
+    Type *d = ty_resolve(dst), *s = ty_resolve(src);
+    if (d->k == TY_TENSOR && s->k == TY_TENSOR &&
+        d->tensor.dt == s->tensor.dt &&
+        !d->tensor.shape->dynamic && s->tensor.shape->dynamic)
+        shape_dyn_crossings++;
+}
 
 static void ck_error(Ck *ck, const char *code, int line, int col,
                      const char *fmt, ...) {
@@ -597,6 +766,7 @@ static bool is_builtin(const char *name) {
     return strcmp(name, "print") == 0 || strcmp(name, "len") == 0 ||
            strcmp(name, "range") == 0 || strcmp(name, "str") == 0 ||
            strcmp(name, "int") == 0 || strcmp(name, "gc_stats") == 0 ||
+           strcmp(name, "gc_collect") == 0 ||
            strcmp(name, "read_file") == 0 || strcmp(name, "write_file") == 0 ||
            strcmp(name, "append_file") == 0 || strcmp(name, "run") == 0 ||
            strcmp(name, "sqrt") == 0 ||
@@ -608,7 +778,21 @@ static bool is_builtin(const char *name) {
            strcmp(name, "float") == 0 || strcmp(name, "eprint") == 0 ||
            strcmp(name, "argv") == 0 || strcmp(name, "exit") == 0 ||
            strcmp(name, "read_file_opt") == 0 ||
-           strcmp(name, "file_exists") == 0;
+           strcmp(name, "file_exists") == 0 ||
+           /* --- tensor primitives (see tensors.md) --- */
+           strcmp(name, "zeros") == 0 || strcmp(name, "ones") == 0 ||
+           strcmp(name, "full") == 0 || strcmp(name, "arange") == 0 ||
+           strcmp(name, "tensor") == 0 || strcmp(name, "randn") == 0 ||
+           strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 ||
+           strcmp(name, "tanh") == 0 || strcmp(name, "relu") == 0 ||
+           strcmp(name, "matmul") == 0 || strcmp(name, "reshape") == 0 ||
+           strcmp(name, "transpose") == 0 || strcmp(name, "permute") == 0 ||
+           strcmp(name, "expand") == 0 || strcmp(name, "sum") == 0 ||
+           strcmp(name, "mean") == 0 || strcmp(name, "max") == 0 ||
+           strcmp(name, "argmax") == 0 || strcmp(name, "tslice") == 0 ||
+           strcmp(name, "item") == 0 || strcmp(name, "shape") == 0 ||
+           strcmp(name, "ndim") == 0 || strcmp(name, "dtype") == 0 ||
+           strcmp(name, "astype") == 0;
 }
 
 /* which builtins are pure (no IO, no randomness, no ambient state)? A pure
@@ -625,7 +809,22 @@ static bool builtin_pure(const char *name) {
             * mutates and `exit`/`argv`/`eprint` touch the process, so those
             * stay impure. See stdlib/SPEC.md §1.2. */
            strcmp(name, "slice") == 0 || strcmp(name, "ord") == 0 ||
-           strcmp(name, "chr") == 0 || strcmp(name, "float") == 0;
+           strcmp(name, "chr") == 0 || strcmp(name, "float") == 0 ||
+           /* tensor ops are pure functions of their inputs; `randn` is the
+            * one exception (randomness is an effect, even when seeded) */
+           strcmp(name, "zeros") == 0 || strcmp(name, "ones") == 0 ||
+           strcmp(name, "full") == 0 || strcmp(name, "arange") == 0 ||
+           strcmp(name, "tensor") == 0 ||
+           strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 ||
+           strcmp(name, "tanh") == 0 || strcmp(name, "relu") == 0 ||
+           strcmp(name, "matmul") == 0 || strcmp(name, "reshape") == 0 ||
+           strcmp(name, "transpose") == 0 || strcmp(name, "permute") == 0 ||
+           strcmp(name, "expand") == 0 || strcmp(name, "sum") == 0 ||
+           strcmp(name, "mean") == 0 || strcmp(name, "max") == 0 ||
+           strcmp(name, "argmax") == 0 || strcmp(name, "tslice") == 0 ||
+           strcmp(name, "item") == 0 || strcmp(name, "shape") == 0 ||
+           strcmp(name, "ndim") == 0 || strcmp(name, "dtype") == 0 ||
+           strcmp(name, "astype") == 0;
 }
 
 static FuncSig *find_func(Ck *ck, const char *name) {
@@ -640,6 +839,63 @@ static FuncSig *find_func(Ck *ck, const char *name) {
 /* --- resolving surface type expressions ---------------------------------- */
 
 static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env);
+
+/* is `name` a dim variable in scope: a `: dim` parameter or a declared `dim`? */
+static bool dim_in_scope(Ck *ck, const char *name) {
+    for (size_t i = 0; i < ck->dim_param_count; i++)
+        if (strcmp(ck->dim_params[i], name) == 0) return true;
+    for (size_t i = 0; i < ck->dim_count; i++)
+        if (strcmp(ck->dim_names[i], name) == 0) return true;
+    return false;
+}
+
+/* Interpret a type-expression argument as a dimension expression (the value
+ * passed for a `: dim` parameter). Only bare dim names and int literals are
+ * supported in type-argument position; richer arithmetic belongs inside a
+ * `[...]` shape list. */
+static DimExpr *type_expr_to_dim(Ck *ck, const TypeExpr *te) {
+    if (!te) return NULL;
+    if (te->kind == TE_NAME) {
+        if (!dim_in_scope(ck, te->name))
+            ck_error(ck, "E_SHAPE_UNKNOWN_DIM", te->line, te->col,
+                     "unknown dimension '%s' (declare it with `dim`, or bind "
+                     "it as a `: dim` parameter)", te->name);
+        return dim_var(te->name);
+    }
+    if (te->kind == TE_LIT && te->lit.kind == LIT_INT)
+        return dim_lit(te->lit.ival);
+    ck_error(ck, "E_SHAPE_DIM_ARG", te->line, te->col,
+             "dimension argument must be a dim name or an int literal");
+    return NULL;
+}
+
+/* Resolve a dimension expression: apply the active substitution env, then
+ * report any variable that is neither a dim parameter nor a declared dim.
+ * Returns a fresh tree (the caller owns it). */
+static DimExpr *resolve_dim(Ck *ck, const DimExpr *e, int line, int col) {
+    if (!e) return NULL;
+    switch (e->kind) {
+    case DE_VAR:
+        if (ck->dim_sub_count)
+            for (size_t i = 0; i < ck->dim_sub_count; i++)
+                if (strcmp(e->var, ck->dim_sub_names[i]) == 0)
+                    return dim_clone(ck->dim_sub_values[i]);
+        if (!dim_in_scope(ck, e->var))
+            ck_error(ck, "E_SHAPE_UNKNOWN_DIM", line, col,
+                     "unknown dimension '%s' (declare it with `dim`, or bind "
+                     "it as a `: dim` parameter)", e->var);
+        return dim_var(e->var);
+    case DE_LIT:
+        return dim_lit(e->lit);
+    case DE_ADD:
+        return dim_add(resolve_dim(ck, e->lhs, line, col),
+                       resolve_dim(ck, e->rhs, line, col));
+    case DE_MUL:
+        return dim_mul(resolve_dim(ck, e->lhs, line, col),
+                       resolve_dim(ck, e->rhs, line, col));
+    }
+    return NULL;
+}
 
 static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
     /* type variables in scope shadow aliases and builtins */
@@ -703,16 +959,46 @@ static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
                      "recursive generic type '%s' is not supported", te->name);
             return &t_any;
         }
-        TyEnv sub;
-        sub.names = al->params;
-        sub.count = al->param_count;
-        sub.types = xmalloc(sizeof(Type *) * al->param_count);
+        /* partition parameters into type variables and `: dim` dimensions */
+        size_t ndims = 0;
         for (size_t j = 0; j < al->param_count; j++)
-            sub.types[j] = resolve_type(ck, te->args[j], env);
+            if (al->param_dims && al->param_dims[j]) ndims++;
+        size_t ntypes = al->param_count - ndims;
+        TyEnv sub;
+        sub.count = ntypes;
+        sub.names = xmalloc(sizeof(char *) * (ntypes ? ntypes : 1));
+        sub.types = xmalloc(sizeof(Type *) * (ntypes ? ntypes : 1));
+        char **dn = xmalloc(sizeof(char *) * (ndims ? ndims : 1));
+        DimExpr **dv = xmalloc(sizeof(DimExpr *) * (ndims ? ndims : 1));
+        size_t ti = 0, di = 0;
+        for (size_t j = 0; j < al->param_count; j++) {
+            bool isdim = al->param_dims && al->param_dims[j];
+            if (isdim) {
+                dn[di] = al->params[j];
+                dv[di] = type_expr_to_dim(ck, te->args[j]);
+                di++;
+            } else {
+                sub.names[ti] = al->params[j];
+                sub.types[ti] = resolve_type(ck, te->args[j], env);
+                ti++;
+            }
+        }
+        char **saved_dn = ck->dim_sub_names;
+        DimExpr **saved_dv = ck->dim_sub_values;
+        size_t saved_dc = ck->dim_sub_count;
+        ck->dim_sub_names = dn;
+        ck->dim_sub_values = dv;
+        ck->dim_sub_count = ndims;
         ck->alias_depth++;
         Type *r = resolve_type(ck, al->body, &sub);
         ck->alias_depth--;
+        ck->dim_sub_names = saved_dn;
+        ck->dim_sub_values = saved_dv;
+        ck->dim_sub_count = saved_dc;
+        free(sub.names);
         free(sub.types);
+        free(dn);
+        free(dv);
         return r;
     }
     ck_error(ck, "E_TYPE_UNKNOWN_TYPE", te->line, te->col,
@@ -752,6 +1038,26 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
             params[i] = resolve_type(ck, te->fun.params[i], env);
         return ty_func(params, te->fun.param_count, resolve_type(ck, te->fun.ret, env));
     }
+    case TE_TENSOR: {
+        CDType dt = CDT_F32;
+        if (te->tensor.dtype && te->tensor.dtype->kind == TE_NAME) {
+            if (strcmp(te->tensor.dtype->name, "f64") == 0) dt = CDT_F64;
+            else if (strcmp(te->tensor.dtype->name, "f32") == 0) dt = CDT_F32;
+            else
+                ck_error(ck, "E_SHAPE_DTYPE", te->line, te->col,
+                         "unknown tensor dtype '%s' (Phase 2 supports f32 and f64)",
+                         te->tensor.dtype->name);
+        }
+        if (te->tensor.dynamic)
+            return ty_tensor(dt, shape_dynamic());
+        DimExpr **dims = xmalloc(sizeof(DimExpr *) *
+                                 (te->tensor.shape_count ? te->tensor.shape_count : 1));
+        for (size_t i = 0; i < te->tensor.shape_count; i++)
+            dims[i] = resolve_dim(ck, te->tensor.shape[i], te->line, te->col);
+        return ty_tensor(dt, shape_of(dims, te->tensor.shape_count));
+    }
+    case TE_FIN:
+        return ty_fin(resolve_dim(ck, te->fin_dim, te->line, te->col));
     case TE_INTER: {
         Type *a = resolve_type(ck, te->lhs, env);
         Type *b = resolve_type(ck, te->rhs, env);
@@ -982,6 +1288,259 @@ static bool is_numeric(const Type *t) {
     return t->k == TY_INT || t->k == TY_FLOAT || t->k == TY_BOOL || t->k == TY_ANY;
 }
 
+/* --- tensor primitive typing rules (SPEC_V2.md W4) ----------------------- */
+
+/* If `t` is a tensor, return it. If it is `any`/`never` (the untyped escape
+ * hatch), return `&t_any` as a sentinel. Anything else is an error. */
+static Type *expect_tensor(Ck *ck, const Expr *e, Type *t, const char *fn) {
+    Type *tt = tensor_of(t);
+    if (tt) return tt;
+    Type *r = ty_resolve(t);
+    if (r->k != TY_ANY && r->k != TY_NEVER)
+        ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                 "%s() expects a tensor, got %s", fn, type_str(t));
+    return &t_any;
+}
+
+/* elementwise unary (exp/log/tanh/relu): preserves dtype and shape */
+static Type *infer_tensor_unary(Ck *ck, const Expr *e, Type *t,
+                                const char *fn) {
+    Type *tt = expect_tensor(ck, e, t, fn);
+    return tt == &t_any ? &t_any : tt;
+}
+
+/* elementwise binary via `+ - * /` (dispatched from the operator functions) */
+static Type *infer_tensor_binop(Ck *ck, const Expr *e, Type *a, Type *b) {
+    if (a->tensor.dt != b->tensor.dt)
+        ck_error(ck, "E_SHAPE_DTYPE", e->line, e->col,
+                 "tensor dtypes do not match: %s and %s",
+                 type_str(a), type_str(b));
+    Shape *rs = broadcast_shapes(a->tensor.shape, b->tensor.shape);
+    if (!rs) {
+        ck_error(ck, "E_SHAPE_BROADCAST", e->line, e->col,
+                 "tensor shapes cannot broadcast: %s and %s (use expand())",
+                 type_str(a), type_str(b));
+        return ty_tensor(a->tensor.dt, shape_dynamic());
+    }
+    return ty_tensor(a->tensor.dt, rs);
+}
+
+static Type *infer_tensor_matmul(Ck *ck, const Expr *e, Type **argt) {
+    Type *a = expect_tensor(ck, e, argt[0], "matmul");
+    Type *b = expect_tensor(ck, e, argt[1], "matmul");
+    if (a == &t_any || b == &t_any)
+        return ty_tensor(a == &t_any ? (b == &t_any ? CDT_F32 : b->tensor.dt)
+                                       : a->tensor.dt, shape_dynamic());
+    CDType dt = a->tensor.dt;
+    if (a->tensor.dt != b->tensor.dt)
+        ck_error(ck, "E_SHAPE_DTYPE", e->line, e->col,
+                 "matmul() dtype mismatch: %s and %s", type_str(a), type_str(b));
+    Shape *sa = a->tensor.shape, *sb = b->tensor.shape;
+    if (sa->dynamic || sb->dynamic) return ty_tensor(dt, shape_dynamic());
+    if (sa->count != 2 || sb->count != 2) {
+        ck_error(ck, "E_SHAPE_RANK", e->line, e->col,
+                 "matmul() expects rank-2 tensors, got %s and %s",
+                 type_str(a), type_str(b));
+        return ty_tensor(dt, shape_dynamic());
+    }
+    if (!dim_eq(sa->dims[1], sb->dims[0])) {
+        /* the exit criterion: both shapes printed, the mismatching axis named */
+        Diag *d = diag_add(ck->diags, DIA_TYPE, "E_SHAPE_MATMUL", ck->filename,
+                           e->line, e->col, "contracted dimensions do not match");
+        diag_note(d, "left", type_str(a));
+        diag_note(d, "right", type_str(b));
+        char *ks = dim_str(sa->dims[1]), *ns = dim_str(sb->dims[0]);
+        char mm[256];
+        snprintf(mm, sizeof mm, "%s != %s  (contraction axis)", ks, ns);
+        free(ks);
+        free(ns);
+        diag_note(d, "mismatch", mm);
+        ck->errors++;
+        return ty_tensor(dt, shape_dynamic());
+    }
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * 2);
+    dims[0] = sa->dims[0];
+    dims[1] = sb->dims[1];
+    return ty_tensor(dt, shape_of(dims, 2));
+}
+
+static Type *infer_tensor_reshape(Ck *ck, const Expr *e, Type **argt) {
+    Type *tt = expect_tensor(ck, e, argt[0], "reshape");
+    if (tt == &t_any) return &t_any;
+    Shape *src = tt->tensor.shape;
+    Shape *dst = literal_shape_of_expr(e->as.call.args[1]);
+    if (src->dynamic || !dst) return ty_tensor(tt->tensor.dt, shape_dynamic());
+    DimExpr *ps = shape_prod(src), *pd = shape_prod(dst);
+    bool ok = dim_eq(ps, pd);
+    if (!ok) {
+        char *s1 = dim_str(ps), *s2 = dim_str(pd);
+        ck_error(ck, "E_SHAPE_RESHAPE", e->line, e->col,
+                 "reshape() changes the number of elements: %s elements into a "
+                 "shape with %s elements", s1, s2);
+        free(s1);
+        free(s2);
+    }
+    dim_free(ps);
+    dim_free(pd);
+    return ok ? ty_tensor(tt->tensor.dt, dst)
+              : ty_tensor(tt->tensor.dt, shape_dynamic());
+}
+
+static Type *infer_tensor_transpose(Ck *ck, const Expr *e, Type *t) {
+    Type *tt = expect_tensor(ck, e, t, "transpose");
+    if (tt == &t_any) return &t_any;
+    Shape *s = tt->tensor.shape;
+    if (s->dynamic) return ty_tensor(tt->tensor.dt, shape_dynamic());
+    if (s->count < 2) {
+        ck_error(ck, "E_SHAPE_RANK", e->line, e->col,
+                 "transpose() needs a tensor of rank >= 2, got rank %zu",
+                 s->count);
+        return ty_tensor(tt->tensor.dt, shape_dynamic());
+    }
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * s->count);
+    for (size_t i = 0; i < s->count; i++) dims[i] = s->dims[i];
+    DimExpr *tmp = dims[s->count - 1];
+    dims[s->count - 1] = dims[s->count - 2];
+    dims[s->count - 2] = tmp;
+    return ty_tensor(tt->tensor.dt, shape_of(dims, s->count));
+}
+
+static Type *infer_tensor_permute(Ck *ck, const Expr *e, Type **argt) {
+    Type *tt = expect_tensor(ck, e, argt[0], "permute");
+    if (tt == &t_any) return &t_any;
+    Shape *s = tt->tensor.shape;
+    if (s->dynamic) return ty_tensor(tt->tensor.dt, shape_dynamic());
+    const Expr *pe = e->as.call.args[1];
+    size_t n = s->count;
+    if (!pe || pe->kind != E_LIST || pe->as.list.count != n) {
+        ck_error(ck, "E_SHAPE_PERMUTE", e->line, e->col,
+                 "permute() needs a permutation of the %zu axes (a list of %zu "
+                 "distinct ints)", n, n);
+        return ty_tensor(tt->tensor.dt, shape_dynamic());
+    }
+    int64_t *perm = xmalloc(sizeof(int64_t) * (n ? n : 1));
+    for (size_t i = 0; i < n; i++) {
+        const Expr *it = pe->as.list.items[i];
+        if (it->kind != E_INT) {
+            free(perm);
+            ck_error(ck, "E_SHAPE_PERMUTE", e->line, e->col,
+                     "permute() axes must be int literals");
+            return ty_tensor(tt->tensor.dt, shape_dynamic());
+        }
+        perm[i] = it->as.ival;
+    }
+    for (size_t i = 0; i < n; i++)
+        if (perm[i] < 0 || perm[i] >= (int64_t)n) {
+            free(perm);
+            ck_error(ck, "E_SHAPE_PERMUTE", e->line, e->col,
+                     "permute() axis %lld is out of range for rank %zu",
+                     (long long)perm[i], n);
+            return ty_tensor(tt->tensor.dt, shape_dynamic());
+        }
+    for (size_t i = 0; i < n; i++)
+        for (size_t j = 0; j < i; j++)
+            if (perm[j] == perm[i]) {
+                free(perm);
+                ck_error(ck, "E_SHAPE_PERMUTE", e->line, e->col,
+                         "permute() repeats axis %lld", (long long)perm[i]);
+                return ty_tensor(tt->tensor.dt, shape_dynamic());
+            }
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * (n ? n : 1));
+    for (size_t i = 0; i < n; i++) dims[i] = s->dims[perm[i]];
+    free(perm);
+    return ty_tensor(tt->tensor.dt, shape_of(dims, n));
+}
+
+static Type *infer_tensor_reduce(Ck *ck, const Expr *e, Type **argt,
+                                 const char *fn) {
+    Type *tt = expect_tensor(ck, e, argt[0], fn);
+    if (tt == &t_any) return &t_any;
+    Shape *s = tt->tensor.shape;
+    if (s->dynamic) return ty_tensor(tt->tensor.dt, shape_dynamic());
+    Type *ax = ty_resolve(argt[1]);
+    if (ax->k != TY_LIT || ax->lit.base != TY_INT)
+        return ty_tensor(tt->tensor.dt, shape_dynamic()); /* axis unknown */
+    int64_t axis = ax->lit.ival;
+    if (axis < 0 || axis >= (int64_t)s->count) {
+        ck_error(ck, "E_SHAPE_AXIS", e->line, e->col,
+                 "%s() axis %lld is out of range for a rank-%zu tensor",
+                 fn, (long long)axis, s->count);
+        return ty_tensor(tt->tensor.dt, shape_dynamic());
+    }
+    size_t out_n = s->count - 1;
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * (out_n ? out_n : 1));
+    size_t k = 0;
+    for (size_t i = 0; i < s->count; i++)
+        if ((int64_t)i != axis) dims[k++] = s->dims[i];
+    return ty_tensor(tt->tensor.dt, shape_of(dims, out_n));
+}
+
+static Type *infer_tensor_expand(Ck *ck, const Expr *e, Type **argt) {
+    Type *tt = expect_tensor(ck, e, argt[0], "expand");
+    if (tt == &t_any) return &t_any;
+    Shape *src = tt->tensor.shape;
+    Shape *dst = literal_shape_of_expr(e->as.call.args[1]);
+    if (src->dynamic || !dst) return ty_tensor(tt->tensor.dt, shape_dynamic());
+    if (src->count != dst->count) {
+        ck_error(ck, "E_SHAPE_BROADCAST", e->line, e->col,
+                 "expand() rank mismatch: %zu to %zu axes",
+                 src->count, dst->count);
+        return ty_tensor(tt->tensor.dt, shape_dynamic());
+    }
+    for (size_t i = 0; i < src->count; i++)
+        if (!dim_eq(src->dims[i], dst->dims[i]) && !dim_is_one(src->dims[i])) {
+            ck_error(ck, "E_SHAPE_BROADCAST", e->line, e->col,
+                     "expand() cannot grow axis %zu from %s to %s",
+                     i, dim_str(src->dims[i]), dim_str(dst->dims[i]));
+            return ty_tensor(tt->tensor.dt, shape_dynamic());
+        }
+    return ty_tensor(tt->tensor.dt, dst);
+}
+
+static Type *infer_tensor_slice(Ck *ck, const Expr *e, Type **argt) {
+    Type *tt = expect_tensor(ck, e, argt[0], "tslice");
+    if (tt == &t_any) return &t_any;
+    Shape *s = tt->tensor.shape;
+    if (s->dynamic) return ty_tensor(tt->tensor.dt, shape_dynamic());
+    Type *ax = ty_resolve(argt[1]);
+    if (ax->k != TY_LIT || ax->lit.base != TY_INT)
+        return ty_tensor(tt->tensor.dt, shape_dynamic());
+    int64_t axis = ax->lit.ival;
+    if (axis < 0 || axis >= (int64_t)s->count) {
+        ck_error(ck, "E_SHAPE_AXIS", e->line, e->col,
+                 "tslice() axis %lld is out of range for a rank-%zu tensor",
+                 (long long)axis, s->count);
+        return ty_tensor(tt->tensor.dt, shape_dynamic());
+    }
+    const Expr *lo = e->as.call.args[2], *hi = e->as.call.args[3];
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * (s->count ? s->count : 1));
+    for (size_t i = 0; i < s->count; i++) {
+        if ((int64_t)i == axis && lo && hi && lo->kind == E_INT &&
+            hi->kind == E_INT)
+            dims[i] = dim_lit(hi->as.ival - lo->as.ival);
+        else if ((int64_t)i == axis)
+            return ty_tensor(tt->tensor.dt, shape_dynamic());
+        else
+            dims[i] = s->dims[i];
+    }
+    return ty_tensor(tt->tensor.dt, shape_of(dims, s->count));
+}
+
+static Type *infer_tensor_astype(Ck *ck, const Expr *e, Type **argt) {
+    Type *tt = expect_tensor(ck, e, argt[0], "astype");
+    if (tt == &t_any) return &t_any;
+    CDType ndt = tt->tensor.dt;
+    const Expr *de = e->as.call.args[1];
+    if (de && de->kind == E_STR) {
+        if (strcmp(de->as.sval, "f64") == 0) ndt = CDT_F64;
+        else if (strcmp(de->as.sval, "f32") == 0) ndt = CDT_F32;
+        else
+            ck_error(ck, "E_SHAPE_DTYPE", e->line, e->col,
+                     "unknown tensor dtype '%s'", de->as.sval);
+    }
+    return ty_tensor(ndt, tt->tensor.shape);
+}
+
 static Type *infer_binop(Ck *ck, const Expr *e) {
     /* literal types behave as their base type under operators */
     Type *l = ty_base(infer(ck, e->as.bin.lhs));
@@ -1049,6 +1608,22 @@ static Type *infer_binop(Ck *ck, const Expr *e) {
         /* FALLTHROUGH */
     case B_SUB: case B_MUL: case B_DIV: case B_MOD: {
         if (l->k == TY_ANY || r->k == TY_ANY) return &t_any;
+        /* tensors dispatch elementwise (+ - * /; no % on tensors) */
+        if (op != B_MOD) {
+            Type *tl = tensor_of(l), *tr = tensor_of(r);
+            if (tl || tr) {
+                if (tl && tr) return infer_tensor_binop(ck, e, tl, tr);
+                /* tensor op scalar (or scalar op tensor): the scalar
+                 * broadcasts to the tensor's shape and dtype */
+                Type *t = tl ? tl : tr;
+                Type *sc = tl ? r : l;
+                if (sc->k == TY_INT || sc->k == TY_FLOAT || sc->k == TY_BOOL)
+                    return t;
+                ck_error(ck, "E_TYPE_OPERAND", e->line, e->col,
+                         "cannot combine a tensor with %s", type_str(sc));
+                return &t_any;
+            }
+        }
         if (op == B_MUL) { /* "ab" * 3, [0] * n */
             if (l->k == TY_STR && r->k == TY_INT) return &t_str;
             if (l->k == TY_INT && r->k == TY_STR) return &t_str;
@@ -1215,6 +1790,12 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                          "gc_stats() takes 0 arguments, got %zu", argc);
             return gc_stats_type();
         }
+        if (strcmp(name, "gc_collect") == 0) {
+            if (argc != 0)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "gc_collect() takes 0 arguments, got %zu", argc);
+            return &t_none;
+        }
         if (strcmp(name, "read_file") == 0) {
             if (argc != 1)
                 ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
@@ -1361,6 +1942,129 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             return &t_bool;
         }
 
+        /* --- tensor primitives: shape-obligation typing rules (W4). Each
+         * constructor's shape comes from a runtime list, so it types as the
+         * dynamic escape hatch Tensor[f32, ?]; the shape-carrying operations
+         * (matmul, elementwise, reshape, permute, reductions) verify their
+         * obligations statically and emit E_SHAPE_* diagnostics. */
+        if (strcmp(name, "zeros") == 0 || strcmp(name, "ones") == 0 ||
+            strcmp(name, "arange") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "%s() takes 1 argument, got %zu", dname, argc);
+            return ty_tensor(CDT_F32, shape_dynamic());
+        }
+        if (strcmp(name, "full") == 0 || strcmp(name, "randn") == 0) {
+            if (argc != 2)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "%s() takes 2 arguments, got %zu", dname, argc);
+            return ty_tensor(CDT_F32, shape_dynamic());
+        }
+        if (strcmp(name, "tensor") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "tensor() takes 1 argument, got %zu", argc);
+            return ty_tensor(CDT_F32, shape_dynamic());
+        }
+        if (strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 ||
+            strcmp(name, "tanh") == 0 || strcmp(name, "relu") == 0) {
+            if (argc != 1) {
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "%s() takes 1 argument, got %zu", dname, argc);
+                return &t_any;
+            }
+            return infer_tensor_unary(ck, e, argt[0], name);
+        }
+        if (strcmp(name, "transpose") == 0) {
+            if (argc != 1) {
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "transpose() takes 1 argument, got %zu", argc);
+                return &t_any;
+            }
+            return infer_tensor_transpose(ck, e, argt[0]);
+        }
+        if (strcmp(name, "item") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "item() takes 1 argument, got %zu", argc);
+            return &t_float;
+        }
+        if (strcmp(name, "shape") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "shape() takes 1 argument, got %zu", argc);
+            return ty_list(&t_int);
+        }
+        if (strcmp(name, "ndim") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "ndim() takes 1 argument, got %zu", argc);
+            return &t_int;
+        }
+        if (strcmp(name, "dtype") == 0) {
+            if (argc != 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "dtype() takes 1 argument, got %zu", argc);
+            return &t_str;
+        }
+        if (strcmp(name, "astype") == 0) {
+            if (argc != 2) {
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "astype() takes 2 arguments, got %zu", argc);
+                return &t_any;
+            }
+            return infer_tensor_astype(ck, e, argt);
+        }
+        if (strcmp(name, "matmul") == 0) {
+            if (argc != 2) {
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "matmul() takes 2 arguments, got %zu", argc);
+                return &t_any;
+            }
+            return infer_tensor_matmul(ck, e, argt);
+        }
+        if (strcmp(name, "reshape") == 0) {
+            if (argc != 2) {
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "reshape() takes 2 arguments, got %zu", argc);
+                return &t_any;
+            }
+            return infer_tensor_reshape(ck, e, argt);
+        }
+        if (strcmp(name, "permute") == 0) {
+            if (argc != 2) {
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "permute() takes 2 arguments, got %zu", argc);
+                return &t_any;
+            }
+            return infer_tensor_permute(ck, e, argt);
+        }
+        if (strcmp(name, "expand") == 0) {
+            if (argc != 2) {
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "expand() takes 2 arguments, got %zu", argc);
+                return &t_any;
+            }
+            return infer_tensor_expand(ck, e, argt);
+        }
+        if (strcmp(name, "sum") == 0 || strcmp(name, "mean") == 0 ||
+            strcmp(name, "max") == 0 || strcmp(name, "argmax") == 0) {
+            if (argc != 2) {
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "%s() takes 2 arguments, got %zu", dname, argc);
+                return &t_any;
+            }
+            return infer_tensor_reduce(ck, e, argt, name);
+        }
+        if (strcmp(name, "tslice") == 0) {
+            if (argc != 4) {
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "tslice() takes 4 arguments, got %zu", argc);
+                return &t_any;
+            }
+            return infer_tensor_slice(ck, e, argt);
+        }
+
         if (f) {
             /* purity: a pure function may only call other pure functions */
             if (ck->cur_pure && !f->pure)
@@ -1378,13 +2082,15 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                     if (islam[i])
                         argt[i] = infer_lambda(ck, e->as.call.args[i],
                                                f->params[i]);
-                for (size_t i = 0; i < argc; i++)
+                for (size_t i = 0; i < argc; i++) {
+                    note_shape_crossing(ck, f->params[i], argt[i]);
                     if (!assignable(f->params[i], argt[i]))
                         ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
                                    f->params[i], argt[i],
                                    "argument %zu of %s(): expected %s, got %s",
                                    i + 1, dname, type_str(f->params[i]),
                                    type_str(argt[i]));
+                }
                 return f->ret;
             }
             /* generic call: infer type arguments by unification, then re-check */
@@ -1409,6 +2115,7 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                 if (!sub.types[j]) sub.types[j] = &t_any;
             for (size_t i = 0; i < argc; i++) {
                 Type *pi = ty_subst(f->params[i], &sub);
+                note_shape_crossing(ck, pi, argt[i]);
                 if (!assignable(pi, argt[i]))
                     ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
                                pi, argt[i],
@@ -1443,12 +2150,14 @@ static Type *infer_call(Ck *ck, const Expr *e) {
     for (size_t i = 0; i < argc; i++)
         if (islam[i])
             argt[i] = infer_lambda(ck, e->as.call.args[i], ft->fun.params[i]);
-    for (size_t i = 0; i < argc; i++)
+    for (size_t i = 0; i < argc; i++) {
+        note_shape_crossing(ck, ft->fun.params[i], argt[i]);
         if (!assignable(ft->fun.params[i], argt[i]))
             ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
                        ft->fun.params[i], argt[i],
                        "argument %zu: expected %s, got %s",
                        i + 1, type_str(ft->fun.params[i]), type_str(argt[i]));
+    }
     return ft->fun.ret;
 }
 
@@ -1547,6 +2256,32 @@ static Type *infer(Ck *ck, const Expr *e) {
         if (seq->k == TY_NEVER) return &t_never;
         if (seq->k == TY_LIST) return seq->elem;
         if (seq->k == TY_STR) return &t_str;
+        if (seq->k == TY_TENSOR) {
+            /* `a[i]` drops the indexed (first) axis, matching the runtime's
+             * rank-reduced view semantics (numpy-style) */
+            Shape *s = seq->tensor.shape;
+            if (s->dynamic) return ty_tensor(seq->tensor.dt, shape_dynamic());
+            if (s->count == 0) {
+                ck_error(ck, "E_TYPE_INDEX", e->line, e->col,
+                         "cannot index a scalar (0-d) tensor");
+                return &t_any;
+            }
+            /* Fin[n] index safety (W5): reject an index provably out of range */
+            Type *ix = ty_resolve(idx);
+            if (ix->k == TY_FIN) {
+                int c = dim_le(ix->fin, s->dims[0]);
+                if (c == 0) {
+                    char *b = dim_str(s->dims[0]);
+                    ck_error(ck, "E_SHAPE_INDEX", e->line, e->col,
+                             "index of type %s cannot index an axis of size %s",
+                             type_str(ix), b);
+                    free(b);
+                }
+            }
+            DimExpr **dims = xmalloc(sizeof(DimExpr *) * (s->count - 1 ? s->count - 1 : 1));
+            for (size_t i = 1; i < s->count; i++) dims[i - 1] = s->dims[i];
+            return ty_tensor(seq->tensor.dt, shape_of(dims, s->count - 1));
+        }
         if (seq->k == TY_ANY || seq->k == TY_UNION) return &t_any;
         ck_error(ck, "E_TYPE_INDEX", e->line, e->col,
                  "%s is not indexable", type_str(seq));
@@ -2226,7 +2961,14 @@ static void set_flow(Var *v, Type *val) {
     Type *w = widen(val);
     v->gen++;
     v->bound = true;
-    if (assignable(v->decl, w)) v->type = w;
+    /* a dynamic tensor bound to a statically-shaped annotation keeps the
+     * annotation's shape on reads: the runtime asserts it at the boundary,
+     * so later ops must see the static shape (SPEC_V2.md D4). */
+    Type *d = ty_resolve(v->decl), *s = ty_resolve(w);
+    if (d->k == TY_TENSOR && s->k == TY_TENSOR &&
+        !d->tensor.shape->dynamic && s->tensor.shape->dynamic)
+        v->type = v->decl;
+    else if (assignable(v->decl, w)) v->type = w;
     else if (assignable(v->decl, val)) { defresh(val); v->type = val; }
     else v->type = v->decl;
 }
@@ -2270,6 +3012,7 @@ static void check_assign(Ck *ck, const Stmt *s) {
                 ck_error(ck, "E_PROOF_ANY", s->line, s->col,
                          "'any' is banned in proof mode: annotate '%s' with a "
                          "concrete type", name);
+            note_shape_crossing(ck, ann, val);
             if (!assignable(ann, val))
                 ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, ann, val,
                            "cannot assign %s to '%s' declared as %s",
@@ -2293,6 +3036,7 @@ static void check_assign(Ck *ck, const Stmt *s) {
         }
         if (!v->bound) { /* first assignment fixes the inferred type */
             v->is_const = s->as.assign.is_const;
+            note_shape_crossing(ck, v->decl, val);
             if (!v->annotated) v->decl = widen(val);
             else if (!assignable(v->decl, val))
                 ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, v->decl, val,
@@ -2301,6 +3045,7 @@ static void check_assign(Ck *ck, const Stmt *s) {
             set_flow(v, val);
             return;
         }
+        note_shape_crossing(ck, v->decl, val);
         if (assignable(v->decl, val)) { set_flow(v, val); return; }
         if (v->annotated) {
             ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, v->decl, val,
@@ -2488,6 +3233,7 @@ static void check_stmt(Ck *ck, const Stmt *s) {
             ck_error(ck, "E_PROOF_ANY", s->line, s->col,
                      "returning a value of type 'any', which is banned in "
                      "proof mode");
+        note_shape_crossing(ck, ck->cur_ret, t);
         if (!assignable(ck->cur_ret, t))
             ck_error_t(ck, "E_TYPE_RETURN", s->line, s->col, ck->cur_ret, t,
                        "returning %s from a function declared to return %s",
@@ -2536,6 +3282,9 @@ static void check_stmt(Ck *ck, const Stmt *s) {
     case S_IMPORT:
         /* resolved away by the module linker before checking */
         break;
+    case S_DIMDECL:
+        /* dimension declarations are registered in the signature pass */
+        break;
     }
 }
 
@@ -2582,6 +3331,21 @@ static TyEnv func_tyenv(const Stmt *s) {
             env.types[i] = ty_var(s->as.func.tparams[i]);
     }
     return env;
+}
+
+/* the `: dim` type parameters of a generic function, in declaration order */
+static char **func_dims(const Stmt *s, size_t *out_count) {
+    size_t n = 0;
+    for (size_t i = 0; i < s->as.func.tparam_count; i++)
+        if (s->as.func.tparam_dims && s->as.func.tparam_dims[i]) n++;
+    if (!n) { *out_count = 0; return NULL; }
+    char **dims = xmalloc(sizeof(char *) * n);
+    size_t j = 0;
+    for (size_t i = 0; i < s->as.func.tparam_count; i++)
+        if (s->as.func.tparam_dims && s->as.func.tparam_dims[i])
+            dims[j++] = s->as.func.tparams[i];
+    *out_count = n;
+    return dims;
 }
 
 /* register a function signature into `scope` (nested) or ck->funcs (top). */
@@ -2638,6 +3402,13 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
     f->params = xmalloc(sizeof(Type *) * (f->param_count ? f->param_count : 1));
     bool saved_in_sig = ck->in_sig;
     ck->in_sig = true;
+    /* the `: dim` type parameters are in scope for the signature's shapes */
+    size_t ndims = 0;
+    char **dims = func_dims(s, &ndims);
+    char **saved_dp = ck->dim_params;
+    size_t saved_dpc = ck->dim_param_count;
+    ck->dim_params = dims;
+    ck->dim_param_count = ndims;
     for (size_t j = 0; j < f->param_count; j++) {
         if (ck->proof && s->as.func.param_types[j] == NULL)
             ck_error(ck, "E_PROOF_ANY", s->line, s->col,
@@ -2649,6 +3420,9 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
         ck_error(ck, "E_PROOF_ANY", s->line, s->col,
                  "missing return type annotation ('any' is banned in proof mode)");
     f->ret = resolve_type(ck, s->as.func.ret_type, te);
+    ck->dim_params = saved_dp;
+    ck->dim_param_count = saved_dpc;
+    free(dims);
     ck->in_sig = saved_in_sig;
     f->node = s;
     free(tenv.types);
@@ -2694,6 +3468,14 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     TyEnv tenv = func_tyenv(s);
     TyEnv *te = tenv.count ? &tenv : NULL;
 
+    /* `: dim` type parameters are in scope for the body's shape annotations */
+    size_t ndims = 0;
+    char **dims = func_dims(s, &ndims);
+    char **saved_dp = ck->dim_params;
+    size_t saved_dpc = ck->dim_param_count;
+    ck->dim_params = dims;
+    ck->dim_param_count = ndims;
+
     Scope sc;
     memset(&sc, 0, sizeof(sc));
     sc.parent = parent;
@@ -2734,6 +3516,10 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     ck->cur_pure = saved_pure;
     ck->tyenv = saved_tyenv;
 
+    ck->dim_params = saved_dp;
+    ck->dim_param_count = saved_dpc;
+    free(dims);
+
     free(ptypes);
     free(sc.locals.items);
     free(sc.funcs);
@@ -2741,13 +3527,42 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     ck->filename = saved_file;
 }
 
+size_t check_shape_crossings(void) { return shape_dyn_crossings; }
+
 int check_program(const Program *prog, const char *filename, DiagList *diags,
                   bool proof) {
     Ck ck;
     memset(&ck, 0, sizeof(ck));
+    shape_dyn_crossings = 0;
+    dim_reset_unresolved();
     ck.filename = filename;
     ck.diags = diags;
     ck.proof = proof;
+
+    /* pass 0: `dim` declarations (nominal dimension names), in file order. They
+     * must be in scope for the alias bodies and signatures resolved below. */
+    for (size_t i = 0; i < prog->body.count; i++) {
+        const Stmt *s = prog->body.items[i];
+        if (s->kind != S_DIMDECL) continue;
+        for (size_t j = 0; j < s->as.dim.count; j++) {
+            const char *nm = s->as.dim.names[j];
+            bool dup = false;
+            for (size_t k = 0; k < ck.dim_count; k++)
+                if (strcmp(ck.dim_names[k], nm) == 0) { dup = true; break; }
+            if (dup) {
+                ck_error(&ck, "E_SHAPE_DUP_DIM", s->line, s->col,
+                         "dimension '%s' is declared twice", nm);
+                continue;
+            }
+            if (ck.dim_count == ck.dim_cap) {
+                ck.dim_cap = ck.dim_cap ? ck.dim_cap * 2 : 8;
+                ck.dim_names = realloc(ck.dim_names,
+                                       sizeof(char *) * ck.dim_cap);
+                if (!ck.dim_names) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+            }
+            ck.dim_names[ck.dim_count++] = s->as.dim.names[j];
+        }
+    }
 
     /* pass 1a: type aliases, in file order (use-before-definition is an error).
      * Generic aliases keep their body unresolved and expand at each use. */
@@ -2764,6 +3579,7 @@ int check_program(const Program *prog, const char *filename, DiagList *diags,
         al->name = s->as.tdef.name;
         al->disp = s->as.tdef.dispname;
         al->params = s->as.tdef.params;
+        al->param_dims = s->as.tdef.param_dims;
         al->param_count = s->as.tdef.param_count;
         al->body = s->as.tdef.value;
         al->resolving = true;

@@ -1,0 +1,15 @@
+# The shape stage's surface: nominal dims, tensor annotations, kinded params,
+# dim arithmetic, and the dynamic-shape escape hatch.
+dim Batch, Seq, DModel, NHeads, Dh
+
+type Head[N: dim, H: dim] = Tensor[f32, [N, H]]
+
+def split_heads[B: dim, S: dim, D: dim](
+    x: Tensor[f32, [B, S, D]],
+) -> Tensor[f32, [B, S * D, D + 1]] {
+    return x
+}
+
+def dyn(x: Tensor[f32, ?]) -> Tensor[f32, [Batch, Seq]] { return x }
+
+y: Tensor[f32, [NHeads, Dh, 2 * Dh]] = zeros([1, 1, 1])

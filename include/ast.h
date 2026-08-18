@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+typedef struct DimExpr DimExpr;  /* see include/dim.h */
+
 /* --- type expressions (surface syntax of type annotations) -------------- */
 
 typedef enum {
@@ -19,6 +21,8 @@ typedef enum {
     TE_INTER,  /* A & B  (structural "inheritance") */
     TE_LIT,    /* literal type: 42, "red", True */
     TE_FUNC,   /* (A, B) -> C  (function type) */
+    TE_TENSOR, /* Tensor[dtype, [dim, ...]] or Tensor[dtype, ?] */
+    TE_FIN,    /* Fin[n] — an index provably below the dim `n` */
 } TypeExprKind;
 
 typedef enum { LIT_INT, LIT_STR, LIT_BOOL, LIT_NONE } LitKind;
@@ -48,6 +52,13 @@ struct TypeExpr {
         int64_t ival;       /* LIT_INT, LIT_BOOL (0/1) */
         char *sval;         /* LIT_STR */
     } lit;
+    struct {                /* TE_TENSOR */
+        TypeExpr *dtype;    /* the element dtype: TE_NAME "f32" / "f64" */
+        DimExpr **shape;    /* dimension expressions; NULL when `dynamic` */
+        size_t shape_count;
+        bool dynamic;       /* Tensor[f32, ?]: a dynamic-shape escape hatch */
+    } tensor;
+    DimExpr *fin_dim;       /* TE_FIN: the bound expression `n` */
 };
 
 /* --- expressions -------------------------------------------------------- */
@@ -126,6 +137,7 @@ typedef enum {
     S_RETURN, S_BREAK, S_CONTINUE, S_PASS,
     S_BLOCK, S_FUNC, S_TYPEDEF, S_IMPORT,
     S_MATCH,  /* match e { pat -> { ... } } */
+    S_DIMDECL, /* `dim Batch, Seq, DModel` — nominal dimension names */
 } StmtKind;
 
 /* one entry of `from <path> import a, b as c` */
@@ -172,6 +184,7 @@ struct Stmt {
             char *name;             /* linker-mangled for imported modules */
             const char *dispname;   /* name as written in the source */
             char **tparams;         /* generic type parameters `def f[T, U]` */
+            bool *tparam_dims;      /* parallel: true when `T: dim` (a dimension) */
             size_t tparam_count;
             char **params;
             TypeExpr **param_types; /* entries may be NULL (=any) */
@@ -185,6 +198,7 @@ struct Stmt {
             char *name;             /* linker-mangled for imported modules */
             const char *dispname;   /* name as written in the source */
             char **params;          /* generic parameters `type Pair[A, B]` */
+            bool *param_dims;       /* parallel: true when `A: dim` */
             size_t param_count;
             TypeExpr *value;
         } tdef;
@@ -195,6 +209,10 @@ struct Stmt {
             size_t name_count;
             bool is_from;
         } imp;
+        struct {                                      /* S_DIMDECL */
+            char **names;           /* `dim Batch, Seq, DModel` */
+            size_t count;
+        } dim;
     } as;
 };
 

@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_SHAPE_INDEX",
+    "file": "tests/check/bad_fin.rald",
+    "line": 7,
+    "column": 19,
+    "message": "index of type Fin[1 + N] cannot index an axis of size N",
+    "source_line": "    return item(xs[i])"
+  }
+]

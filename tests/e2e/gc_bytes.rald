@@ -1,0 +1,15 @@
+# GC byte accounting: a large allocation is visible in bytes_*, and once it
+# becomes garbage and a collection runs, the byte counters fall back down.
+def total_bytes(g: any) -> int { return g.bytes_young + g.bytes_old }
+
+big = range(300000)
+g = gc_stats()
+before = total_bytes(g)
+print("large alloc visible:", before > 2000000)
+
+big = []
+gc_collect()
+g2 = gc_stats()
+after = total_bytes(g2)
+print("bytes fell after collection:", after < before / 2)
+print("collections ran:", g2.collections > g.collections)

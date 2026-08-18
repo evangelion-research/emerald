@@ -22,6 +22,7 @@ static const struct { const char *word; TokKind kind; } keywords[] = {
     {"type", TK_TYPE}, {"const", TK_CONST}, {"match", TK_MATCH},
     {"pure", TK_PURE}, {"partial", TK_PARTIAL},
     {"import", TK_IMPORT}, {"from", TK_FROM}, {"as", TK_AS},
+    {"dim", TK_DIM},
 };
 
 static Token make(Lexer *lx, TokKind k, const char *start, int start_col) {
@@ -137,6 +138,7 @@ Token lexer_next(Lexer *lx) {
         if (*lx->cur == '>') { lx->col++; lx->cur++; return make(lx, TK_GTGT, start, start_col); }
         if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_GE, start, start_col); }
         return make(lx, TK_GT, start, start_col);
+    case '?': return make(lx, TK_QUESTION, start, start_col);
     }
     return make(lx, TK_ERROR, start, start_col);
 }
@@ -155,6 +157,7 @@ const char *token_kind_name(TokKind k) {
         [TK_MATCH] = "MATCH",
         [TK_PURE] = "PURE", [TK_PARTIAL] = "PARTIAL",
         [TK_IMPORT] = "IMPORT", [TK_FROM] = "FROM", [TK_AS] = "AS",
+        [TK_DIM] = "DIM",
         [TK_LBRACE] = "LBRACE", [TK_RBRACE] = "RBRACE",
         [TK_LPAREN] = "LPAREN", [TK_RPAREN] = "RPAREN",
         [TK_LBRACK] = "LBRACK", [TK_RBRACK] = "RBRACK",
@@ -164,8 +167,9 @@ const char *token_kind_name(TokKind k) {
         [TK_PLUS] = "PLUS", [TK_MINUS] = "MINUS", [TK_STAR] = "STAR",
         [TK_SLASH] = "SLASH", [TK_PERCENT] = "PERCENT",
         [TK_EQ] = "EQ", [TK_NE] = "NE", [TK_LT] = "LT", [TK_LE] = "LE",
-        [TK_GT] = "GT", [TK_GE] = "GE", [TK_FAT_ARROW] = "FAT_ARROW",
+        [TK_GT] = "GT", [TK_GE] = "GE",        [TK_FAT_ARROW] = "FAT_ARROW",
         [TK_PIPE_GT] = "PIPE_GT", [TK_GTGT] = "GTGT",
+        [TK_QUESTION] = "QUESTION",
     };
     return names[k] ? names[k] : "?";
 }

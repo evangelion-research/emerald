@@ -12,7 +12,10 @@ native binary. Everything here is implemented and covered by `task test`.
 |---|---|
 | [`grammar.md`](grammar.md) | What is the syntax? Lexical rules, EBNF, precedence table, the record-vs-block ambiguity and how it is resolved. |
 | [`type-system.md`](type-system.md) | Records, structural subtyping, `&`/`\|`, literal types, flow narrowing, `never`, generics, and where the checker is deliberately gradual. |
-| [`builtins.md`](builtins.md) | The twenty-six builtins, exactly — and the rule for what earns a place among them rather than a place in the library. |
+| [`core-calculus.md`](core-calculus.md) | The formal fragment: syntax, subtyping, narrowing, generics, and the shape/`Fin` rules as judgments — the paper-style spec the research track calls for. |
+| [`builtins.md`](builtins.md) | The fifty-two builtins, exactly — and the rule for what earns a place among them rather than a place in the library. |
+| [`tensors.md`](tensors.md) | Phase 2 numerics: the tensor runtime model, dtypes, zero-copy views, and byte-aware GC. |
+| [`shapes.md`](shapes.md) | Phase 2 shapes: nominal `dim`s, the canonical-form solver, the per-op typing rules, `Fin[n]`, and the gradual boundary. |
 | [`../stdlib/SPEC.md`](../stdlib/SPEC.md) | The standard library: twelve modules written in Emerald, why it has Python's shape but not Python's signatures, and the compiler bugs writing it exposed. |
 | [`modules.md`](modules.md) | `import` / `from ... import`, path resolution order, privacy by leading underscore, name mangling, and the `emeraldc` CLI contract a package manager would drive. |
 | [`diagnostics.md`](diagnostics.md) | Error-code reference and the `--json` schema, designed to be fed back to a tool (or an LLM) that fixes the program and re-runs. |
@@ -57,3 +60,14 @@ statistically where not, with a machine-checkable certificate at the end.**
   [`proofs.md`](proofs.md) §"What Emerald cannot prove" →
   the ray tracer's [scorecard](../examples/ray_tracer/typed/README.md) →
   [`research-directions.md`](research-directions.md) §1.
+- **"Where do I read the cited papers?"** [`references.md`](references.md) —
+  the annotated bibliography, grouped by topic, with one line per entry on why
+  it matters to Emerald.
+
+## Further reading
+
+[`references.md`](references.md) is the consolidated external bibliography: the
+three anchor papers, then gradual typing, structural subtyping, dependent and
+shape types, array languages, autodiff, mechanistic interpretability, effects,
+proof theory, GC, compiler construction, categorical foundations, and LLM code
+generation — each entry annotated with its relevance to this project.

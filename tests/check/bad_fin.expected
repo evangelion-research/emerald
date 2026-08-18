@@ -1,0 +1,5 @@
+error[E_SHAPE_INDEX]: index of type Fin[1 + N] cannot index an axis of size N
+  --> tests/check/bad_fin.rald:7:19
+    |
+ 7 |     return item(xs[i])
+   |                   ^

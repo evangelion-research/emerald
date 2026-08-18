@@ -14,7 +14,7 @@ vars:
     sh: echo "$PWD/src"
   STDLIBDIR:
     sh: echo "$PWD/stdlib"
-  COMPILER_SRCS: src/lexer.c src/ast.c src/parser.c src/module.c src/check.c src/codegen.c src/diag.c src/main.c
+  COMPILER_SRCS: src/lexer.c src/ast.c src/parser.c src/module.c src/check.c src/codegen.c src/diag.c src/dim.c src/main.c
 
 tasks:
   default:
@@ -87,6 +87,12 @@ tasks:
     deps: [build]
     cmds:
       - ./tests/run_tests.sh stdlib
+
+  test:shape:
+    desc: Unit tests for the dim-expression solver (tests/shape/dim_unit.c)
+    deps: [build]
+    cmds:
+      - ./tests/run_tests.sh shape
 
   examples:
     desc: Compile and run every example program

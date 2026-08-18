@@ -63,9 +63,9 @@ has a switch:
   be shown to descend must say `partial`, which marks it as *not* a proof.
 - **`pure`** — `def forward(x: T) -> U pure` promises no `print`, no `rand`,
   no file or process IO, and no impure callee (a nested `def` inside a pure
-  function must itself be pure). Fourteen of the twenty-six builtins are pure
-  and may be called from pure code, as is roughly half the standard library —
-  everything that reads rather than builds.
+  function must itself be pure). Thirty-eight of the fifty-two builtins are
+  pure and may be called from pure code, as is roughly half the standard
+  library — everything that reads rather than builds.
 - **`--proof`** — `emeraldc --check --proof f.rald` bans `any` and `partial`.
   Since `any` is assignable in both directions, a proof that mentions it proves
   nothing, so proof mode rejects every `any` that surfaces: unannotated
@@ -101,18 +101,25 @@ for a seven-part tour of each feature.
 
 ## Builtins
 
-Twenty-six builtins compile straight into runtime calls and are in scope in
-every module: `print`, `eprint`, `len`, `range`, `str`, `int`, `float`, `sqrt`,
-`tan`, `rand`, `append`, `slice`, `ord`, `chr`, `argv`, `exit`, `map`, `filter`,
-`reduce`, `read_file`, `read_file_opt`, `file_exists`, `write_file`,
-`append_file`, `run`, `gc_stats`. They are not values (`f = print` is an error —
-there is no closure to hand out) and cannot be redefined.
+Fifty-two builtins compile straight into runtime calls and are in scope in
+every module. Twenty-seven are the core set: `print`, `eprint`, `len`, `range`,
+`str`, `int`, `float`, `sqrt`, `tan`, `rand`, `append`, `slice`, `ord`, `chr`,
+`argv`, `exit`, `map`, `filter`, `reduce`, `read_file`, `read_file_opt`,
+`file_exists`, `write_file`, `append_file`, `run`, `gc_stats`, `gc_collect`.
+The other twenty-five are the Phase 2 tensor primitives: `zeros`, `ones`,
+`full`, `arange`, `tensor`, `randn`, `exp`, `log`, `tanh`, `relu`, `matmul`,
+`reshape`, `transpose`, `permute`, `expand`, `sum`, `mean`, `max`, `argmax`,
+`tslice`, `item`, `shape`, `ndim`, `dtype`, `astype`. They are not values
+(`f = print` is an error — there is no closure to hand out) and cannot be
+redefined.
 
 A builtin exists only when it cannot be written in Emerald: allocation-level
 (`append`, `slice`, `len`, `range`), formatting (`str`, `print`), foreign
-(`read_file`, `argv`, `run`), or privileged (`gc_stats`). `append` is the
-load-bearing one — without amortized in-place growth, every list built in a loop
-is quadratic. See [`docs/builtins.md`](docs/builtins.md).
+(`read_file`, `argv`, `run`), privileged (`gc_stats`), or a tensor shape
+obligation (`matmul`, `reshape`). `append` is the load-bearing core one —
+without amortized in-place growth, every list built in a loop is quadratic.
+See [`docs/builtins.md`](docs/builtins.md), [`docs/tensors.md`](docs/tensors.md),
+and [`docs/shapes.md`](docs/shapes.md).
 
 ## Standard library
 
@@ -202,7 +209,7 @@ Requires a C compiler and [go-task](https://taskfile.dev) (`brew install go-task
 
 ```sh
 task                 # build bin/emeraldc
-task test            # 99 golden tests across 6 stage suites (incl. proof mode)
+task test            # 123 tests across 7 stage suites (incl. proof mode)
 task examples        # compile & run every example
 
 bin/emeraldc examples/fib.rald && ./examples/fib
@@ -218,8 +225,8 @@ Every stage has a driver flag and its own golden test directory under `tests/`.
 No stage is observable only through the stage after it.
 
 ```
-emeraldc [--emit-tokens|--emit-ast|--check|--emit-c]
-         [--json] [--proof] [--keep-c] [-I DIR]... [-o OUT] file.rald
+emeraldc [--emit-tokens|--emit-ast|--emit-shapes|--check|--emit-c]
+         [--json] [--proof] [--shape-report] [--keep-c] [-I DIR]... [-o OUT] file.rald
 ```
 
 See [`docs/architecture.md`](docs/architecture.md).
@@ -271,12 +278,17 @@ gap analysis and ten research tracks aimed at one thesis —
 > obligations discharged exactly where possible and statistically where not,
 > with a machine-checkable certificate at the end.**
 
-The blockers are stated plainly there: no tensors, no indexed types, no
-induction, no termination checking, `any` as a universal solvent, unsound
-covariant lists, no effects. The tracks that follow — shape types, effects and
-purity, interpretations as first-class typed objects, approximate `(ε, δ)`
-judgments, a proof fragment that actually means something — are ordered by how
-much of that they unblock.
+The blockers are stated plainly there: no induction, no termination checking,
+`any` as a universal solvent, unsound covariant lists, no effects. The tracks
+that follow — shape types, effects and purity, interpretations as first-class
+typed objects, approximate `(ε, δ)` judgments, a proof fragment that actually
+means something — are ordered by how much of that they unblock.
+
+Phase 2 has already landed the first of those tracks: **tensors and shape
+types** ([`docs/tensors.md`](docs/tensors.md), [`docs/shapes.md`](docs/shapes.md)).
+A shape bug is now a compile error with both shapes printed, an MLP trains on
+XOR end-to-end ([`examples/mlp/`](examples/mlp/)), and `Fin[n]` rejects a
+provably out-of-range index at compile time.
 
 ---
 
@@ -286,8 +298,8 @@ much of that they unblock.
 |---|---|
 | `include/` | compiler headers |
 | `src/` | compiler (`lexer` → `parser` → `module` → `check` → `codegen` → `main`, plus `diag`) and `runtime.c` (Value model + GC, compiled into every program) |
-| `docs/` | **start at [`docs/README.md`](docs/README.md)** — grammar, type system, builtins, modules, diagnostics, architecture, GC, proofs, research directions |
+| `docs/` | **start at [`docs/README.md`](docs/README.md)** — grammar, type system, builtins, modules, diagnostics, architecture, GC, proofs, research directions, plus the Phase 2 [`tensors.md`](docs/tensors.md) and [`shapes.md`](docs/shapes.md) |
 | `stdlib/` | the standard library, in Emerald — **start at [`stdlib/SPEC.md`](stdlib/SPEC.md)** |
-| `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `e2e`, `imports`, `stdlib`) + `run_tests.sh` |
-| `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `functional/` (a seven-part tour of the functional core), `modules/` (a multi-file program), `ray_tracer/` (the experiment) |
+| `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `e2e`, `imports`, `stdlib`, `shape`) + `run_tests.sh` |
+| `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `functional/` (a seven-part tour of the functional core), `modules/` (a multi-file program), `ray_tracer/` (the experiment), `mlp/` (a hand-written MLP trained on XOR, and its `shape_bug` compile error) |
 | `Taskfile.yml` | build / test / examples / bless / clean |

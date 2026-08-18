@@ -12,7 +12,7 @@ typedef enum {
     TK_BREAK, TK_CONTINUE, TK_PASS, TK_TYPE,
     TK_CONST, TK_MATCH,
     TK_PURE, TK_PARTIAL,
-    TK_IMPORT, TK_FROM, TK_AS,
+    TK_IMPORT, TK_FROM, TK_AS, TK_DIM,
     /* punctuation / operators */
     TK_LBRACE, TK_RBRACE, TK_LPAREN, TK_RPAREN, TK_LBRACK, TK_RBRACK,
     TK_COMMA, TK_DOT, TK_COLON, TK_SEMI, TK_ASSIGN, TK_ARROW,
@@ -22,6 +22,7 @@ typedef enum {
     TK_FAT_ARROW,  /* =>  (lambda) */
     TK_PIPE_GT,    /* |>  (pipe) */
     TK_GTGT,       /* >>  (composition) */
+    TK_QUESTION,   /* ?   (dynamic tensor shape) */
     TK__COUNT
 } TokKind;
 

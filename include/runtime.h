@@ -22,7 +22,16 @@
 #include <stdint.h>
 
 typedef enum { V_NONE, V_BOOL, V_INT, V_FLOAT, V_OBJ, V_STR } VTag;
-typedef enum { O_STR, O_LIST, O_REC, O_FUNC, O_CELL } OTag;
+typedef enum { O_STR, O_LIST, O_REC, O_FUNC, O_CELL, O_TENSOR } OTag;
+
+/* Tensor dtypes. Only f32 and f64 are implemented in Phase 2; the other tags
+ * are reserved so the tag width is settled before Phase 4 (quantized models)
+ * needs them. */
+typedef enum {
+    DT_F32, DT_F64,
+    DT_F16, DT_BF16, DT_I8, DT_I32,   /* reserved, not implemented */
+    DT_COUNT,
+} DType;
 
 typedef struct Obj Obj;
 
@@ -46,6 +55,11 @@ struct Obj {
     bool remembered;  /* tenured object that may reference the nursery */
     Obj *gc_next;     /* intrusive list: links objects within their generation */
     Obj *rem_next;    /* intrusive list: the remembered set */
+    size_t nbytes;    /* total bytes owned: the Obj header plus every backing
+                       * array (string data, list items, record keys/vals,
+                       * closure env, tensor data). Drives byte-aware GC: a
+                       * single 400 MB tensor must trigger a collection even
+                       * though it is one object. */
     union {
         struct { size_t len; char *data; } str;              /* NUL-terminated */
         struct { size_t len, cap; Value *items; } list;
@@ -62,6 +76,18 @@ struct Obj {
             size_t arity;
         } func;
         struct { Value val; } cell;   /* O_CELL: a mutable captured variable */
+        /* O_TENSOR: a strided N-d array of floats. `data` is owned when
+         * `base == NULL`; a view (slicing, transpose) keeps `base` non-NULL
+         * and points into the owner's buffer, so the GC has one edge to trace
+         * and views are zero-copy. */
+        struct {
+            DType dt;
+            uint8_t ndim;
+            int64_t *dims;      /* shape: ndim entries */
+            int64_t *strides;   /* element strides: ndim entries */
+            void *data;         /* numel * dtype_size bytes; NULL for a view */
+            Obj *base;          /* owning tensor when this is a view */
+        } tensor;
     } as;
 };
 
@@ -95,6 +121,7 @@ static inline Value em_float(double f) { Value v; v.tag = V_FLOAT; v.as.f = f; r
 void rt_init(void);
 void rt_gc_collect(void);
 void rt_fatal(const char *fmt, ...);
+Value em_gc_collect(void);  /* force a major collection; returns None */
 
 /* source location of the statement currently executing, for runtime errors */
 extern const char *rt_cur_file;
@@ -172,5 +199,39 @@ Value em_reduce(Value fn, Value acc, Value xs);
 
 /* `f >> g`: a closure h(x) = g(f(x)) */
 Value em_compose(Value f, Value g);
+
+/* --- tensors (Phase 2 numerics) -----------------------------------------
+ * Whole-array runtime calls over an unboxed float buffer (see tensors.md).
+ * `shape` is always a list[int]; axes are 0-based ints. `+ - * /` on two
+ * tensors dispatch here from the operator functions. */
+Value em_tensor_zeros(Value shape);
+Value em_tensor_ones(Value shape);
+Value em_tensor_full(Value shape, Value fill);
+Value em_tensor_arange(Value n);
+Value em_tensor_from_list(Value nested);
+Value em_tensor_randn(Value shape, Value seed);
+Value em_tensor_exp(Value t);
+Value em_tensor_log(Value t);
+Value em_tensor_tanh(Value t);
+Value em_tensor_relu(Value t);
+Value em_tensor_add(Value a, Value b);
+Value em_tensor_sub(Value a, Value b);
+Value em_tensor_mul(Value a, Value b);
+Value em_tensor_div(Value a, Value b);
+Value em_tensor_matmul(Value a, Value b);
+Value em_tensor_reshape(Value t, Value shape);
+Value em_tensor_transpose(Value t);
+Value em_tensor_permute(Value t, Value perm);
+Value em_tensor_sum(Value t, Value axis);
+Value em_tensor_mean(Value t, Value axis);
+Value em_tensor_max(Value t, Value axis);
+Value em_tensor_argmax(Value t, Value axis);
+Value em_tensor_slice(Value t, Value axis, Value lo, Value hi);
+Value em_tensor_expand(Value t, Value shape);
+Value em_tensor_item(Value t);
+Value em_tensor_shape(Value t);
+Value em_tensor_ndim(Value t);
+Value em_tensor_dtype(Value t);
+Value em_tensor_astype(Value t, Value dtype);
 
 #endif

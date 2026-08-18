@@ -1,0 +1,37 @@
+# Elementwise ops with broadcasting, reductions, matmul, reshape, transpose.
+a = tensor([[1.0, 2.0], [3.0, 4.0]])
+b = tensor([10.0, 20.0])
+
+print(item((a + b)[0][0]))        # 11.0
+print(item((a * 2)[1][1]))        # 8.0
+print(item((a - b)[1][0]))        # -7.0
+print(item((a / b)[0][1]))        # 0.1
+
+# elementwise unary
+print(item(exp(tensor([[0.0]]))))  # 1.0
+print(item(log(tensor([[1.0]]))))  # 0.0
+print(item(tanh(tensor([[0.0]])))) # 0.0
+print(item(relu(tensor([[-3.0]]))))# 0.0
+
+# matmul: 2D@2D, matrix@vector, dot product
+print(item(matmul(a, tensor([[5.0], [6.0]]))[1][0]))   # 39.0
+print(item(matmul(a, tensor([1.0, 2.0]))[1]))          # 11.0
+print(item(matmul(tensor([1.0, 2.0, 3.0]), tensor([4.0, 5.0, 6.0]))))  # 32.0
+
+# reductions over an axis
+print(item(sum(a, 0)[0]))        # 4.0
+print(item(mean(a, 1)[0]))       # 1.5
+print(item(max(a, 1)[0]))        # 2.0
+print(item(argmax(a, 1)[0]))     # 1.0
+
+# transpose and reshape (with -1 inference)
+print(item(transpose(a)[1][0]))  # 2.0
+print(reshape(arange(6), [2, -1]))
+
+# expand (broadcast a size-1 dim, zero-copy)
+print(item(expand(tensor([[1.0]]), [2, 3])[1][2]))  # 1.0
+
+# f64 via astype
+d = astype(tensor([[1.0, 2.0]]), "f64")
+print(dtype(d))
+print(item(d[0][1]))             # 2.0

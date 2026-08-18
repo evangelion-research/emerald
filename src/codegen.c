@@ -98,6 +98,7 @@ static bool is_builtin(const char *name) {
     return strcmp(name, "print") == 0 || strcmp(name, "len") == 0 ||
            strcmp(name, "str") == 0 || strcmp(name, "int") == 0 ||
            strcmp(name, "range") == 0 || strcmp(name, "gc_stats") == 0 ||
+           strcmp(name, "gc_collect") == 0 ||
            strcmp(name, "read_file") == 0 || strcmp(name, "write_file") == 0 ||
            strcmp(name, "run") == 0 || strcmp(name, "sqrt") == 0 ||
            strcmp(name, "tan") == 0 || strcmp(name, "rand") == 0 ||
@@ -108,7 +109,20 @@ static bool is_builtin(const char *name) {
            strcmp(name, "float") == 0 || strcmp(name, "eprint") == 0 ||
            strcmp(name, "argv") == 0 || strcmp(name, "exit") == 0 ||
            strcmp(name, "read_file_opt") == 0 ||
-           strcmp(name, "file_exists") == 0;
+           strcmp(name, "file_exists") == 0 ||
+           strcmp(name, "zeros") == 0 || strcmp(name, "ones") == 0 ||
+           strcmp(name, "full") == 0 || strcmp(name, "arange") == 0 ||
+           strcmp(name, "tensor") == 0 || strcmp(name, "randn") == 0 ||
+           strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 ||
+           strcmp(name, "tanh") == 0 || strcmp(name, "relu") == 0 ||
+           strcmp(name, "matmul") == 0 || strcmp(name, "reshape") == 0 ||
+           strcmp(name, "transpose") == 0 || strcmp(name, "permute") == 0 ||
+           strcmp(name, "expand") == 0 || strcmp(name, "sum") == 0 ||
+           strcmp(name, "mean") == 0 || strcmp(name, "max") == 0 ||
+           strcmp(name, "argmax") == 0 || strcmp(name, "tslice") == 0 ||
+           strcmp(name, "item") == 0 || strcmp(name, "shape") == 0 ||
+           strcmp(name, "ndim") == 0 || strcmp(name, "dtype") == 0 ||
+           strcmp(name, "astype") == 0;
 }
 
 /* --- function info (closure conversion) ---------------------------------- */
@@ -317,7 +331,7 @@ static int gen_call(Cg *cg, const Expr *e) {
         args[i] = gen_expr(cg, e->as.call.args[i]);
 
     int t = new_temp(cg);
-    char tb[32], ab[32], bb[32], cb[32];
+    char tb[32], ab[32], bb[32], cb[32], db[32];
     SB call = {0};
 
     const Expr *fn = e->as.call.fn;
@@ -345,6 +359,8 @@ static int gen_call(Cg *cg, const Expr *e) {
                      slotref(args[0], ab), slotref(args[1], bb));
         } else if (strcmp(name, "gc_stats") == 0) {
             emit(cg, "%s = em_gc_stats();", slotref(t, tb));
+        } else if (strcmp(name, "gc_collect") == 0) {
+            emit(cg, "%s = em_gc_collect();", slotref(t, tb));
         } else if (strcmp(name, "read_file") == 0) {
             emit(cg, "%s = em_read_file(%s);", slotref(t, tb), slotref(args[0], ab));
         } else if (strcmp(name, "write_file") == 0) {
@@ -403,6 +419,69 @@ static int gen_call(Cg *cg, const Expr *e) {
         } else if (strcmp(name, "file_exists") == 0) {
             emit(cg, "%s = em_file_exists(%s);", slotref(t, tb),
                  slotref(args[0], ab));
+        } else if (strcmp(name, "zeros") == 0) {
+            emit(cg, "%s = em_tensor_zeros(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "ones") == 0) {
+            emit(cg, "%s = em_tensor_ones(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "full") == 0) {
+            emit(cg, "%s = em_tensor_full(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "arange") == 0) {
+            emit(cg, "%s = em_tensor_arange(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "tensor") == 0) {
+            emit(cg, "%s = em_tensor_from_list(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "randn") == 0) {
+            emit(cg, "%s = em_tensor_randn(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "exp") == 0) {
+            emit(cg, "%s = em_tensor_exp(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "log") == 0) {
+            emit(cg, "%s = em_tensor_log(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "tanh") == 0) {
+            emit(cg, "%s = em_tensor_tanh(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "relu") == 0) {
+            emit(cg, "%s = em_tensor_relu(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "matmul") == 0) {
+            emit(cg, "%s = em_tensor_matmul(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "reshape") == 0) {
+            emit(cg, "%s = em_tensor_reshape(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "transpose") == 0) {
+            emit(cg, "%s = em_tensor_transpose(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "permute") == 0) {
+            emit(cg, "%s = em_tensor_permute(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "expand") == 0) {
+            emit(cg, "%s = em_tensor_expand(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "sum") == 0) {
+            emit(cg, "%s = em_tensor_sum(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "mean") == 0) {
+            emit(cg, "%s = em_tensor_mean(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "max") == 0) {
+            emit(cg, "%s = em_tensor_max(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "argmax") == 0) {
+            emit(cg, "%s = em_tensor_argmax(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "tslice") == 0) {
+            emit(cg, "%s = em_tensor_slice(%s, %s, %s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb),
+                 slotref(args[2], cb), slotref(args[3], db));
+        } else if (strcmp(name, "item") == 0) {
+            emit(cg, "%s = em_tensor_item(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "shape") == 0) {
+            emit(cg, "%s = em_tensor_shape(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "ndim") == 0) {
+            emit(cg, "%s = em_tensor_ndim(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "dtype") == 0) {
+            emit(cg, "%s = em_tensor_dtype(%s);", slotref(t, tb), slotref(args[0], ab));
+        } else if (strcmp(name, "astype") == 0) {
+            emit(cg, "%s = em_tensor_astype(%s, %s);", slotref(t, tb),
+                 slotref(args[0], ab), slotref(args[1], bb));
         } else {
             Access kind;
             int slot;
@@ -955,6 +1034,7 @@ static void gen_stmt(Cg *cg, const Stmt *s) {
         break; /* top-level bodies are emitted separately */
     case S_TYPEDEF:
     case S_IMPORT:
+    case S_DIMDECL:
         break; /* compile-time only (imports are resolved away by linking) */
     }
     cg->ntemps = mark;

@@ -22,7 +22,7 @@ comment    = "#" .* to end of line ;
 - Strings support escapes: `\\`, `\"`, `\'`, `\n`, `\t`, `\r`, `\0`.
 - Keywords: `def if else elif while for in return and or not
   True False None break continue pass type pure partial import from as
-  const match`.
+  const match dim`.
 - Operators/punct: `{ } ( ) [ ] , . : ; = + - * / % == != < <= > >= | & ->
   => |> >>` (`=>` lambda, `|>` pipe, `>>` compose).
 - Semicolons `;` are optional statement separators.
@@ -45,6 +45,7 @@ statement     := func_def
                | break_stmt | continue_stmt | pass_stmt
                | match_stmt
                | type_def
+               | dim_def
                | import_stmt
                | block | simple_stmt
 
@@ -57,7 +58,8 @@ func_def      := "def" IDENT [tparams] "(" [param ("," param)*] ")"
                  ["->" type] ["pure"] ["partial"] block
                  (* `pure`: may only call pure code; `partial`: opts out of
                     termination checking — see type-system.md *)
-tparams       := "[" IDENT ("," IDENT)* "]"  (* generic type parameters *)
+tparams       := "[" IDENT [":" "dim"] ("," IDENT [":" "dim"])* "]"
+                 (* generic type parameters; `: dim` kind one as a dimension *)
 param         := IDENT [":" type]
 if_stmt       := "if" expr block
                  (("elif" | "else" "if") expr block)*
@@ -66,6 +68,7 @@ while_stmt    := "while" expr block
 for_stmt      := "for" IDENT "in" expr block
 return_stmt   := "return" [expr]
 type_def      := "type" IDENT [tparams] "=" type
+dim_def       := "dim" IDENT ("," IDENT)*   (* nominal dimension names *)
 block         := "{" statement* "}"
 simple_stmt   := "const" IDENT [":" type] "=" expr  (* immutable binding *)
                | IDENT ":" type "=" expr     (* annotated declaration *)
@@ -93,12 +96,19 @@ type      := inter ("|" inter)*              (* union *)
 inter     := type_atom ("&" type_atom)*      (* intersection / "extends" *)
 type_atom := "int" | "float" | "str" | "bool" | "None" | "any" | "never"
            | "list" "[" type "]"
+           | "Tensor" "[" type "," ("?" | "[" dim ("," dim)* "]") "]"
+                                             (* tensor with static or dynamic shape *)
+           | "Fin" "[" dim "]"               (* index provably below `dim` *)
            | "{" [IDENT ":" type ("," IDENT ":" type)* [","]] "}"
            | "(" [type ("," type)*] ")" "->" type   (* function type *)
            | IDENT ["[" type ("," type)* "]"]  (* alias, maybe generic *)
            | int_lit | "-" int_lit | string_lit | "True" | "False"
                                              (* literal types *)
            | "(" type ")"
+
+dim         := dim_term ("+" dim_term)*      (* dimension arithmetic *)
+dim_term    := dim_factor ("*" dim_factor)*
+dim_factor  := IDENT | int_lit
 ```
 
 - Type aliases must be declared (at top level) before use. Across modules this
@@ -114,6 +124,9 @@ type_atom := "int" | "float" | "str" | "bool" | "None" | "any" | "never"
 - Function types `(T1, T2) -> U` describe first-class functions and lambdas;
   they are structural, so `def f(x: int) -> int` has type `(int) -> int` and
   can be passed anywhere a value of that type is expected.
+- `dim Batch, Seq` declares nominally distinct dimension names, usable inside a
+  `Tensor[f32, [Batch, Seq]]` shape (or `Fin[Batch]`). `Tensor[f32, ?]` is the
+  dynamic-shape escape hatch. See `docs/shapes.md` for the typing rules.
 
 ## Expression Precedence (low → high)
 

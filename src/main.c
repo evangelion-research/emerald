@@ -24,6 +24,7 @@
 #include "check.h"
 #include "codegen.h"
 #include "diag.h"
+#include "dim.h"
 #include "lexer.h"
 #include "module.h"
 #include "parser.h"
@@ -69,6 +70,173 @@ static void emit_tokens(const char *src) {
     }
 }
 
+/* --- the shape stage's observable surface (--emit-shapes) --------------- */
+
+/* Walk a type expression, printing every tensor annotation it contains (the
+ * dtype + shape surface that W4 later checks). */
+static void emit_type_shapes(FILE *out, const TypeExpr *t) {
+    if (!t) return;
+    switch (t->kind) {
+    case TE_TENSOR:
+        fprintf(out, "Tensor[");
+        if (t->tensor.dtype && t->tensor.dtype->kind == TE_NAME)
+            fprintf(out, "%s", t->tensor.dtype->name);
+        else
+            fprintf(out, "?");
+        if (t->tensor.dynamic) {
+            fprintf(out, ", ?]\n");
+        } else {
+            fprintf(out, ", [");
+            for (size_t i = 0; i < t->tensor.shape_count; i++) {
+                if (i) fprintf(out, ", ");
+                char *s = dim_str(t->tensor.shape[i]);
+                fprintf(out, "%s", s);
+                free(s);
+            }
+            fprintf(out, "]]\n");
+        }
+        break;
+    case TE_FIN: {
+        char *s = dim_str(t->fin_dim);
+        fprintf(out, "Fin[%s]\n", s);
+        free(s);
+        break;
+    }
+    case TE_NAME:
+        for (size_t i = 0; i < t->arg_count; i++)
+            emit_type_shapes(out, t->args[i]);
+        break;
+    case TE_LIST:
+        emit_type_shapes(out, t->elem);
+        break;
+    case TE_REC:
+        for (size_t i = 0; i < t->fields.count; i++)
+            emit_type_shapes(out, t->fields.types[i]);
+        break;
+    case TE_UNION:
+    case TE_INTER:
+        emit_type_shapes(out, t->lhs);
+        emit_type_shapes(out, t->rhs);
+        break;
+    case TE_FUNC:
+        for (size_t i = 0; i < t->fun.param_count; i++)
+            emit_type_shapes(out, t->fun.params[i]);
+        emit_type_shapes(out, t->fun.ret);
+        break;
+    case TE_LIT:
+        break;
+    }
+}
+
+static void emit_expr_shapes(FILE *out, const Expr *e) {
+    if (!e) return;
+    switch (e->kind) {
+    case E_LAMBDA:
+        for (size_t i = 0; i < e->as.lam.param_count; i++)
+            emit_type_shapes(out, e->as.lam.param_types[i]);
+        emit_expr_shapes(out, e->as.lam.body);
+        break;
+    case E_LIST:
+        for (size_t i = 0; i < e->as.list.count; i++)
+            emit_expr_shapes(out, e->as.list.items[i]);
+        break;
+    case E_REC:
+        for (size_t i = 0; i < e->as.rec.count; i++)
+            emit_expr_shapes(out, e->as.rec.values[i]);
+        break;
+    case E_BINOP:
+        emit_expr_shapes(out, e->as.bin.lhs);
+        emit_expr_shapes(out, e->as.bin.rhs);
+        break;
+    case E_UNOP:
+        emit_expr_shapes(out, e->as.un.operand);
+        break;
+    case E_CALL:
+        emit_expr_shapes(out, e->as.call.fn);
+        for (size_t i = 0; i < e->as.call.count; i++)
+            emit_expr_shapes(out, e->as.call.args[i]);
+        break;
+    case E_INDEX:
+        emit_expr_shapes(out, e->as.index.seq);
+        emit_expr_shapes(out, e->as.index.idx);
+        break;
+    case E_ATTR:
+        emit_expr_shapes(out, e->as.attr.obj);
+        break;
+    default:
+        break;
+    }
+}
+
+static void emit_stmt_shapes(FILE *out, const Stmt *s);
+
+static void emit_block_shapes(FILE *out, const Block *b) {
+    for (size_t i = 0; i < b->count; i++)
+        emit_stmt_shapes(out, b->items[i]);
+}
+
+static void emit_stmt_shapes(FILE *out, const Stmt *s) {
+    switch (s->kind) {
+    case S_DIMDECL:
+        fprintf(out, "dim");
+        for (size_t i = 0; i < s->as.dim.count; i++)
+            fprintf(out, " %s", s->as.dim.names[i]);
+        fprintf(out, "\n");
+        break;
+    case S_ASSIGN:
+        emit_type_shapes(out, s->as.assign.ann);
+        emit_expr_shapes(out, s->as.assign.value);
+        break;
+    case S_EXPR:
+        emit_expr_shapes(out, s->as.expr);
+        break;
+    case S_IF:
+        for (size_t i = 0; i < s->as.ifs.count; i++) {
+            emit_expr_shapes(out, s->as.ifs.conds[i]);
+            emit_block_shapes(out, &s->as.ifs.blocks[i]);
+        }
+        if (s->as.ifs.has_else) emit_block_shapes(out, &s->as.ifs.else_block);
+        break;
+    case S_WHILE:
+        emit_expr_shapes(out, s->as.wh.cond);
+        emit_block_shapes(out, &s->as.wh.body);
+        break;
+    case S_FOR:
+        emit_expr_shapes(out, s->as.fr.seq);
+        emit_block_shapes(out, &s->as.fr.body);
+        break;
+    case S_RETURN:
+        emit_expr_shapes(out, s->as.ret);
+        break;
+    case S_BLOCK:
+        emit_block_shapes(out, &s->as.block);
+        break;
+    case S_MATCH:
+        emit_expr_shapes(out, s->as.mtch.subject);
+        for (size_t i = 0; i < s->as.mtch.count; i++)
+            emit_block_shapes(out, &s->as.mtch.blocks[i]);
+        break;
+    case S_FUNC:
+        for (size_t i = 0; i < s->as.func.param_count; i++)
+            emit_type_shapes(out, s->as.func.param_types[i]);
+        emit_type_shapes(out, s->as.func.ret_type);
+        emit_block_shapes(out, &s->as.func.body);
+        break;
+    case S_TYPEDEF:
+        emit_type_shapes(out, s->as.tdef.value);
+        break;
+    case S_IMPORT:
+    case S_BREAK:
+    case S_CONTINUE:
+    case S_PASS:
+        break;
+    }
+}
+
+static void emit_shapes(FILE *out, const Program *p) {
+    emit_block_shapes(out, &p->body);
+}
+
 /* "dir/prog.rald" -> "dir/prog"; any other extension is kept and suffixed */
 static char *default_output(const char *path) {
     size_t n = strlen(path);
@@ -81,18 +249,21 @@ static char *default_output(const char *path) {
 }
 
 static void usage(void) {
-    fputs("usage: emeraldc [--emit-tokens|--emit-ast|--check|--emit-c]\n"
-          "                [--json] [--proof] [--keep-c] [-I DIR]... [-o OUT] file.rald\n",
+    fputs("usage: emeraldc [--emit-tokens|--emit-ast|--emit-shapes|--check|--emit-c]\n"
+          "                [--json] [--proof] [--shape-report] [--keep-c] [-I DIR]...\n"
+          "                [-o OUT] file.rald\n",
           stderr);
     exit(2);
 }
 
 int main(int argc, char **argv) {
     const char *file = NULL, *out_path = NULL;
-    enum { MODE_BUILD, MODE_TOKENS, MODE_AST, MODE_CHECK, MODE_C } mode = MODE_BUILD;
+    enum { MODE_BUILD, MODE_TOKENS, MODE_AST, MODE_SHAPES, MODE_CHECK, MODE_C }
+        mode = MODE_BUILD;
     bool keep_c = false;
     bool json_errors = false;
     bool proof = false;
+    bool shape_report = false;
     const char **inc = malloc(sizeof(char *) * (size_t)argc);
     size_t ninc = 0;
     if (!inc) return 1;
@@ -100,10 +271,12 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--emit-tokens") == 0) mode = MODE_TOKENS;
         else if (strcmp(argv[i], "--emit-ast") == 0) mode = MODE_AST;
+        else if (strcmp(argv[i], "--emit-shapes") == 0) mode = MODE_SHAPES;
         else if (strcmp(argv[i], "--check") == 0) mode = MODE_CHECK;
         else if (strcmp(argv[i], "--emit-c") == 0) mode = MODE_C;
         else if (strcmp(argv[i], "--json") == 0) json_errors = true;
         else if (strcmp(argv[i], "--proof") == 0) proof = true;
+        else if (strcmp(argv[i], "--shape-report") == 0) shape_report = true;
         else if (strcmp(argv[i], "--keep-c") == 0) keep_c = true;
         else if (strcmp(argv[i], "-o") == 0) {
             if (++i == argc) usage();
@@ -142,7 +315,16 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    if (mode == MODE_SHAPES) {
+        /* the shape stage's own observable surface: dim declarations and every
+         * tensor annotation, dumped from the linked program */
+        emit_shapes(stdout, prog);
+        return 0;
+    }
+
     errors = check_program(prog, file, &diags, proof);
+    if (shape_report)
+        fprintf(stderr, "shape-crossings: %zu\n", check_shape_crossings());
     if (mode == MODE_CHECK) {
         if (diags.json) diag_render(&diags, stdout);
         else if (errors == 0) printf("ok\n");

@@ -1,0 +1,22 @@
+# Shape-obligation typing rules (W4): these all discharge statically.
+dim Batch, DModel, DOut
+
+def layer(x: Tensor[f32, [Batch, DModel]], w: Tensor[f32, [DModel, DOut]]) -> Tensor[f32, [Batch, DOut]] {
+    h = matmul(x, w)
+    h2 = relu(h)
+    h3 = h + h2          # elementwise broadcast of equal shapes
+    return h3
+}
+
+def row_sums(x: Tensor[f32, [Batch, DModel]]) -> Tensor[f32, [Batch]] {
+    return sum(x, 1)     # reduce away the last axis
+}
+
+def flipped(x: Tensor[f32, [Batch, DOut]]) -> Tensor[f32, [DOut, Batch]] {
+    return transpose(x)
+}
+
+x: Tensor[f32, [Batch, DModel]] = zeros([2, 3])
+w: Tensor[f32, [DModel, DOut]] = zeros([3, 5])
+y = layer(x, w)
+print(y)

@@ -1,0 +1,8 @@
+error[E_SHAPE_MATMUL]: contracted dimensions do not match
+  --> tests/check/bad_shape_matmul.rald:6:15
+    |
+ 6 |     h = matmul(x, w)
+   |               ^
+   = left: Tensor[f32, [Batch, DModel]]
+   = right: Tensor[f32, [DHidden, DOut]]
+   = mismatch: DModel != DHidden  (contraction axis)
