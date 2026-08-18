@@ -1,0 +1,42 @@
+# A record groups several values under names. It is Emerald's answer to
+# what other languages call an object.
+const point = { x: 3, y: 4 }
+print(point)
+print(point.x, point.y)
+
+# `type` gives a shape a name, so you can talk about it.
+type Point = { x: int, y: int }
+
+def distance_squared(p: Point) -> int {
+    return p.x * p.x + p.y * p.y
+}
+print(distance_squared(point))
+
+# A record you intend to change: write the type, then assign fields.
+here: Point = { x: 0, y: 0 }
+here.x = 10
+print(here)
+
+# Records compare by their contents, not by identity.
+print({ x: 1, y: 2 } == { x: 1, y: 2 })
+
+# The shape is what matters, not the name. This record has x and y
+# (and more besides), so it counts as a Point everywhere a Point is wanted.
+const labelled = { x: 1, y: 2, name: "origin-ish" }
+print(distance_squared(labelled))
+
+# `&` builds a bigger shape out of a smaller one: a Point3 is a Point
+# that also has a z.
+type Point3 = Point & { z: int }
+const p3: Point3 = { x: 1, y: 2, z: 3 }
+print(distance_squared(p3), p3.z)
+
+# Lists of records are how you store many of the same thing.
+type Person = { name: str, age: int }
+const people: list[Person] = [
+    { name: "ada", age: 36 },
+    { name: "alan", age: 41 },
+]
+for person in people {
+    print(person.name, "is", person.age)
+}

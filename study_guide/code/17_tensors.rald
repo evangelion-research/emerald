@@ -1,0 +1,49 @@
+# A tensor is a grid of numbers: a plain list of numbers is 1-D, a table is
+# 2-D, and so on. Tensors are what neural networks are made of.
+
+# `dim` names a size. These are *names*, not numbers — that is the point.
+dim Rows, Cols
+
+# Building tensors. The shape is the list of sizes: [2, 3] is 2 rows of 3.
+const a = zeros([2, 3])
+const b = ones([2, 3])
+print(a)
+print(b)
+
+# Printing a tensor shows its dtype and shape, not its contents — a real one
+# has millions of numbers. To see actual values, index into it and use item().
+print(item(b[0][0]), item(b[1][2]))
+
+# You can also build one from ordinary nested lists.
+const m = tensor([[1.0, 2.0], [3.0, 4.0]])
+print(m)
+print(shape(m), ndim(m), dtype(m))
+print(item(m[0][0]), item(m[0][1]), item(m[1][0]), item(m[1][1]))
+
+# Arithmetic happens on the whole grid at once, not one number at a time.
+print(b + b)
+print(m * m)
+print(m * 10.0)
+
+# matmul is matrix multiplication: a [2,3] times a [3,2] gives a [2,2].
+print(matmul(ones([2, 3]), ones([3, 2])))
+
+# Because the shape is part of the type, a function can demand a given shape,
+# and the compiler checks the demand before the program ever runs.
+def row_sums(t: Tensor[f32, [Rows, Cols]]) -> Tensor[f32, [Rows]] {
+    return sum(t, 1)
+}
+const sums = row_sums(tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]))
+print(sums, item(sums[0]), item(sums[1]))
+
+# Reshaping is checked too: 2*3 and 3*2 both hold six numbers, so this is fine.
+print(reshape(tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]), [3, 2]))
+
+# transpose flips rows and columns.
+print(transpose(tensor([[1.0, 2.0], [3.0, 4.0]])))
+
+# item() pulls a single number back out of a one-number tensor.
+print(item(sum(tensor([1.0, 2.0, 3.0]), 0)))
+
+# randn needs an explicit seed, so a run is repeatable by construction.
+print(shape(randn([2, 2], 42)))

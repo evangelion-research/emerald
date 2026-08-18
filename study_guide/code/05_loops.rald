@@ -1,0 +1,41 @@
+# `for` repeats a block once for each item in a list.
+for fruit in ["apple", "pear", "fig"] {
+    print("I have a", fruit)
+}
+
+# range(n) makes the list 0, 1, ... n-1. It is how you count.
+for i in range(3) {
+    print("step", i)
+}
+
+# range(from, to) starts somewhere else. `to` is not included.
+for i in range(1, 4) {
+    print(i, "squared is", i * i)
+}
+
+# Adding up as you go: keep a running total in a changing name.
+total: int = 0
+for i in range(1, 11) {
+    total = total + i
+}
+print("1 + 2 + ... + 10 =", total)
+
+# `while` repeats as long as its question stays True.
+countdown: int = 3
+while countdown > 0 {
+    print(countdown)
+    countdown = countdown - 1
+}
+print("lift off")
+
+# `break` leaves the loop early. `continue` skips to the next turn.
+for i in range(10) {
+    if i == 3 { continue }
+    if i > 5 { break }
+    print("i is", i)
+}
+
+# A for loop also walks through text, one character at a time.
+for letter in "hi" {
+    print(letter)
+}

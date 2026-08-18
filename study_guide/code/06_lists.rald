@@ -1,0 +1,33 @@
+# A list holds many values in order. All of them must be the same type.
+const primes = [2, 3, 5, 7]
+print(primes)
+print(len(primes))
+
+# Positions are counted from 0, so the first item is at 0.
+print(primes[0], primes[3])
+
+# A list you intend to change needs its type written down.
+scores: list[int] = [10, 20]
+scores[0] = 99          # replace the item at position 0
+append(scores, 30)      # add one on the end
+print(scores)
+
+# Building a list from nothing is the most common thing you will do.
+squares: list[int] = []
+for i in range(1, 6) {
+    append(squares, i * i)
+}
+print(squares)
+
+# slice(list, from, to) copies a piece out, leaving the original alone.
+print(slice(squares, 0, 3))
+print(squares)
+
+# Lists compare by their contents.
+print([1, 2] == [1, 2])
+
+# Lists of text work the same way.
+names: list[str] = []
+append(names, "ada")
+append(names, "alan")
+print(names, len(names))

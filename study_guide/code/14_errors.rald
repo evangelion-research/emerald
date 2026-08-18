@@ -1,0 +1,30 @@
+# Emerald has no exceptions. A function that can fail says so in its type,
+# and hands back a value describing what happened.
+from result import Result, Option, is_ok, unwrap_or, why, ok, err
+import strings
+
+# strings.parse_int gives back a Result: either a value or a reason.
+const good = strings.parse_int("123")
+const bad  = strings.parse_int("banana")
+
+print(is_ok(good), is_ok(bad))
+print(unwrap_or(good, 0), unwrap_or(bad, 0))
+print(why(bad))
+
+# You can look inside a Result directly: it is just a tagged union.
+if good.ok == True { print("parsed", good.val) }
+if bad.ok == False { print("failed:", bad.err) }
+
+# Writing your own failing function.
+def safe_divide(a: int, b: int) -> Result[int] {
+    if b == 0 { return err("division by zero") }
+    return ok(int(a / b))
+}
+print(unwrap_or(safe_divide(10, 2), 0))
+print(why(safe_divide(10, 0)))
+
+# An Option is for "maybe there is nothing", with no reason attached.
+import lists
+const found = lists.first([10, 20])
+const empty = lists.first([])
+print(found, empty)
