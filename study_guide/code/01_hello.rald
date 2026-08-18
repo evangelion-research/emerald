@@ -1,2 +1,0 @@
-# Anything after a # is a comment. The computer ignores it; it is for you.
-print("Hello, world!")

@@ -1,7 +1,0 @@
-# A *value* is a piece of information. Emerald has five basic kinds.
-
-print(42)          # an int   — a whole number
-print(2.5)         # a float  — a number with a fractional part
-print("emerald")   # a str    — text, always in quotes
-print(True)        # a bool   — either True or False
-print(None)        # None     — "there is no value here"

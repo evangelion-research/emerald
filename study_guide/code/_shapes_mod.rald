@@ -1,8 +1,0 @@
-# A module is just a file. Its top-level defs and types are importable.
-type Rect = { w: int, h: int }
-
-def area(r: Rect) -> int { return r.w * r.h }
-def perimeter(r: Rect) -> int { return 2 * (r.w + r.h) }
-
-# A name starting with _ is private: other files cannot import it.
-def _secret() -> str { return "not exported" }

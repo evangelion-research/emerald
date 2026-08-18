@@ -1,9 +1,0 @@
-# Some values count as False even though they are not the value False.
-# These are: None, False, 0, 0.0, "" (empty text), [] (empty list).
-if not 0 { print("0 is falsy") }
-if not "" { print("empty text is falsy") }
-if not [] { print("an empty list is falsy") }
-
-# Everything else counts as True.
-if "anything" { print("non-empty text is truthy") }
-if 42 { print("any non-zero number is truthy") }
