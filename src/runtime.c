@@ -296,11 +296,20 @@ Value em_str_new(const char *cstr) {
     return str_copy(cstr, strlen(cstr));
 }
 
-Value em_list_litn(size_t n, ...) {
+/* A fresh empty list with room for `n` items (len 0). Every list constructor
+ * goes through here so the capacity, the byte charge, and the zero-length
+ * case are decided once. */
+static Obj *list_new(size_t n) {
     Obj *o = rt_obj_new(O_LIST);
     o->as.list.items = xmalloc(sizeof(Value) * (n ? n : 1));
     o->as.list.cap = n ? n : 1;
+    o->as.list.len = 0;
     obj_charge(o, sizeof(Value) * (n ? n : 1));
+    return o;
+}
+
+Value em_list_litn(size_t n, ...) {
+    Obj *o = list_new(n);
     va_list ap;
     va_start(ap, n);
     for (size_t i = 0; i < n; i++)
@@ -497,11 +506,9 @@ Value em_add(Value a, Value b) {
         return str_take(d, la + lb);
     }
     if (is_list(a) && is_list(b)) {
-        Obj *o = rt_obj_new(O_LIST); /* a and b stay rooted by the caller */
+        /* a and b stay rooted by the caller */
         size_t n = a.as.o->as.list.len + b.as.o->as.list.len;
-        o->as.list.items = xmalloc(sizeof(Value) * (n ? n : 1));
-        o->as.list.cap = n ? n : 1;
-        obj_charge(o, sizeof(Value) * (n ? n : 1));
+        Obj *o = list_new(n);
         memcpy(o->as.list.items, a.as.o->as.list.items,
                sizeof(Value) * a.as.o->as.list.len);
         memcpy(o->as.list.items + a.as.o->as.list.len, b.as.o->as.list.items,
@@ -552,11 +559,8 @@ Value em_mul(Value a, Value b) {
             d[l * (size_t)times] = '\0';
             return str_take(d, l * (size_t)times);
         }
-        Obj *o = rt_obj_new(O_LIST);
         size_t l = s.as.o->as.list.len, total = l * (size_t)times;
-        o->as.list.items = xmalloc(sizeof(Value) * (total ? total : 1));
-        o->as.list.cap = total ? total : 1;
-        obj_charge(o, sizeof(Value) * (total ? total : 1));
+        Obj *o = list_new(total);
         for (int64_t i = 0; i < times; i++)
             memcpy(o->as.list.items + (size_t)i * l, s.as.o->as.list.items,
                    sizeof(Value) * l);
@@ -825,12 +829,9 @@ Value em_len(Value v) {
 Value em_range(Value lo, Value hi) {
     if (lo.tag != V_INT || hi.tag != V_INT)
         rt_fatal("range() arguments must be int");
-    Obj *o = rt_obj_new(O_LIST);
     int64_t a = lo.as.i, b = hi.as.i;
     size_t n = b > a ? (size_t)(b - a) : 0;
-    o->as.list.items = xmalloc(sizeof(Value) * (n ? n : 1));
-    o->as.list.cap = n ? n : 1;
-    obj_charge(o, sizeof(Value) * (n ? n : 1));
+    Obj *o = list_new(n);
     for (size_t i = 0; i < n; i++)
         o->as.list.items[i] = em_int(a + (int64_t)i);
     o->as.list.len = n;
@@ -1034,11 +1035,8 @@ Value em_slice(Value seq, Value lo, Value hi) {
         size_t a, b;
         Obj *src = seq.as.o;
         slice_bounds(lo.as.i, hi.as.i, src->as.list.len, &a, &b);
-        Obj *o = rt_obj_new(O_LIST);
         size_t n = b - a;
-        o->as.list.items = xmalloc(sizeof(Value) * (n ? n : 1));
-        o->as.list.cap = n ? n : 1;
-        obj_charge(o, sizeof(Value) * (n ? n : 1));
+        Obj *o = list_new(n);
         /* src cannot move: rt_obj_new may collect, but seq is rooted by the
          * caller's frame and the copy happens after the allocation. */
         memcpy(o->as.list.items, seq.as.o->as.list.items + a, sizeof(Value) * n);
@@ -1102,12 +1100,8 @@ void rt_set_args(int argc, char **argv) {
 }
 
 Value em_argv(void) {
-    Obj *o = rt_obj_new(O_LIST);
     size_t n = rt_argc > 0 ? (size_t)rt_argc : 0;
-    o->as.list.items = xmalloc(sizeof(Value) * (n ? n : 1));
-    o->as.list.cap = n ? n : 1;
-    obj_charge(o, sizeof(Value) * (n ? n : 1));
-    o->as.list.len = 0;
+    Obj *o = list_new(n);
     Value list = obj_val(o);
     RootFrame fr;
     rt_push_frame(&fr, &list, 1);
@@ -1203,17 +1197,23 @@ Value em_map(Value fn, Value xs) {
     if (!(xs.tag == V_OBJ && xs.as.o->tag == O_LIST))
         rt_fatal("map() expects a list, got %s", type_name(xs));
     Obj *src = xs.as.o;
-    Value result = em_list_litn(src->as.list.len);
+    size_t n = src->as.list.len;
+    Obj *dst = list_new(n);
+    /* the result is traced by the GC from here on, so every slot must hold a
+     * real Value before the mapping function can allocate */
+    for (size_t i = 0; i < n; i++) dst->as.list.items[i] = em_none();
+    dst->as.list.len = n;
+    Value result = obj_val(dst);
     RootFrame fr;
     rt_push_frame(&fr, &result, 1); /* root the result while fn may allocate */
-    Obj *dst = result.as.o;
-    for (size_t i = 0; i < src->as.list.len; i++) {
+    for (size_t i = 0; i < n; i++) {
         Value a[1] = { src->as.list.items[i] };
         RootFrame af;
         rt_push_frame(&af, a, 1);
         Value r = call_closure_n(fn, a, 1);
         rt_pop_frame();
         dst->as.list.items[i] = r;
+        gc_write_barrier(dst, r);
     }
     rt_pop_frame();
     return result;
@@ -1223,30 +1223,16 @@ Value em_filter(Value fn, Value xs) {
     if (!(xs.tag == V_OBJ && xs.as.o->tag == O_LIST))
         rt_fatal("filter() expects a list, got %s", type_name(xs));
     Obj *src = xs.as.o;
-    Value result = em_list_litn(0);
+    Value result = obj_val(list_new(0));
     RootFrame fr;
     rt_push_frame(&fr, &result, 1);
-    Obj *dst = result.as.o;
     for (size_t i = 0; i < src->as.list.len; i++) {
         Value a[1] = { src->as.list.items[i] };
         RootFrame af;
         rt_push_frame(&af, a, 1);
         Value keep = call_closure_n(fn, a, 1);
         rt_pop_frame();
-        if (em_truthy(keep)) {
-            if (dst->as.list.len == dst->as.list.cap) {
-                size_t oldcap = dst->as.list.cap;
-                dst->as.list.cap = dst->as.list.cap ? dst->as.list.cap * 2 : 4;
-                dst->as.list.items =
-                    realloc(dst->as.list.items, sizeof(Value) * dst->as.list.cap);
-                if (!dst->as.list.items) {
-                    fputs("emerald: out of memory\n", stderr);
-                    exit(1);
-                }
-                obj_charge(dst, (dst->as.list.cap - oldcap) * sizeof(Value));
-            }
-            dst->as.list.items[dst->as.list.len++] = a[0];
-        }
+        if (em_truthy(keep)) em_append(result, a[0]);
     }
     rt_pop_frame();
     return result;
@@ -1901,11 +1887,8 @@ Value em_tensor_item(Value tv) {
 
 Value em_tensor_shape(Value tv) {
     Obj *t = tv.as.o;
-    Obj *o = rt_obj_new(O_LIST);
     size_t n = t->as.tensor.ndim;
-    o->as.list.items = xmalloc(sizeof(Value) * (n ? n : 1));
-    o->as.list.cap = n ? n : 1;
-    obj_charge(o, sizeof(Value) * (n ? n : 1));
+    Obj *o = list_new(n);
     for (uint8_t d = 0; d < n; d++)
         o->as.list.items[d] = em_int(t->as.tensor.dims[d]);
     o->as.list.len = n;

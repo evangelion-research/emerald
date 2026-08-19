@@ -1,0 +1,83 @@
+/* The builtin table: the one list of Emerald's builtin functions.
+ *
+ * Included (with the macros defined) by the type checker and the code
+ * generator, so a new builtin is added in exactly one place.
+ *
+ *   EM_BUILTIN(name, cfn, arity, pure)       returns a Value
+ *   EM_BUILTIN_VOID(name, cfn, arity, pure)  returns void; the call's Emerald
+ *                                            value is None
+ *
+ *   cfn    the runtime entry point, or NULL when codegen lowers the call
+ *          specially (the variadic and optional-argument builtins)
+ *   arity  the fixed argument count, or -1 when codegen lowers it specially
+ *   pure   true when the result is a function of the arguments alone, so a
+ *          `pure` Emerald function may call it (see stdlib/SPEC.md §1.2)
+ *
+ * The checker owns the per-builtin *typing* rules; this file owns only the
+ * facts all three consumers agree on.
+ */
+#ifndef EM_BUILTIN_VOID
+#define EM_BUILTIN_VOID EM_BUILTIN
+#endif
+
+/* --- core ---------------------------------------------------------------- */
+EM_BUILTIN(     "print",         NULL,               -1, false)
+EM_BUILTIN(     "eprint",        NULL,               -1, false)
+EM_BUILTIN(     "range",         NULL,               -1, true)
+EM_BUILTIN(     "len",           "em_len",            1, true)
+EM_BUILTIN(     "str",           "em_str",            1, true)
+EM_BUILTIN(     "int",           "em_int_of",         1, true)
+EM_BUILTIN(     "float",         "em_float_of",       1, true)
+EM_BUILTIN(     "sqrt",          "em_sqrt",           1, true)
+EM_BUILTIN(     "tan",           "em_tan",            1, true)
+EM_BUILTIN(     "rand",          "em_rand",           0, false)
+
+/* --- GC observability ---------------------------------------------------- */
+EM_BUILTIN(     "gc_stats",      "em_gc_stats",       0, true)
+EM_BUILTIN(     "gc_collect",    "em_gc_collect",     0, false)
+
+/* --- files and process --------------------------------------------------- */
+EM_BUILTIN(     "read_file",     "em_read_file",      1, false)
+EM_BUILTIN(     "read_file_opt", "em_read_file_opt",  1, false)
+EM_BUILTIN(     "file_exists",   "em_file_exists",    1, false)
+EM_BUILTIN_VOID("write_file",    "em_write_file",     2, false)
+EM_BUILTIN_VOID("append_file",   "em_append_file",    2, false)
+EM_BUILTIN(     "run",           "em_run",            1, false)
+EM_BUILTIN(     "argv",          "em_argv",           0, false)
+EM_BUILTIN_VOID("exit",          "em_exit",           1, false)
+
+/* --- the stdlib foundation (stdlib/SPEC.md §1.1) ------------------------- */
+EM_BUILTIN_VOID("append",        "em_append",         2, false)
+EM_BUILTIN(     "slice",         "em_slice",          3, true)
+EM_BUILTIN(     "ord",           "em_ord",            1, true)
+EM_BUILTIN(     "chr",           "em_chr",            1, true)
+EM_BUILTIN(     "map",           "em_map",            2, true)
+EM_BUILTIN(     "filter",        "em_filter",         2, true)
+EM_BUILTIN(     "reduce",        "em_reduce",         3, true)
+
+/* --- tensor primitives (tensors.md) -------------------------------------- */
+EM_BUILTIN(     "zeros",         "em_tensor_zeros",   1, true)
+EM_BUILTIN(     "ones",          "em_tensor_ones",    1, true)
+EM_BUILTIN(     "full",          "em_tensor_full",    2, true)
+EM_BUILTIN(     "arange",        "em_tensor_arange",  1, true)
+EM_BUILTIN(     "tensor",        "em_tensor_from_list", 1, true)
+EM_BUILTIN(     "randn",         "em_tensor_randn",   2, false)
+EM_BUILTIN(     "exp",           "em_tensor_exp",     1, true)
+EM_BUILTIN(     "log",           "em_tensor_log",     1, true)
+EM_BUILTIN(     "tanh",          "em_tensor_tanh",    1, true)
+EM_BUILTIN(     "relu",          "em_tensor_relu",    1, true)
+EM_BUILTIN(     "matmul",        "em_tensor_matmul",  2, true)
+EM_BUILTIN(     "reshape",       "em_tensor_reshape", 2, true)
+EM_BUILTIN(     "transpose",     "em_tensor_transpose", 1, true)
+EM_BUILTIN(     "permute",       "em_tensor_permute", 2, true)
+EM_BUILTIN(     "expand",        "em_tensor_expand",  2, true)
+EM_BUILTIN(     "sum",           "em_tensor_sum",     2, true)
+EM_BUILTIN(     "mean",          "em_tensor_mean",    2, true)
+EM_BUILTIN(     "max",           "em_tensor_max",     2, true)
+EM_BUILTIN(     "argmax",        "em_tensor_argmax",  2, true)
+EM_BUILTIN(     "tslice",        "em_tensor_slice",   4, true)
+EM_BUILTIN(     "item",          "em_tensor_item",    1, true)
+EM_BUILTIN(     "shape",         "em_tensor_shape",   1, true)
+EM_BUILTIN(     "ndim",          "em_tensor_ndim",    1, true)
+EM_BUILTIN(     "dtype",         "em_tensor_dtype",   1, true)
+EM_BUILTIN(     "astype",        "em_tensor_astype",  2, true)

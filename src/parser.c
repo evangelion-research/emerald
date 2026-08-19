@@ -9,6 +9,7 @@
 #include "diag.h"
 #include "dim.h"
 #include "lexer.h"
+#include "xalloc.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -25,12 +26,6 @@ typedef struct {
 } Parser;
 
 /* --- infrastructure ----------------------------------------------------- */
-
-static void *xmalloc(size_t n) {
-    void *p = malloc(n ? n : 1);
-    if (!p) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
-    return p;
-}
 
 static void perror_at(Parser *p, int line, int col, const char *fmt, ...) {
     char msg[512];
@@ -125,8 +120,7 @@ typedef struct { void **items; size_t count, cap; } PtrVec;
 static void vec_push(PtrVec *v, void *item) {
     if (v->count == v->cap) {
         v->cap = v->cap ? v->cap * 2 : 8;
-        v->items = realloc(v->items, sizeof(void *) * v->cap);
-        if (!v->items) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        v->items = xrealloc(v->items, sizeof(void *) * v->cap);
     }
     v->items[v->count++] = item;
 }
@@ -371,8 +365,7 @@ static void parse_type_params(Parser *p, char ***out, bool **out_dims,
             }
             if (ndims == capdims) {
                 capdims = capdims ? capdims * 2 : 4;
-                dims = realloc(dims, sizeof(bool) * capdims);
-                if (!dims) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+                dims = xrealloc(dims, sizeof(bool) * capdims);
             }
             dims[ndims++] = is_dim;
         } while (match(p, TK_COMMA));
@@ -764,8 +757,7 @@ static Stmt *parse_if(Parser *p) {
         vec_push(&conds, cond);
         if (nblocks == capblocks) {
             capblocks = capblocks ? capblocks * 2 : 4;
-            blocks = realloc(blocks, sizeof(Block) * capblocks);
-            if (!blocks) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+            blocks = xrealloc(blocks, sizeof(Block) * capblocks);
         }
         blocks[nblocks++] = body;
 
@@ -900,8 +892,7 @@ static Stmt *parse_match(Parser *p) {
         expect(p, TK_ARROW, "'->' after pattern");
         if (nblocks == capblocks) {
             capblocks = capblocks ? capblocks * 2 : 4;
-            blocks = realloc(blocks, sizeof(Block) * capblocks);
-            if (!blocks) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+            blocks = xrealloc(blocks, sizeof(Block) * capblocks);
         }
         blocks[nblocks++] = parse_block(p);
     }

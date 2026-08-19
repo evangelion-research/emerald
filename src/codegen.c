@@ -20,6 +20,7 @@
  * so mutations are visible across the closure boundary.
  */
 #include "codegen.h"
+#include "xalloc.h"
 
 #include <stdarg.h>
 #include <stdlib.h>
@@ -33,21 +34,24 @@ static void sb_grow(SB *sb, size_t need) {
     if (sb->len + need + 1 <= sb->cap) return;
     sb->cap = sb->cap ? sb->cap * 2 : 256;
     while (sb->cap < sb->len + need + 1) sb->cap *= 2;
-    sb->buf = realloc(sb->buf, sb->cap);
-    if (!sb->buf) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    sb->buf = xrealloc(sb->buf, sb->cap);
+}
+
+static void sb_vprintf(SB *sb, const char *fmt, va_list ap) {
+    va_list ap2;
+    va_copy(ap2, ap);
+    int n = vsnprintf(NULL, 0, fmt, ap);
+    sb_grow(sb, (size_t)n);
+    vsnprintf(sb->buf + sb->len, (size_t)n + 1, fmt, ap2);
+    va_end(ap2);
+    sb->len += (size_t)n;
 }
 
 static void sb_printf(SB *sb, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    va_list ap2;
-    va_copy(ap2, ap);
-    int n = vsnprintf(NULL, 0, fmt, ap);
+    sb_vprintf(sb, fmt, ap);
     va_end(ap);
-    sb_grow(sb, (size_t)n);
-    vsnprintf(sb->buf + sb->len, (size_t)n + 1, fmt, ap2);
-    va_end(ap2);
-    sb->len += (size_t)n;
 }
 
 /* --- name tables --------------------------------------------------------- */
@@ -68,12 +72,8 @@ static void names_add_file(Names *ns, const char *name, const char *file) {
     if (names_find(ns, name) >= 0) return;
     if (ns->count == ns->cap) {
         ns->cap = ns->cap ? ns->cap * 2 : 8;
-        ns->names = realloc(ns->names, sizeof(char *) * ns->cap);
-        ns->files = realloc(ns->files, sizeof(char *) * ns->cap);
-        if (!ns->names || !ns->files) {
-            fputs("emeraldc: out of memory\n", stderr);
-            exit(1);
-        }
+        ns->names = xrealloc(ns->names, sizeof(char *) * ns->cap);
+        ns->files = xrealloc(ns->files, sizeof(char *) * ns->cap);
     }
     ns->files[ns->count] = file;
     ns->names[ns->count++] = (char *)name;
@@ -94,36 +94,28 @@ static bool global_owned_by(const Names *globals, const char *name,
     return strcmp(globals->files[i], file) == 0;
 }
 
-static bool is_builtin(const char *name) {
-    return strcmp(name, "print") == 0 || strcmp(name, "len") == 0 ||
-           strcmp(name, "str") == 0 || strcmp(name, "int") == 0 ||
-           strcmp(name, "range") == 0 || strcmp(name, "gc_stats") == 0 ||
-           strcmp(name, "gc_collect") == 0 ||
-           strcmp(name, "read_file") == 0 || strcmp(name, "write_file") == 0 ||
-           strcmp(name, "run") == 0 || strcmp(name, "sqrt") == 0 ||
-           strcmp(name, "tan") == 0 || strcmp(name, "rand") == 0 ||
-           strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
-           strcmp(name, "reduce") == 0 || strcmp(name, "append_file") == 0 ||
-           strcmp(name, "append") == 0 || strcmp(name, "slice") == 0 ||
-           strcmp(name, "ord") == 0 || strcmp(name, "chr") == 0 ||
-           strcmp(name, "float") == 0 || strcmp(name, "eprint") == 0 ||
-           strcmp(name, "argv") == 0 || strcmp(name, "exit") == 0 ||
-           strcmp(name, "read_file_opt") == 0 ||
-           strcmp(name, "file_exists") == 0 ||
-           strcmp(name, "zeros") == 0 || strcmp(name, "ones") == 0 ||
-           strcmp(name, "full") == 0 || strcmp(name, "arange") == 0 ||
-           strcmp(name, "tensor") == 0 || strcmp(name, "randn") == 0 ||
-           strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 ||
-           strcmp(name, "tanh") == 0 || strcmp(name, "relu") == 0 ||
-           strcmp(name, "matmul") == 0 || strcmp(name, "reshape") == 0 ||
-           strcmp(name, "transpose") == 0 || strcmp(name, "permute") == 0 ||
-           strcmp(name, "expand") == 0 || strcmp(name, "sum") == 0 ||
-           strcmp(name, "mean") == 0 || strcmp(name, "max") == 0 ||
-           strcmp(name, "argmax") == 0 || strcmp(name, "tslice") == 0 ||
-           strcmp(name, "item") == 0 || strcmp(name, "shape") == 0 ||
-           strcmp(name, "ndim") == 0 || strcmp(name, "dtype") == 0 ||
-           strcmp(name, "astype") == 0;
+/* the shared builtin table (include/builtins.def) */
+typedef struct {
+    const char *name;
+    const char *cfn;  /* runtime entry point; NULL = lowered specially below */
+    int arity;
+    bool rets;        /* the C function returns a Value */
+} Builtin;
+
+static const Builtin builtins[] = {
+#define EM_BUILTIN(n, c, a, p)      { n, c, a, true },
+#define EM_BUILTIN_VOID(n, c, a, p) { n, c, a, false },
+#include "builtins.def"
+#undef EM_BUILTIN
+#undef EM_BUILTIN_VOID
+};
+
+static const Builtin *builtin_find(const char *name) {
+    for (size_t i = 0; i < sizeof builtins / sizeof *builtins; i++)
+        if (strcmp(builtins[i].name, name) == 0) return &builtins[i];
+    return NULL;
 }
+
 
 /* --- function info (closure conversion) ---------------------------------- */
 
@@ -146,14 +138,10 @@ static int add_local(FuncInfo *fi, const char *name) {
     if (i >= 0) return i;
     if (fi->locals.count == fi->locals.cap) {
         fi->locals.cap = fi->locals.cap ? fi->locals.cap * 2 : 8;
-        fi->locals.names = realloc(fi->locals.names,
+        fi->locals.names = xrealloc(fi->locals.names,
                                    sizeof(char *) * fi->locals.cap);
-        fi->local_cell = realloc(fi->local_cell,
+        fi->local_cell = xrealloc(fi->local_cell,
                                  sizeof(bool) * fi->locals.cap);
-        if (!fi->locals.names || !fi->local_cell) {
-            fputs("emeraldc: out of memory\n", stderr);
-            exit(1);
-        }
     }
     fi->locals.names[fi->locals.count] = (char *)name;
     fi->local_cell[fi->locals.count] = false;
@@ -180,14 +168,8 @@ static void emit(Cg *cg, const char *fmt, ...) {
     for (int i = 0; i < cg->indent; i++) sb_printf(&cg->body, "    ");
     va_list ap;
     va_start(ap, fmt);
-    va_list ap2;
-    va_copy(ap2, ap);
-    int n = vsnprintf(NULL, 0, fmt, ap);
+    sb_vprintf(&cg->body, fmt, ap);
     va_end(ap);
-    sb_grow(&cg->body, (size_t)n);
-    vsnprintf(cg->body.buf + cg->body.len, (size_t)n + 1, fmt, ap2);
-    va_end(ap2);
-    cg->body.len += (size_t)n;
     sb_printf(&cg->body, "\n");
 }
 
@@ -325,163 +307,50 @@ static const char *binop_fn(BinOp op) {
 
 static int gen_call(Cg *cg, const Expr *e) {
     size_t argc = e->as.call.count;
-    int *args = malloc(sizeof(int) * (argc ? argc : 1));
-    if (!args) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    int *args = xmalloc(sizeof(int) * argc);
     for (size_t i = 0; i < argc; i++)
         args[i] = gen_expr(cg, e->as.call.args[i]);
 
     int t = new_temp(cg);
-    char tb[32], ab[32], bb[32], cb[32], db[32];
+    char tb[32], ab[32], bb[32];
     SB call = {0};
 
     const Expr *fn = e->as.call.fn;
     if (fn->kind == E_NAME) {
         const char *name = fn->as.sval;
-        if (strcmp(name, "print") == 0) {
-            sb_printf(&call, "em_print(%zu", argc);
+        const Builtin *b = builtin_find(name);
+        if (b && b->cfn) {
+            /* fixed-arity builtins all lower the same way: call the runtime
+             * entry point with the argument slots. The checker has already
+             * verified the arity, so the table's count is what we emit. */
+            SB c = {0};
+            sb_printf(&c, "%s(", b->cfn);
+            for (size_t i = 0; i < argc; i++)
+                sb_printf(&c, "%s%s", i ? ", " : "", slotref(args[i], ab));
+            sb_printf(&c, ")");
+            if (b->rets) {
+                emit(cg, "%s = %s;", slotref(t, tb), c.buf);
+            } else {
+                emit(cg, "%s;", c.buf);
+                emit(cg, "%s = em_none();", slotref(t, tb));
+            }
+            free(c.buf);
+        } else if (strcmp(name, "print") == 0 || strcmp(name, "eprint") == 0) {
+            /* variadic: the runtime takes the count, then the values */
+            sb_printf(&call, "%s(%zu",
+                      name[0] == 'e' ? "em_eprint" : "em_print", argc);
             for (size_t i = 0; i < argc; i++)
                 sb_printf(&call, ", %s", slotref(args[i], ab));
             sb_printf(&call, ");");
             emit(cg, "%s", call.buf);
             emit(cg, "%s = em_none();", slotref(t, tb));
-        } else if (strcmp(name, "len") == 0) {
-            emit(cg, "%s = em_len(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "str") == 0) {
-            emit(cg, "%s = em_str(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "int") == 0) {
-            emit(cg, "%s = em_int_of(%s);", slotref(t, tb), slotref(args[0], ab));
         } else if (strcmp(name, "range") == 0) {
-            if (argc == 1)
+            if (argc == 1)  /* range(n) starts at 0 */
                 emit(cg, "%s = em_range(em_int(0), %s);", slotref(t, tb),
                      slotref(args[0], ab));
             else
                 emit(cg, "%s = em_range(%s, %s);", slotref(t, tb),
                      slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "gc_stats") == 0) {
-            emit(cg, "%s = em_gc_stats();", slotref(t, tb));
-        } else if (strcmp(name, "gc_collect") == 0) {
-            emit(cg, "%s = em_gc_collect();", slotref(t, tb));
-        } else if (strcmp(name, "read_file") == 0) {
-            emit(cg, "%s = em_read_file(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "write_file") == 0) {
-            emit(cg, "em_write_file(%s, %s);", slotref(args[0], ab),
-                 slotref(args[1], bb));
-            emit(cg, "%s = em_none();", slotref(t, tb));
-        } else if (strcmp(name, "append_file") == 0) {
-            emit(cg, "em_append_file(%s, %s);", slotref(args[0], ab),
-                 slotref(args[1], bb));
-            emit(cg, "%s = em_none();", slotref(t, tb));
-        } else if (strcmp(name, "run") == 0) {
-            emit(cg, "%s = em_run(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "sqrt") == 0) {
-            emit(cg, "%s = em_sqrt(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "tan") == 0) {
-            emit(cg, "%s = em_tan(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "rand") == 0) {
-            emit(cg, "%s = em_rand();", slotref(t, tb));
-        } else if (strcmp(name, "map") == 0) {
-            emit(cg, "%s = em_map(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "filter") == 0) {
-            emit(cg, "%s = em_filter(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "reduce") == 0) {
-            emit(cg, "%s = em_reduce(%s, %s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb), slotref(args[2], cb));
-        } else if (strcmp(name, "append") == 0) {
-            emit(cg, "em_append(%s, %s);", slotref(args[0], ab),
-                 slotref(args[1], bb));
-            emit(cg, "%s = em_none();", slotref(t, tb));
-        } else if (strcmp(name, "slice") == 0) {
-            emit(cg, "%s = em_slice(%s, %s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb), slotref(args[2], cb));
-        } else if (strcmp(name, "ord") == 0) {
-            emit(cg, "%s = em_ord(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "chr") == 0) {
-            emit(cg, "%s = em_chr(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "float") == 0) {
-            emit(cg, "%s = em_float_of(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "eprint") == 0) {
-            sb_printf(&call, "em_eprint(%zu", argc);
-            for (size_t i = 0; i < argc; i++)
-                sb_printf(&call, ", %s", slotref(args[i], ab));
-            sb_printf(&call, ");");
-            emit(cg, "%s", call.buf);
-            emit(cg, "%s = em_none();", slotref(t, tb));
-        } else if (strcmp(name, "argv") == 0) {
-            emit(cg, "%s = em_argv();", slotref(t, tb));
-        } else if (strcmp(name, "exit") == 0) {
-            emit(cg, "em_exit(%s);", slotref(args[0], ab));
-            emit(cg, "%s = em_none();", slotref(t, tb));
-        } else if (strcmp(name, "read_file_opt") == 0) {
-            emit(cg, "%s = em_read_file_opt(%s);", slotref(t, tb),
-                 slotref(args[0], ab));
-        } else if (strcmp(name, "file_exists") == 0) {
-            emit(cg, "%s = em_file_exists(%s);", slotref(t, tb),
-                 slotref(args[0], ab));
-        } else if (strcmp(name, "zeros") == 0) {
-            emit(cg, "%s = em_tensor_zeros(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "ones") == 0) {
-            emit(cg, "%s = em_tensor_ones(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "full") == 0) {
-            emit(cg, "%s = em_tensor_full(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "arange") == 0) {
-            emit(cg, "%s = em_tensor_arange(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "tensor") == 0) {
-            emit(cg, "%s = em_tensor_from_list(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "randn") == 0) {
-            emit(cg, "%s = em_tensor_randn(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "exp") == 0) {
-            emit(cg, "%s = em_tensor_exp(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "log") == 0) {
-            emit(cg, "%s = em_tensor_log(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "tanh") == 0) {
-            emit(cg, "%s = em_tensor_tanh(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "relu") == 0) {
-            emit(cg, "%s = em_tensor_relu(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "matmul") == 0) {
-            emit(cg, "%s = em_tensor_matmul(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "reshape") == 0) {
-            emit(cg, "%s = em_tensor_reshape(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "transpose") == 0) {
-            emit(cg, "%s = em_tensor_transpose(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "permute") == 0) {
-            emit(cg, "%s = em_tensor_permute(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "expand") == 0) {
-            emit(cg, "%s = em_tensor_expand(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "sum") == 0) {
-            emit(cg, "%s = em_tensor_sum(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "mean") == 0) {
-            emit(cg, "%s = em_tensor_mean(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "max") == 0) {
-            emit(cg, "%s = em_tensor_max(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "argmax") == 0) {
-            emit(cg, "%s = em_tensor_argmax(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
-        } else if (strcmp(name, "tslice") == 0) {
-            emit(cg, "%s = em_tensor_slice(%s, %s, %s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb),
-                 slotref(args[2], cb), slotref(args[3], db));
-        } else if (strcmp(name, "item") == 0) {
-            emit(cg, "%s = em_tensor_item(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "shape") == 0) {
-            emit(cg, "%s = em_tensor_shape(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "ndim") == 0) {
-            emit(cg, "%s = em_tensor_ndim(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "dtype") == 0) {
-            emit(cg, "%s = em_tensor_dtype(%s);", slotref(t, tb), slotref(args[0], ab));
-        } else if (strcmp(name, "astype") == 0) {
-            emit(cg, "%s = em_tensor_astype(%s, %s);", slotref(t, tb),
-                 slotref(args[0], ab), slotref(args[1], bb));
         } else {
             Access kind;
             int slot;
@@ -580,8 +449,7 @@ static int gen_expr(Cg *cg, const Expr *e) {
     }
     case E_LIST: {
         size_t n = e->as.list.count;
-        int *items = malloc(sizeof(int) * (n ? n : 1));
-        if (!items) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        int *items = xmalloc(sizeof(int) * n);
         for (size_t i = 0; i < n; i++)
             items[i] = gen_expr(cg, e->as.list.items[i]);
         int t = new_temp(cg);
@@ -597,8 +465,7 @@ static int gen_expr(Cg *cg, const Expr *e) {
     }
     case E_REC: {
         size_t n = e->as.rec.count;
-        int *vals = malloc(sizeof(int) * (n ? n : 1));
-        if (!vals) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        int *vals = xmalloc(sizeof(int) * n);
         for (size_t i = 0; i < n; i++)
             vals[i] = gen_expr(cg, e->as.rec.values[i]);
         int t = new_temp(cg);
@@ -791,15 +658,7 @@ static void gen_pat_test(const Pat *p, const char *subj, SB *out) {
             sb_printf(out, " && em_rec_has(%s, ", subj);
             sb_c_string(out, it->name);
             sb_printf(out, ")");
-            if (it->kind == P_LIT) {
-                SB f = {0};
-                sb_printf(&f, "em_getattr(%s, ", subj);
-                sb_c_string(&f, it->name);
-                sb_printf(&f, ")");
-                sb_printf(out, " && ");
-                gen_pat_test(it, f.buf, out);
-                free(f.buf);
-            } else if (it->kind == P_REC) {
+            if (it->kind == P_LIT || it->kind == P_REC) {
                 SB f = {0};
                 sb_printf(&f, "em_getattr(%s, ", subj);
                 sb_c_string(&f, it->name);
@@ -819,7 +678,6 @@ static void gen_pat_test(const Pat *p, const char *subj, SB *out) {
  * `subj` (a C expression). Only runs once the arm's test has passed, so
  * em_getattr is safe here. */
 static void gen_pat_binds(Cg *cg, const Pat *p, const char *subj) {
-    char ab[32];
     switch (p->kind) {
     case P_BIND:
         gen_var_write(cg, p->bind, subj);
@@ -838,7 +696,6 @@ static void gen_pat_binds(Cg *cg, const Pat *p, const char *subj) {
         break;
     case P_LIT:
     case P_WILD:
-        (void)ab;
         break;
     }
 }
@@ -996,8 +853,7 @@ static void gen_stmt(Cg *cg, const Stmt *s) {
             /* self tail call: evaluate the arguments, reassign the parameter
              * slots, and jump back to the loop header (see gen_function) */
             size_t argc = s->as.ret->as.call.count;
-            int *args = malloc(sizeof(int) * (argc ? argc : 1));
-            if (!args) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+            int *args = xmalloc(sizeof(int) * argc);
             for (size_t i = 0; i < argc; i++)
                 args[i] = gen_expr(cg, s->as.ret->as.call.args[i]);
             for (size_t i = 0; i < argc && i < cg->fi->node->as.func.param_count; i++)
@@ -1049,7 +905,6 @@ static void gen_block(Cg *cg, const Block *b) {
 
 typedef struct {
     Names *globals;
-    Names top_names;
     int counter;
     FuncInfo **all;      /* every function, in build order */
     size_t all_count, all_cap;
@@ -1159,8 +1014,7 @@ static void collect_child_defs(const Block *b, Stmt ***defs, size_t *count,
         case S_FUNC:
             if (*count == *cap) {
                 *cap = *cap ? *cap * 2 : 4;
-                *defs = realloc(*defs, sizeof(Stmt *) * *cap);
-                if (!*defs) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+                *defs = xrealloc(*defs, sizeof(Stmt *) * *cap);
             }
             (*defs)[(*count)++] = (Stmt *)s;
             break;
@@ -1253,8 +1107,7 @@ static void collect_lambdas_expr(const Expr *e, Expr ***lams, size_t *count,
     case E_LAMBDA:
         if (*count == *cap) {
             *cap = *cap ? *cap * 2 : 4;
-            *lams = realloc(*lams, sizeof(Expr *) * *cap);
-            if (!*lams) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+            *lams = xrealloc(*lams, sizeof(Expr *) * *cap);
         }
         (*lams)[(*count)++] = (Expr *)e;
         collect_lambdas_expr(e->as.lam.body, lams, count, cap);
@@ -1377,7 +1230,7 @@ static void collect_local_cb(const char *name, const char *file, int line,
         add_local(lc->fi, name);
 }
 
-static void compute_captures(Ctx *ctx, FuncInfo *fi, const Block *body) {
+static void compute_captures(FuncInfo *fi, const Block *body) {
     Names used = {0};
     collect_used_block(body, &used);
     for (size_t i = 0; i < used.count; i++) {
@@ -1387,9 +1240,8 @@ static void compute_captures(Ctx *ctx, FuncInfo *fi, const Block *body) {
             names_add(&fi->captures, n);
             continue;
         }
-        if (names_find(ctx->globals, n) >= 0) continue;  /* global */
-        if (names_find(&ctx->top_names, n) >= 0) continue; /* top-level fn */
-        if (is_builtin(n)) continue;
+        /* anything else (global, top-level function, builtin) needs no
+         * capture slot */
     }
     /* forward children's captures that aren't bound here (deep capture) */
     for (size_t c = 0; c < fi->child_count; c++) {
@@ -1412,28 +1264,22 @@ static void compute_boxing(FuncInfo *fi);
 static FuncInfo *build_lambda(Ctx *ctx, const Expr *lam, FuncInfo *parent) {
     char name[32];
     snprintf(name, sizeof(name), "__lam%d", ctx->counter);
-    Stmt *ret = calloc(1, sizeof(Stmt));
-    if (!ret) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    Stmt *ret = xcalloc(1, sizeof(Stmt));
     ret->kind = S_RETURN;
     ret->line = lam->line;
     ret->col = lam->col;
     ret->as.ret = (Expr *)lam->as.lam.body;
-    Stmt *func = calloc(1, sizeof(Stmt));
-    if (!func) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    Stmt *func = xcalloc(1, sizeof(Stmt));
     func->kind = S_FUNC;
     func->line = lam->line;
     func->col = lam->col;
     func->as.func.name = strdup(name);
-    func->as.func.dispname = name;
+    func->as.func.dispname = func->as.func.name;
     func->as.func.params = lam->as.lam.params;
     func->as.func.param_types = lam->as.lam.param_types;
     func->as.func.param_count = lam->as.lam.param_count;
     func->as.func.body.count = 1;
-    func->as.func.body.items = malloc(sizeof(Stmt *));
-    if (!func->as.func.body.items) {
-        fputs("emeraldc: out of memory\n", stderr);
-        exit(1);
-    }
+    func->as.func.body.items = xmalloc(sizeof(Stmt *));
     func->as.func.body.items[0] = ret;
     FuncInfo *fi = build_func(ctx, func, parent);
     fi->lamb = lam;
@@ -1444,8 +1290,7 @@ static FuncInfo *build_lambda(Ctx *ctx, const Expr *lam, FuncInfo *parent) {
  * It owns the top-level lambdas as children (so they get closure treatment)
  * but has no locals of its own — everything at the top level is a global. */
 static FuncInfo *make_top_root(Ctx *ctx, const Block *body) {
-    FuncInfo *fi = calloc(1, sizeof(FuncInfo));
-    if (!fi) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    FuncInfo *fi = xcalloc(1, sizeof(FuncInfo));
     fi->parent = NULL;
     fi->name = "<top>";
     fi->node = NULL;
@@ -1453,13 +1298,12 @@ static FuncInfo *make_top_root(Ctx *ctx, const Block *body) {
     size_t n = 0, cap = 0;
     collect_lambdas_block(body, &lams, &n, &cap);
     fi->child_cap = n ? n : 1;
-    fi->children = calloc(fi->child_cap, sizeof(FuncInfo *));
-    if (!fi->children) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    fi->children = xcalloc(fi->child_cap, sizeof(FuncInfo *));
     fi->child_count = n;
     for (size_t i = 0; i < n; i++)
         fi->children[i] = build_lambda(ctx, lams[i], fi);
     free(lams);
-    compute_captures(ctx, fi, body);
+    compute_captures(fi, body);
     compute_boxing(fi);
     return fi;
 }
@@ -1475,8 +1319,7 @@ static void compute_boxing(FuncInfo *fi) {
 }
 
 static FuncInfo *build_func(Ctx *ctx, const Stmt *node, FuncInfo *parent) {
-    FuncInfo *fi = calloc(1, sizeof(FuncInfo));
-    if (!fi) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    FuncInfo *fi = xcalloc(1, sizeof(FuncInfo));
     fi->node = node;
     fi->parent = parent;
     fi->name = node->as.func.name;
@@ -1488,8 +1331,7 @@ static FuncInfo *build_func(Ctx *ctx, const Stmt *node, FuncInfo *parent) {
 
     if (ctx->all_count == ctx->all_cap) {
         ctx->all_cap = ctx->all_cap ? ctx->all_cap * 2 : 8;
-        ctx->all = realloc(ctx->all, sizeof(FuncInfo *) * ctx->all_cap);
-        if (!ctx->all) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        ctx->all = xrealloc(ctx->all, sizeof(FuncInfo *) * ctx->all_cap);
     }
     ctx->all[ctx->all_count++] = fi;
 
@@ -1512,8 +1354,7 @@ static FuncInfo *build_func(Ctx *ctx, const Stmt *node, FuncInfo *parent) {
     collect_lambdas_block(&node->as.func.body, &lams, &nlams, &lamcap);
 
     fi->child_cap = (ndefs + nlams) ? (ndefs + nlams) : 1;
-    fi->children = calloc(fi->child_cap, sizeof(FuncInfo *));
-    if (!fi->children) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    fi->children = xcalloc(fi->child_cap, sizeof(FuncInfo *));
     fi->child_count = 0;
     for (size_t i = 0; i < ndefs; i++)
         fi->children[fi->child_count++] = build_func(ctx, defs[i], fi);
@@ -1522,7 +1363,7 @@ static FuncInfo *build_func(Ctx *ctx, const Stmt *node, FuncInfo *parent) {
     free(defs);
     free(lams);
 
-    compute_captures(ctx, fi, &node->as.func.body);
+    compute_captures(fi, &node->as.func.body);
     compute_boxing(fi);
     return fi;
 }
@@ -1659,14 +1500,8 @@ void codegen_program(FILE *out, const Program *prog, const char *filename) {
     ast_collect_assigned(&prog->body, collect_name_cb, &globals);
     collect_match_pats_block(&prog->body, collect_name_cb, &globals);
 
-    /* top-level function names */
-    Names top_names = {0};
-    for (size_t i = 0; i < prog->body.count; i++)
-        if (prog->body.items[i]->kind == S_FUNC)
-            names_add(&top_names, prog->body.items[i]->as.func.name);
-
     /* build the function tree (top-level defs are the root's children) */
-    Ctx ctx = { &globals, top_names, 0, NULL, 0, 0 };
+    Ctx ctx = { &globals, 0, NULL, 0, 0 };
     FuncInfo **top = NULL;
     size_t top_count = 0, top_cap = 0;
     for (size_t i = 0; i < prog->body.count; i++) {
@@ -1674,8 +1509,7 @@ void codegen_program(FILE *out, const Program *prog, const char *filename) {
         if (s->kind != S_FUNC) continue;
         if (top_count == top_cap) {
             top_cap = top_cap ? top_cap * 2 : 8;
-            top = realloc(top, sizeof(FuncInfo *) * top_cap);
-            if (!top) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+            top = xrealloc(top, sizeof(FuncInfo *) * top_cap);
         }
         top[top_count++] = build_func(&ctx, s, NULL);
     }

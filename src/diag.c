@@ -1,5 +1,6 @@
 /* Structured diagnostics: collection and rendering (human + JSON). */
 #include "diag.h"
+#include "xalloc.h"
 
 #include <stdarg.h>
 #include <stdlib.h>
@@ -12,8 +13,7 @@ void diag_init(DiagList *dl, const char *src) {
 
 static char *xstrdup(const char *s) {
     size_t n = strlen(s) + 1;
-    char *p = malloc(n);
-    if (!p) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    char *p = xmalloc(n);
     memcpy(p, s, n);
     return p;
 }
@@ -24,8 +24,7 @@ void diag_add_source(DiagList *dl, const char *file, const char *src) {
         if (strcmp(dl->sources[i].file, file) == 0) return;
     if (dl->source_count == dl->source_cap) {
         dl->source_cap = dl->source_cap ? dl->source_cap * 2 : 8;
-        dl->sources = realloc(dl->sources, sizeof(DiagSource) * dl->source_cap);
-        if (!dl->sources) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        dl->sources = xrealloc(dl->sources, sizeof(DiagSource) * dl->source_cap);
     }
     dl->sources[dl->source_count].file = file;
     dl->sources[dl->source_count].src = src;
@@ -41,30 +40,12 @@ static const char *diag_src_for(const DiagList *dl, const Diag *d) {
     return dl->source_count ? NULL : dl->src;
 }
 
-void diag_free(DiagList *dl) {
-    for (size_t i = 0; i < dl->count; i++) {
-        Diag *d = &dl->items[i];
-        free(d->message);
-        free(d->expected);
-        free(d->actual);
-        for (size_t j = 0; j < d->note_count; j++) {
-            free(d->notes[j].label);
-            free(d->notes[j].value);
-        }
-        free(d->notes);
-    }
-    free(dl->items);
-    free(dl->sources);
-    memset(dl, 0, sizeof(*dl));
-}
-
 static Diag *diag_addv(DiagList *dl, DiagKind kind, const char *code,
                        const char *file, int line, int col,
                        const char *fmt, va_list ap) {
     if (dl->count == dl->cap) {
         dl->cap = dl->cap ? dl->cap * 2 : 16;
-        dl->items = realloc(dl->items, sizeof(Diag) * dl->cap);
-        if (!dl->items) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        dl->items = xrealloc(dl->items, sizeof(Diag) * dl->cap);
     }
     Diag *d = &dl->items[dl->count++];
     memset(d, 0, sizeof(*d));
@@ -78,8 +59,7 @@ static Diag *diag_addv(DiagList *dl, DiagKind kind, const char *code,
     va_list ap2;
     va_copy(ap2, ap);
     int n = vsnprintf(NULL, 0, fmt, ap);
-    d->message = malloc((size_t)n + 1);
-    if (!d->message) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+    d->message = xmalloc((size_t)n + 1);
     vsnprintf(d->message, (size_t)n + 1, fmt, ap2);
     va_end(ap2);
     return d;
@@ -102,19 +82,11 @@ void diag_set_types(Diag *d, const char *expected, const char *actual) {
 void diag_note(Diag *d, const char *label, const char *value) {
     if (d->note_count == d->note_cap) {
         d->note_cap = d->note_cap ? d->note_cap * 2 : 4;
-        d->notes = realloc(d->notes, sizeof(DiagNote) * d->note_cap);
-        if (!d->notes) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        d->notes = xrealloc(d->notes, sizeof(DiagNote) * d->note_cap);
     }
     d->notes[d->note_count].label = xstrdup(label);
     d->notes[d->note_count].value = xstrdup(value);
     d->note_count++;
-}
-
-int diag_error_count(const DiagList *dl) {
-    int n = 0;
-    for (size_t i = 0; i < dl->count; i++)
-        if (dl->items[i].severity == SEV_ERROR) n++;
-    return n;
 }
 
 /* Extract the text of source line `line` (1-based). Returns a pointer into

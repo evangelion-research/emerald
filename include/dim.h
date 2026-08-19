@@ -38,11 +38,6 @@ void dim_free(DimExpr *e);
 
 /* Deep-copy an expression. */
 DimExpr *dim_clone(const DimExpr *e);
-/* Substitute each variable in `names` with the corresponding `values`
- * expression (cloned), returning a fresh tree. */
-DimExpr *dim_subst(const DimExpr *e, char *const *names, DimExpr *const *values,
-                   size_t count);
-
 /* Render an expression in a stable, human-readable form ("B*S + 2*D"). The
  * returned string is malloc'd and must be freed by the caller. */
 char *dim_str(const DimExpr *e);

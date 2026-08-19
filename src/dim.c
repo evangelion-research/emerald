@@ -2,17 +2,13 @@
  * and compare structurally. See include/dim.h for the model and D3 in
  * docs/SPEC_V2.md for why there is deliberately no SMT dependency here. */
 #include "dim.h"
+#include "xalloc.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 /* --- tiny allocation helpers -------------------------------------------- */
 
-static void *xmalloc(size_t n) {
-    void *p = malloc(n ? n : 1);
-    if (!p) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
-    return p;
-}
 static char *xstrdup(const char *s) {
     size_t n = strlen(s);
     char *d = xmalloc(n + 1);
@@ -64,8 +60,8 @@ void dim_free(DimExpr *e) {
     free(e);
 }
 
-DimExpr *dim_subst(const DimExpr *e, char *const *names, DimExpr *const *values,
-                   size_t count) {
+static DimExpr *dim_subst(const DimExpr *e, char *const *names,
+                          DimExpr *const *values, size_t count) {
     if (!e) return NULL;
     switch (e->kind) {
     case DE_VAR:
@@ -110,8 +106,7 @@ static void poly_init(Poly *p) { p->terms = NULL; p->count = p->cap = 0; }
 static void poly_push(Poly *p, int64_t coef, char **vars, size_t nvars) {
     if (p->count == p->cap) {
         p->cap = p->cap ? p->cap * 2 : 8;
-        p->terms = realloc(p->terms, sizeof(Term) * p->cap);
-        if (!p->terms) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        p->terms = xrealloc(p->terms, sizeof(Term) * p->cap);
     }
     p->terms[p->count].coef = coef;
     p->terms[p->count].vars = vars;
@@ -198,13 +193,13 @@ static Poly poly_add(const Poly *a, const Poly *b) {
     r.cap = a->count + b->count ? a->count + b->count : 1;
     for (size_t i = 0; i < a->count; i++) {
         Term t = a->terms[i];
-        t.vars = xmalloc(sizeof(char *) * (t.nvars ? t.nvars : 1));
+        t.vars = xmalloc(sizeof(char *) * t.nvars);
         for (size_t j = 0; j < t.nvars; j++) t.vars[j] = xstrdup(a->terms[i].vars[j]);
         r.terms[r.count++] = t;
     }
     for (size_t i = 0; i < b->count; i++) {
         Term t = b->terms[i];
-        t.vars = xmalloc(sizeof(char *) * (t.nvars ? t.nvars : 1));
+        t.vars = xmalloc(sizeof(char *) * t.nvars);
         for (size_t j = 0; j < t.nvars; j++) t.vars[j] = xstrdup(b->terms[i].vars[j]);
         r.terms[r.count++] = t;
     }
@@ -216,12 +211,12 @@ static Poly poly_add(const Poly *a, const Poly *b) {
 static Poly poly_neg(const Poly *p) {
     Poly r;
     poly_init(&r);
-    r.terms = xmalloc(sizeof(Term) * (p->count ? p->count : 1));
+    r.terms = xmalloc(sizeof(Term) * p->count);
     r.cap = p->count ? p->count : 1;
     for (size_t i = 0; i < p->count; i++) {
         Term t = p->terms[i];
         t.coef = -t.coef;
-        t.vars = xmalloc(sizeof(char *) * (t.nvars ? t.nvars : 1));
+        t.vars = xmalloc(sizeof(char *) * t.nvars);
         for (size_t j = 0; j < t.nvars; j++) t.vars[j] = xstrdup(p->terms[i].vars[j]);
         r.terms[r.count++] = t;
     }
@@ -286,8 +281,7 @@ static void sb_put(SB *sb, const char *s) {
     if (sb->len + n + 1 > sb->cap) {
         sb->cap = sb->cap ? sb->cap * 2 : 64;
         while (sb->cap < sb->len + n + 1) sb->cap *= 2;
-        sb->buf = realloc(sb->buf, sb->cap);
-        if (!sb->buf) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        sb->buf = xrealloc(sb->buf, sb->cap);
     }
     memcpy(sb->buf + sb->len, s, n + 1);
     sb->len += n;

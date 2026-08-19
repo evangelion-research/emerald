@@ -63,7 +63,6 @@ typedef struct {
 } DiagList;
 
 void diag_init(DiagList *dl, const char *src);
-void diag_free(DiagList *dl);
 
 /* Register `src` as the text of `file`, so diagnostics against that file can
  * quote their source line. Both pointers are borrowed and must outlive the
@@ -80,7 +79,6 @@ void diag_set_types(Diag *d, const char *expected, const char *actual);
 /* Attach an arbitrary structured note. */
 void diag_note(Diag *d, const char *label, const char *value);
 
-int  diag_error_count(const DiagList *dl);
 void diag_render(const DiagList *dl, FILE *out);
 
 #endif

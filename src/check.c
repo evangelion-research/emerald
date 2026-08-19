@@ -19,6 +19,7 @@
 #include "check.h"
 #include "diag.h"
 #include "dim.h"
+#include "xalloc.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -86,11 +87,6 @@ static Type t_any = {.k = TY_ANY}, t_never = {.k = TY_NEVER},
             t_int = {.k = TY_INT}, t_float = {.k = TY_FLOAT},
             t_str = {.k = TY_STR};
 
-static void *xmalloc(size_t n) {
-    void *p = malloc(n ? n : 1);
-    if (!p) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
-    return p;
-}
 
 static Type *ty_new(TyKind k) {
     Type *t = xmalloc(sizeof(Type));
@@ -109,7 +105,7 @@ static Type *ty_func(Type **params, size_t count, Type *ret) {
     Type *t = ty_new(TY_FUNC);
     /* own a copy: callers may pass stack arrays (e.g. {t} in a local), and
      * the func type outlives them */
-    t->fun.params = xmalloc(sizeof(Type *) * (count ? count : 1));
+    t->fun.params = xmalloc(sizeof(Type *) * count);
     for (size_t i = 0; i < count; i++)
         t->fun.params[i] = params[i];
     t->fun.count = count;
@@ -196,7 +192,7 @@ static DimExpr *shape_prod(const Shape *s) {
 static Shape *broadcast_shapes(const Shape *a, const Shape *b) {
     if (a->dynamic || b->dynamic) return shape_dynamic();
     if (a->count != b->count) return NULL;
-    DimExpr **dims = xmalloc(sizeof(DimExpr *) * (a->count ? a->count : 1));
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * a->count);
     for (size_t i = 0; i < a->count; i++) {
         DimExpr *da = a->dims[i], *db = b->dims[i];
         if (dim_eq(da, db)) dims[i] = da;
@@ -211,7 +207,7 @@ static Shape *broadcast_shapes(const Shape *a, const Shape *b) {
  * (e.g. `[2, 3, 4]`); NULL otherwise. The result is a fresh, owned tree. */
 static Shape *literal_shape_of_expr(const Expr *e) {
     if (!e || e->kind != E_LIST) return NULL;
-    DimExpr **dims = xmalloc(sizeof(DimExpr *) * (e->as.list.count ? e->as.list.count : 1));
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * e->as.list.count);
     for (size_t i = 0; i < e->as.list.count; i++) {
         if (e->as.list.items[i]->kind != E_INT) {
             for (size_t j = 0; j < i; j++) dim_free(dims[j]);
@@ -490,7 +486,7 @@ static Type *widen(Type *t) {
         Type *r = ty_new(TY_REC);
         r->rec.names = t->rec.names;
         r->rec.count = t->rec.count;
-        r->rec.types = xmalloc(sizeof(Type *) * (t->rec.count ? t->rec.count : 1));
+        r->rec.types = xmalloc(sizeof(Type *) * t->rec.count);
         for (size_t i = 0; i < t->rec.count; i++)
             r->rec.types[i] = widen(t->rec.types[i]);
         return r;
@@ -737,8 +733,7 @@ static Var *env_find(VarEnv *env, const char *name) {
 static Var *env_add(VarEnv *env, const char *name, Type *t, bool annotated) {
     if (env->count == env->cap) {
         env->cap = env->cap ? env->cap * 2 : 8;
-        env->items = realloc(env->items, sizeof(Var) * env->cap);
-        if (!env->items) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        env->items = xrealloc(env->items, sizeof(Var) * env->cap);
     }
     Var *v = &env->items[env->count++];
     v->name = (char *)name;
@@ -762,69 +757,27 @@ static Var *lookup_var(Ck *ck, const char *name) {
     return env_find(&ck->globals, name);
 }
 
-static bool is_builtin(const char *name) {
-    return strcmp(name, "print") == 0 || strcmp(name, "len") == 0 ||
-           strcmp(name, "range") == 0 || strcmp(name, "str") == 0 ||
-           strcmp(name, "int") == 0 || strcmp(name, "gc_stats") == 0 ||
-           strcmp(name, "gc_collect") == 0 ||
-           strcmp(name, "read_file") == 0 || strcmp(name, "write_file") == 0 ||
-           strcmp(name, "append_file") == 0 || strcmp(name, "run") == 0 ||
-           strcmp(name, "sqrt") == 0 ||
-           strcmp(name, "tan") == 0 || strcmp(name, "rand") == 0 ||
-           strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
-           strcmp(name, "reduce") == 0 ||
-           strcmp(name, "append") == 0 || strcmp(name, "slice") == 0 ||
-           strcmp(name, "ord") == 0 || strcmp(name, "chr") == 0 ||
-           strcmp(name, "float") == 0 || strcmp(name, "eprint") == 0 ||
-           strcmp(name, "argv") == 0 || strcmp(name, "exit") == 0 ||
-           strcmp(name, "read_file_opt") == 0 ||
-           strcmp(name, "file_exists") == 0 ||
-           /* --- tensor primitives (see tensors.md) --- */
-           strcmp(name, "zeros") == 0 || strcmp(name, "ones") == 0 ||
-           strcmp(name, "full") == 0 || strcmp(name, "arange") == 0 ||
-           strcmp(name, "tensor") == 0 || strcmp(name, "randn") == 0 ||
-           strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 ||
-           strcmp(name, "tanh") == 0 || strcmp(name, "relu") == 0 ||
-           strcmp(name, "matmul") == 0 || strcmp(name, "reshape") == 0 ||
-           strcmp(name, "transpose") == 0 || strcmp(name, "permute") == 0 ||
-           strcmp(name, "expand") == 0 || strcmp(name, "sum") == 0 ||
-           strcmp(name, "mean") == 0 || strcmp(name, "max") == 0 ||
-           strcmp(name, "argmax") == 0 || strcmp(name, "tslice") == 0 ||
-           strcmp(name, "item") == 0 || strcmp(name, "shape") == 0 ||
-           strcmp(name, "ndim") == 0 || strcmp(name, "dtype") == 0 ||
-           strcmp(name, "astype") == 0;
+/* the shared builtin table (include/builtins.def): `pure` marks the builtins
+ * a `pure` Emerald function is allowed to call. The per-builtin typing rules
+ * live in infer_call(). */
+static const struct { const char *name; bool pure; } builtins[] = {
+#define EM_BUILTIN(n, c, a, p) { n, p },
+#include "builtins.def"
+#undef EM_BUILTIN
+#undef EM_BUILTIN_VOID
+};
+
+static const char *builtin_find(const char *name, bool *pure) {
+    for (size_t i = 0; i < sizeof builtins / sizeof *builtins; i++)
+        if (strcmp(builtins[i].name, name) == 0) {
+            if (pure) *pure = builtins[i].pure;
+            return builtins[i].name;
+        }
+    return NULL;
 }
 
-/* which builtins are pure (no IO, no randomness, no ambient state)? A pure
- * function may call exactly these. `print`, the file/process builtins, and
- * `rand` are the impure ones. */
-static bool builtin_pure(const char *name) {
-    return strcmp(name, "len") == 0 || strcmp(name, "range") == 0 ||
-           strcmp(name, "str") == 0 || strcmp(name, "int") == 0 ||
-           strcmp(name, "gc_stats") == 0 ||
-           strcmp(name, "sqrt") == 0 || strcmp(name, "tan") == 0 ||
-           strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
-           strcmp(name, "reduce") == 0 ||
-           /* slice/ord/chr/float are functions of their arguments; `append`
-            * mutates and `exit`/`argv`/`eprint` touch the process, so those
-            * stay impure. See stdlib/SPEC.md §1.2. */
-           strcmp(name, "slice") == 0 || strcmp(name, "ord") == 0 ||
-           strcmp(name, "chr") == 0 || strcmp(name, "float") == 0 ||
-           /* tensor ops are pure functions of their inputs; `randn` is the
-            * one exception (randomness is an effect, even when seeded) */
-           strcmp(name, "zeros") == 0 || strcmp(name, "ones") == 0 ||
-           strcmp(name, "full") == 0 || strcmp(name, "arange") == 0 ||
-           strcmp(name, "tensor") == 0 ||
-           strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 ||
-           strcmp(name, "tanh") == 0 || strcmp(name, "relu") == 0 ||
-           strcmp(name, "matmul") == 0 || strcmp(name, "reshape") == 0 ||
-           strcmp(name, "transpose") == 0 || strcmp(name, "permute") == 0 ||
-           strcmp(name, "expand") == 0 || strcmp(name, "sum") == 0 ||
-           strcmp(name, "mean") == 0 || strcmp(name, "max") == 0 ||
-           strcmp(name, "argmax") == 0 || strcmp(name, "tslice") == 0 ||
-           strcmp(name, "item") == 0 || strcmp(name, "shape") == 0 ||
-           strcmp(name, "ndim") == 0 || strcmp(name, "dtype") == 0 ||
-           strcmp(name, "astype") == 0;
+static bool is_builtin(const char *name) {
+    return builtin_find(name, NULL) != NULL;
 }
 
 static FuncSig *find_func(Ck *ck, const char *name) {
@@ -966,10 +919,10 @@ static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
         size_t ntypes = al->param_count - ndims;
         TyEnv sub;
         sub.count = ntypes;
-        sub.names = xmalloc(sizeof(char *) * (ntypes ? ntypes : 1));
-        sub.types = xmalloc(sizeof(Type *) * (ntypes ? ntypes : 1));
-        char **dn = xmalloc(sizeof(char *) * (ndims ? ndims : 1));
-        DimExpr **dv = xmalloc(sizeof(DimExpr *) * (ndims ? ndims : 1));
+        sub.names = xmalloc(sizeof(char *) * ntypes);
+        sub.types = xmalloc(sizeof(Type *) * ntypes);
+        char **dn = xmalloc(sizeof(char *) * ndims);
+        DimExpr **dv = xmalloc(sizeof(DimExpr *) * ndims);
         size_t ti = 0, di = 0;
         for (size_t j = 0; j < al->param_count; j++) {
             bool isdim = al->param_dims && al->param_dims[j];
@@ -1024,7 +977,7 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
     case TE_REC: {
         Type *t = ty_new(TY_REC);
         t->rec.names = te->fields.names;
-        t->rec.types = xmalloc(sizeof(Type *) * (te->fields.count ? te->fields.count : 1));
+        t->rec.types = xmalloc(sizeof(Type *) * te->fields.count);
         t->rec.count = te->fields.count;
         for (size_t i = 0; i < te->fields.count; i++)
             t->rec.types[i] = resolve_type(ck, te->fields.types[i], env);
@@ -1033,7 +986,7 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
     case TE_UNION:
         return ty_join(resolve_type(ck, te->lhs, env), resolve_type(ck, te->rhs, env));
     case TE_FUNC: {
-        Type **params = xmalloc(sizeof(Type *) * (te->fun.param_count ? te->fun.param_count : 1));
+        Type **params = xmalloc(sizeof(Type *) * te->fun.param_count);
         for (size_t i = 0; i < te->fun.param_count; i++)
             params[i] = resolve_type(ck, te->fun.params[i], env);
         return ty_func(params, te->fun.param_count, resolve_type(ck, te->fun.ret, env));
@@ -1051,7 +1004,7 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
         if (te->tensor.dynamic)
             return ty_tensor(dt, shape_dynamic());
         DimExpr **dims = xmalloc(sizeof(DimExpr *) *
-                                 (te->tensor.shape_count ? te->tensor.shape_count : 1));
+                                 te->tensor.shape_count);
         for (size_t i = 0; i < te->tensor.shape_count; i++)
             dims[i] = resolve_dim(ck, te->tensor.shape[i], te->line, te->col);
         return ty_tensor(dt, shape_of(dims, te->tensor.shape_count));
@@ -1070,8 +1023,8 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
         /* merge; fields from the right side override */
         Type *t = ty_new(TY_REC);
         size_t max = a->rec.count + b->rec.count;
-        t->rec.names = xmalloc(sizeof(char *) * (max ? max : 1));
-        t->rec.types = xmalloc(sizeof(Type *) * (max ? max : 1));
+        t->rec.names = xmalloc(sizeof(char *) * max);
+        t->rec.types = xmalloc(sizeof(Type *) * max);
         for (size_t i = 0; i < a->rec.count; i++) {
             t->rec.names[t->rec.count] = a->rec.names[i];
             t->rec.types[t->rec.count] = a->rec.types[i];
@@ -1124,7 +1077,7 @@ static Type *infer_lambda_with(Ck *ck, const Expr *e, Type **ptypes) {
 static Type *infer_lambda(Ck *ck, const Expr *e, const Type *expected) {
     const Type *ex = expected ? ty_resolve(expected) : NULL;
     Type **ptypes = xmalloc(sizeof(Type *) *
-                            (e->as.lam.param_count ? e->as.lam.param_count : 1));
+                            e->as.lam.param_count);
     for (size_t i = 0; i < e->as.lam.param_count; i++) {
         if (e->as.lam.param_types[i] == NULL && ex && ex->k == TY_FUNC &&
             i < ex->fun.count)
@@ -1184,7 +1137,7 @@ static Type *ty_subst(Type *t, Subst *sub) {
         Type *r = ty_new(TY_REC);
         r->rec.names = t->rec.names;
         r->rec.count = t->rec.count;
-        r->rec.types = xmalloc(sizeof(Type *) * (t->rec.count ? t->rec.count : 1));
+        r->rec.types = xmalloc(sizeof(Type *) * t->rec.count);
         for (size_t i = 0; i < t->rec.count; i++)
             r->rec.types[i] = ty_subst(t->rec.types[i], sub);
         return r;
@@ -1200,7 +1153,7 @@ static Type *ty_subst(Type *t, Subst *sub) {
         if (!contains_var(t)) return t;
         Type *r = ty_new(TY_FUNC);
         r->fun.count = t->fun.count;
-        r->fun.params = xmalloc(sizeof(Type *) * (t->fun.count ? t->fun.count : 1));
+        r->fun.params = xmalloc(sizeof(Type *) * t->fun.count);
         for (size_t i = 0; i < t->fun.count; i++)
             r->fun.params[i] = ty_subst(t->fun.params[i], sub);
         r->fun.ret = ty_subst(t->fun.ret, sub);
@@ -1300,13 +1253,6 @@ static Type *expect_tensor(Ck *ck, const Expr *e, Type *t, const char *fn) {
         ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                  "%s() expects a tensor, got %s", fn, type_str(t));
     return &t_any;
-}
-
-/* elementwise unary (exp/log/tanh/relu): preserves dtype and shape */
-static Type *infer_tensor_unary(Ck *ck, const Expr *e, Type *t,
-                                const char *fn) {
-    Type *tt = expect_tensor(ck, e, t, fn);
-    return tt == &t_any ? &t_any : tt;
 }
 
 /* elementwise binary via `+ - * /` (dispatched from the operator functions) */
@@ -1418,7 +1364,7 @@ static Type *infer_tensor_permute(Ck *ck, const Expr *e, Type **argt) {
                  "distinct ints)", n, n);
         return ty_tensor(tt->tensor.dt, shape_dynamic());
     }
-    int64_t *perm = xmalloc(sizeof(int64_t) * (n ? n : 1));
+    int64_t *perm = xmalloc(sizeof(int64_t) * n);
     for (size_t i = 0; i < n; i++) {
         const Expr *it = pe->as.list.items[i];
         if (it->kind != E_INT) {
@@ -1445,7 +1391,7 @@ static Type *infer_tensor_permute(Ck *ck, const Expr *e, Type **argt) {
                          "permute() repeats axis %lld", (long long)perm[i]);
                 return ty_tensor(tt->tensor.dt, shape_dynamic());
             }
-    DimExpr **dims = xmalloc(sizeof(DimExpr *) * (n ? n : 1));
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * n);
     for (size_t i = 0; i < n; i++) dims[i] = s->dims[perm[i]];
     free(perm);
     return ty_tensor(tt->tensor.dt, shape_of(dims, n));
@@ -1468,7 +1414,7 @@ static Type *infer_tensor_reduce(Ck *ck, const Expr *e, Type **argt,
         return ty_tensor(tt->tensor.dt, shape_dynamic());
     }
     size_t out_n = s->count - 1;
-    DimExpr **dims = xmalloc(sizeof(DimExpr *) * (out_n ? out_n : 1));
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * out_n);
     size_t k = 0;
     for (size_t i = 0; i < s->count; i++)
         if ((int64_t)i != axis) dims[k++] = s->dims[i];
@@ -1513,7 +1459,7 @@ static Type *infer_tensor_slice(Ck *ck, const Expr *e, Type **argt) {
         return ty_tensor(tt->tensor.dt, shape_dynamic());
     }
     const Expr *lo = e->as.call.args[2], *hi = e->as.call.args[3];
-    DimExpr **dims = xmalloc(sizeof(DimExpr *) * (s->count ? s->count : 1));
+    DimExpr **dims = xmalloc(sizeof(DimExpr *) * s->count);
     for (size_t i = 0; i < s->count; i++) {
         if ((int64_t)i == axis && lo && hi && lo->kind == E_INT &&
             hi->kind == E_INT)
@@ -1646,6 +1592,17 @@ static Type *infer_binop(Ck *ck, const Expr *e) {
     return &t_any;
 }
 
+/* The arity check every fixed-arity builtin repeats. Returns false (having
+ * reported) when the call site does not match. */
+static bool ck_arity(Ck *ck, const Expr *e, const char *name, size_t want) {
+    size_t got = e->as.call.count;
+    if (got == want) return true;
+    ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+             "%s() takes %zu argument%s, got %zu", name, want,
+             want == 1 ? "" : "s", got);
+    return false;
+}
+
 /* the generic signatures of the higher-order list builtins, instantiated
  * with fresh type variables at each call site:
  *   map(f: (T) -> U, xs: list[T]) -> list[U]
@@ -1680,12 +1637,7 @@ static Type *infer_map_like(Ck *ck, const Expr *e, const char *name,
         ret = u;
         want = 3;
     }
-    if (argc != want) {
-        ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                 "%s() takes %zu argument%s, got %zu", name, want,
-                 want == 1 ? "" : "s", argc);
-        return &t_any;
-    }
+    if (!ck_arity(ck, e, name, want)) return &t_any;
     char *tvnames[] = { "T", "U" };
     Subst sub;
     sub.names = tvnames;
@@ -1723,8 +1675,8 @@ static Type *infer_map_like(Ck *ck, const Expr *e, const char *name,
 static Type *infer_call(Ck *ck, const Expr *e) {
     const Expr *fn = e->as.call.fn;
     size_t argc = e->as.call.count;
-    Type **argt = xmalloc(sizeof(Type *) * (argc ? argc : 1));
-    bool *islam = xmalloc(sizeof(bool) * (argc ? argc : 1));
+    Type **argt = xmalloc(sizeof(Type *) * argc);
+    bool *islam = xmalloc(sizeof(bool) * argc);
     for (size_t i = 0; i < argc; i++) {
         /* lambdas are inferred lazily so unannotated parameters can take the
          * expected type from the callee's signature (contextual typing) */
@@ -1736,7 +1688,8 @@ static Type *infer_call(Ck *ck, const Expr *e) {
         const char *name = fn->as.sval;
         const char *dname = fn->disp ? fn->disp : name;
         /* purity: a pure function may only call pure builtins */
-        if (ck->cur_pure && is_builtin(name) && !builtin_pure(name))
+        bool bpure = false;
+        if (ck->cur_pure && builtin_find(name, &bpure) && !bpure)
             ck_error(ck, "E_TYPE_PURE_CALL", e->line, e->col,
                      "pure function calls impure builtin '%s'", dname);
         if (strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
@@ -1747,12 +1700,11 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             for (size_t i = 0; i < argc; i++)
                 if (islam[i])
                     argt[i] = infer_lambda(ck, e->as.call.args[i], NULL);
-        if (strcmp(name, "print") == 0) return &t_none;
+        /* the variadic builtins accept any number of arguments */
+        if (strcmp(name, "print") == 0 ||
+            strcmp(name, "eprint") == 0) return &t_none;
         if (strcmp(name, "len") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "len() takes 1 argument, got %zu", argc);
-            else {
+            if (ck_arity(ck, e, dname, 1)) {
                 Type *a = ty_base(argt[0]);
                 if (a->k != TY_ANY && a->k != TY_STR && a->k != TY_LIST &&
                     a->k != TY_REC && a->k != TY_UNION && a->k != TY_NEVER)
@@ -1773,76 +1725,51 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             return ty_list(&t_int);
         }
         if (strcmp(name, "str") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "str() takes 1 argument, got %zu", argc);
+            ck_arity(ck, e, dname, 1);
             return &t_str;
         }
         if (strcmp(name, "int") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "int() takes 1 argument, got %zu", argc);
+            ck_arity(ck, e, dname, 1);
             return &t_int;
         }
         if (strcmp(name, "gc_stats") == 0) {
-            if (argc != 0)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "gc_stats() takes 0 arguments, got %zu", argc);
+            ck_arity(ck, e, dname, 0);
             return gc_stats_type();
         }
         if (strcmp(name, "gc_collect") == 0) {
-            if (argc != 0)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "gc_collect() takes 0 arguments, got %zu", argc);
+            ck_arity(ck, e, dname, 0);
             return &t_none;
         }
         if (strcmp(name, "read_file") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "read_file() takes 1 argument, got %zu", argc);
-            else if (!assignable(&t_str, argt[0]))
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
                 ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                          "read_file() path must be str, got %s", type_str(argt[0]));
             return &t_str;
         }
         if (strcmp(name, "write_file") == 0 || strcmp(name, "append_file") == 0) {
-            if (argc != 2)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "%s() takes 2 arguments, got %zu", name, argc);
+            ck_arity(ck, e, dname, 2);
             return &t_none;
         }
         if (strcmp(name, "run") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "run() takes 1 argument, got %zu", argc);
-            else if (!assignable(&t_str, argt[0]))
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
                 ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                          "run() command must be str, got %s", type_str(argt[0]));
             return &t_int;
         }
         if (strcmp(name, "sqrt") == 0 || strcmp(name, "tan") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "%s() takes 1 argument, got %zu", name, argc);
-            else if (!assignable(&t_float, argt[0]))
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_float, argt[0]))
                 ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                          "%s() argument must be a number, got %s",
                          name, type_str(argt[0]));
             return &t_float;
         }
         if (strcmp(name, "rand") == 0) {
-            if (argc != 0)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "rand() takes 0 arguments, got %zu", argc);
+            ck_arity(ck, e, dname, 0);
             return &t_float;
         }
         /* --- the stdlib foundation (see stdlib/SPEC.md §1.1) ------------- */
         if (strcmp(name, "append") == 0) {
-            if (argc != 2) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "append() takes 2 arguments, got %zu", argc);
-                return &t_none;
-            }
+            if (!ck_arity(ck, e, dname, 2)) return &t_none;
             Type *l = ty_base(ty_resolve(argt[0]));
             if (l->k == TY_LIST) {
                 if (!assignable(l->elem, argt[1]))
@@ -1858,11 +1785,7 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             return &t_none;
         }
         if (strcmp(name, "slice") == 0) {
-            if (argc != 3) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "slice() takes 3 arguments, got %zu", argc);
-                return &t_any;
-            }
+            if (!ck_arity(ck, e, dname, 3)) return &t_any;
             for (size_t i = 1; i < 3; i++)
                 if (!assignable(&t_int, argt[i]))
                     ck_error(ck, "E_TYPE_ARG", e->line, e->col,
@@ -1879,41 +1802,27 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             return &t_any;
         }
         if (strcmp(name, "ord") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "ord() takes 1 argument, got %zu", argc);
-            else if (!assignable(&t_str, argt[0]))
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
                 ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                          "ord() argument must be str, got %s", type_str(argt[0]));
             return &t_int;
         }
         if (strcmp(name, "chr") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "chr() takes 1 argument, got %zu", argc);
-            else if (!assignable(&t_int, argt[0]))
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_int, argt[0]))
                 ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                          "chr() argument must be int, got %s", type_str(argt[0]));
             return &t_str;
         }
         if (strcmp(name, "float") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "float() takes 1 argument, got %zu", argc);
+            ck_arity(ck, e, dname, 1);
             return &t_float;
         }
-        if (strcmp(name, "eprint") == 0) return &t_none;
         if (strcmp(name, "argv") == 0) {
-            if (argc != 0)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "argv() takes 0 arguments, got %zu", argc);
+            ck_arity(ck, e, dname, 0);
             return ty_list(&t_str);
         }
         if (strcmp(name, "exit") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "exit() takes 1 argument, got %zu", argc);
-            else if (!assignable(&t_int, argt[0]))
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_int, argt[0]))
                 ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                          "exit() status must be int, got %s", type_str(argt[0]));
             /* `never`: exit() does not return, so `return exit(1)` satisfies
@@ -1922,20 +1831,14 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             return &t_never;
         }
         if (strcmp(name, "read_file_opt") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "read_file_opt() takes 1 argument, got %zu", argc);
-            else if (!assignable(&t_str, argt[0]))
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
                 ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                          "read_file_opt() path must be str, got %s",
                          type_str(argt[0]));
             return ty_join(&t_str, &t_none);
         }
         if (strcmp(name, "file_exists") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "file_exists() takes 1 argument, got %zu", argc);
-            else if (!assignable(&t_str, argt[0]))
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
                 ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                          "file_exists() path must be str, got %s",
                          type_str(argt[0]));
@@ -1949,119 +1852,70 @@ static Type *infer_call(Ck *ck, const Expr *e) {
          * obligations statically and emit E_SHAPE_* diagnostics. */
         if (strcmp(name, "zeros") == 0 || strcmp(name, "ones") == 0 ||
             strcmp(name, "arange") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "%s() takes 1 argument, got %zu", dname, argc);
+            ck_arity(ck, e, dname, 1);
             return ty_tensor(CDT_F32, shape_dynamic());
         }
         if (strcmp(name, "full") == 0 || strcmp(name, "randn") == 0) {
-            if (argc != 2)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "%s() takes 2 arguments, got %zu", dname, argc);
+            ck_arity(ck, e, dname, 2);
             return ty_tensor(CDT_F32, shape_dynamic());
         }
         if (strcmp(name, "tensor") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "tensor() takes 1 argument, got %zu", argc);
+            ck_arity(ck, e, dname, 1);
             return ty_tensor(CDT_F32, shape_dynamic());
         }
         if (strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 ||
             strcmp(name, "tanh") == 0 || strcmp(name, "relu") == 0) {
-            if (argc != 1) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "%s() takes 1 argument, got %zu", dname, argc);
-                return &t_any;
-            }
-            return infer_tensor_unary(ck, e, argt[0], name);
+            if (!ck_arity(ck, e, dname, 1)) return &t_any;
+            /* elementwise unary: preserves dtype and shape */
+            return expect_tensor(ck, e, argt[0], name);
         }
         if (strcmp(name, "transpose") == 0) {
-            if (argc != 1) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "transpose() takes 1 argument, got %zu", argc);
-                return &t_any;
-            }
+            if (!ck_arity(ck, e, dname, 1)) return &t_any;
             return infer_tensor_transpose(ck, e, argt[0]);
         }
         if (strcmp(name, "item") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "item() takes 1 argument, got %zu", argc);
+            ck_arity(ck, e, dname, 1);
             return &t_float;
         }
         if (strcmp(name, "shape") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "shape() takes 1 argument, got %zu", argc);
+            ck_arity(ck, e, dname, 1);
             return ty_list(&t_int);
         }
         if (strcmp(name, "ndim") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "ndim() takes 1 argument, got %zu", argc);
+            ck_arity(ck, e, dname, 1);
             return &t_int;
         }
         if (strcmp(name, "dtype") == 0) {
-            if (argc != 1)
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "dtype() takes 1 argument, got %zu", argc);
+            ck_arity(ck, e, dname, 1);
             return &t_str;
         }
         if (strcmp(name, "astype") == 0) {
-            if (argc != 2) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "astype() takes 2 arguments, got %zu", argc);
-                return &t_any;
-            }
+            if (!ck_arity(ck, e, dname, 2)) return &t_any;
             return infer_tensor_astype(ck, e, argt);
         }
         if (strcmp(name, "matmul") == 0) {
-            if (argc != 2) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "matmul() takes 2 arguments, got %zu", argc);
-                return &t_any;
-            }
+            if (!ck_arity(ck, e, dname, 2)) return &t_any;
             return infer_tensor_matmul(ck, e, argt);
         }
         if (strcmp(name, "reshape") == 0) {
-            if (argc != 2) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "reshape() takes 2 arguments, got %zu", argc);
-                return &t_any;
-            }
+            if (!ck_arity(ck, e, dname, 2)) return &t_any;
             return infer_tensor_reshape(ck, e, argt);
         }
         if (strcmp(name, "permute") == 0) {
-            if (argc != 2) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "permute() takes 2 arguments, got %zu", argc);
-                return &t_any;
-            }
+            if (!ck_arity(ck, e, dname, 2)) return &t_any;
             return infer_tensor_permute(ck, e, argt);
         }
         if (strcmp(name, "expand") == 0) {
-            if (argc != 2) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "expand() takes 2 arguments, got %zu", argc);
-                return &t_any;
-            }
+            if (!ck_arity(ck, e, dname, 2)) return &t_any;
             return infer_tensor_expand(ck, e, argt);
         }
         if (strcmp(name, "sum") == 0 || strcmp(name, "mean") == 0 ||
             strcmp(name, "max") == 0 || strcmp(name, "argmax") == 0) {
-            if (argc != 2) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "%s() takes 2 arguments, got %zu", dname, argc);
-                return &t_any;
-            }
+            if (!ck_arity(ck, e, dname, 2)) return &t_any;
             return infer_tensor_reduce(ck, e, argt, name);
         }
         if (strcmp(name, "tslice") == 0) {
-            if (argc != 4) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "tslice() takes 4 arguments, got %zu", argc);
-                return &t_any;
-            }
+            if (!ck_arity(ck, e, dname, 4)) return &t_any;
             return infer_tensor_slice(ck, e, argt);
         }
 
@@ -2070,12 +1924,8 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             if (ck->cur_pure && !f->pure)
                 ck_error(ck, "E_TYPE_PURE_CALL", e->line, e->col,
                          "pure function calls impure function '%s'", dname);
-            if (argc != f->param_count) {
-                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                         "%s() takes %zu argument%s, got %zu", dname,
-                         f->param_count, f->param_count == 1 ? "" : "s", argc);
+            if (!ck_arity(ck, e, dname, f->param_count))
                 return f->tparam_count ? &t_any : f->ret;
-            }
             if (f->tparam_count == 0) {
                 /* infer deferred lambdas against the declared parameter types */
                 for (size_t i = 0; i < argc; i++)
@@ -2194,7 +2044,7 @@ static Type *infer(Ck *ck, const Expr *e) {
         FuncSig *f = find_func(ck, e->as.sval);
         if (f) {
             if (f->tparam_count) return &t_any; /* generics aren't first-class */
-            Type **params = xmalloc(sizeof(Type *) * (f->param_count ? f->param_count : 1));
+            Type **params = xmalloc(sizeof(Type *) * f->param_count);
             for (size_t i = 0; i < f->param_count; i++) params[i] = f->params[i];
             return ty_func(params, f->param_count, f->ret);
         }
@@ -2217,7 +2067,7 @@ static Type *infer(Ck *ck, const Expr *e) {
     case E_REC: {
         Type *t = ty_new(TY_REC);
         t->rec.names = e->as.rec.names;
-        t->rec.types = xmalloc(sizeof(Type *) * (e->as.rec.count ? e->as.rec.count : 1));
+        t->rec.types = xmalloc(sizeof(Type *) * e->as.rec.count);
         t->rec.count = e->as.rec.count;
         for (size_t i = 0; i < e->as.rec.count; i++)
             t->rec.types[i] = infer(ck, e->as.rec.values[i]);
@@ -2240,7 +2090,7 @@ static Type *infer(Ck *ck, const Expr *e) {
         return infer_call(ck, e);
     case E_LAMBDA: {
         Type **ptypes = xmalloc(sizeof(Type *) *
-                                (e->as.lam.param_count ? e->as.lam.param_count : 1));
+                                e->as.lam.param_count);
         for (size_t i = 0; i < e->as.lam.param_count; i++)
             ptypes[i] = e->as.lam.param_types[i]
                             ? resolve_type(ck, e->as.lam.param_types[i], ck->tyenv)
@@ -2395,7 +2245,7 @@ static Type *narrow_ne(Type *t, Type *lit) {
     t = ty_resolve(t);
     Type **alts = t->k == TY_UNION ? t->uni.alts : &t;
     size_t n = t->k == TY_UNION ? t->uni.count : 1;
-    Type **keep = xmalloc(sizeof(Type *) * (n ? n : 1));
+    Type **keep = xmalloc(sizeof(Type *) * n);
     size_t kn = 0;
     for (size_t i = 0; i < n; i++) {
         Type *alt = alts[i];
@@ -2417,7 +2267,7 @@ static Type *narrow_field(Type *t, const char *fname, Type *lit, bool eq) {
     t = ty_resolve(t);
     Type **alts = t->k == TY_UNION ? t->uni.alts : &t;
     size_t n = t->k == TY_UNION ? t->uni.count : 1;
-    Type **keep = xmalloc(sizeof(Type *) * (n ? n : 1));
+    Type **keep = xmalloc(sizeof(Type *) * n);
     size_t kn = 0;
     for (size_t i = 0; i < n; i++) {
         Type *alt = alts[i];
@@ -2447,7 +2297,7 @@ static Type *narrow_truthy(Type *t, bool sense) {
     t = ty_resolve(t);
     Type **alts = t->k == TY_UNION ? t->uni.alts : &t;
     size_t n = t->k == TY_UNION ? t->uni.count : 1;
-    Type **keep = xmalloc(sizeof(Type *) * (n ? n : 1));
+    Type **keep = xmalloc(sizeof(Type *) * n);
     size_t kn = 0;
     for (size_t i = 0; i < n; i++) {
         Type *alt = alts[i];
@@ -2797,8 +2647,7 @@ static void collect_calls_expr(const Expr *e, const char *fname,
             strcmp(e->as.call.fn->as.sval, fname) == 0) {
             if (*count == *cap) {
                 *cap = *cap ? *cap * 2 : 8;
-                *out = realloc(*out, sizeof(Expr *) * *cap);
-                if (!*out) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+                *out = xrealloc(*out, sizeof(Expr *) * *cap);
             }
             (*out)[(*count)++] = e;
         }
@@ -2897,9 +2746,9 @@ static Type *check_pattern(Ck *ck, const Pat *p, const Type *st, VarEnv *env) {
     case P_REC: {
         Type *t = ty_new(TY_REC);
         t->rec.names = xmalloc(sizeof(char *) *
-                               (p->rec.count ? p->rec.count : 1));
+                               p->rec.count);
         t->rec.types = xmalloc(sizeof(Type *) *
-                               (p->rec.count ? p->rec.count : 1));
+                               p->rec.count);
         t->rec.count = p->rec.count;
         for (size_t i = 0; i < p->rec.count; i++) {
             const Pat *it = p->rec.items[i];
@@ -3376,8 +3225,7 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
             }
         if (scope->func_count == scope->func_cap) {
             scope->func_cap = scope->func_cap ? scope->func_cap * 2 : 4;
-            scope->funcs = realloc(scope->funcs, sizeof(FuncSig) * scope->func_cap);
-            if (!scope->funcs) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+            scope->funcs = xrealloc(scope->funcs, sizeof(FuncSig) * scope->func_cap);
         }
         f = &scope->funcs[scope->func_count++];
     } else {
@@ -3399,7 +3247,7 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
     f->param_count = s->as.func.param_count;
     f->pure = s->as.func.pure;
     f->partial = s->as.func.partial;
-    f->params = xmalloc(sizeof(Type *) * (f->param_count ? f->param_count : 1));
+    f->params = xmalloc(sizeof(Type *) * f->param_count);
     bool saved_in_sig = ck->in_sig;
     ck->in_sig = true;
     /* the `: dim` type parameters are in scope for the signature's shapes */
@@ -3481,7 +3329,7 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     sc.parent = parent;
     sc.pure = s->as.func.pure;
     Type **ptypes = xmalloc(sizeof(Type *) *
-                            (s->as.func.param_count ? s->as.func.param_count : 1));
+                            s->as.func.param_count);
     for (size_t i = 0; i < s->as.func.param_count; i++) {
         ptypes[i] = resolve_type(ck, s->as.func.param_types[i], te);
         Var *v = env_add(&sc.locals, s->as.func.params[i], ptypes[i],
@@ -3556,9 +3404,8 @@ int check_program(const Program *prog, const char *filename, DiagList *diags,
             }
             if (ck.dim_count == ck.dim_cap) {
                 ck.dim_cap = ck.dim_cap ? ck.dim_cap * 2 : 8;
-                ck.dim_names = realloc(ck.dim_names,
+                ck.dim_names = xrealloc(ck.dim_names,
                                        sizeof(char *) * ck.dim_cap);
-                if (!ck.dim_names) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
             }
             ck.dim_names[ck.dim_count++] = s->as.dim.names[j];
         }
@@ -3572,8 +3419,7 @@ int check_program(const Program *prog, const char *filename, DiagList *diags,
         if (s->file) ck.filename = s->file;
         if (ck.alias_count == ck.alias_cap) {
             ck.alias_cap = ck.alias_cap ? ck.alias_cap * 2 : 8;
-            ck.aliases = realloc(ck.aliases, sizeof(*ck.aliases) * ck.alias_cap);
-            if (!ck.aliases) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+            ck.aliases = xrealloc(ck.aliases, sizeof(*ck.aliases) * ck.alias_cap);
         }
         Alias *al = &ck.aliases[ck.alias_count++];
         al->name = s->as.tdef.name;
@@ -3590,7 +3436,7 @@ int check_program(const Program *prog, const char *filename, DiagList *diags,
     ck.filename = filename;
 
     /* pass 1b: top-level function signatures */
-    ck.funcs = xmalloc(sizeof(FuncSig) * (prog->body.count ? prog->body.count : 1));
+    ck.funcs = xmalloc(sizeof(FuncSig) * prog->body.count);
     for (size_t i = 0; i < prog->body.count; i++) {
         const Stmt *s = prog->body.items[i];
         if (s->kind != S_FUNC) continue;

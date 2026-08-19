@@ -25,6 +25,7 @@
 #include "module.h"
 #include "dim.h"
 #include "parser.h"
+#include "xalloc.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -32,12 +33,6 @@
 #include <limits.h>
 #include <string.h>
 #include <sys/stat.h>
-
-static void *xmalloc(size_t n) {
-    void *p = malloc(n ? n : 1);
-    if (!p) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
-    return p;
-}
 
 static char *xstrdup(const char *s) {
     size_t n = strlen(s) + 1;
@@ -73,8 +68,7 @@ static void names_add(Names *ns, const char *name) {
     if (names_has(ns, name)) return;
     if (ns->count == ns->cap) {
         ns->cap = ns->cap ? ns->cap * 2 : 8;
-        ns->items = realloc(ns->items, sizeof(char *) * ns->cap);
-        if (!ns->items) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        ns->items = xrealloc(ns->items, sizeof(char *) * ns->cap);
     }
     ns->items[ns->count++] = name;
 }
@@ -84,8 +78,7 @@ typedef struct { void **items; size_t count, cap; } PtrVec;
 static void vec_push(PtrVec *v, void *item) {
     if (v->count == v->cap) {
         v->cap = v->cap ? v->cap * 2 : 8;
-        v->items = realloc(v->items, sizeof(void *) * v->cap);
-        if (!v->items) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        v->items = xrealloc(v->items, sizeof(void *) * v->cap);
     }
     v->items[v->count++] = item;
 }
@@ -787,7 +780,7 @@ static Bind *bind_imports(Loader *ld, Mod *m, size_t *out_count) {
     }
 
     /* flatten into a contiguous array */
-    Bind *out = xmalloc(sizeof(Bind) * (binds.count ? binds.count : 1));
+    Bind *out = xmalloc(sizeof(Bind) * binds.count);
     for (size_t i = 0; i < binds.count; i++) out[i] = *(Bind *)binds.items[i];
     *out_count = binds.count;
     free(binds.items);
@@ -840,15 +833,13 @@ static Mod *load_module(Loader *ld, const char *dotted, const char *file,
 
     if (ld->count == ld->cap) {
         ld->cap = ld->cap ? ld->cap * 2 : 8;
-        ld->mods = realloc(ld->mods, sizeof(Mod *) * ld->cap);
-        if (!ld->mods) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        ld->mods = xrealloc(ld->mods, sizeof(Mod *) * ld->cap);
     }
     ld->mods[ld->count++] = m;
 
     if (ld->depth == ld->stack_cap) {
         ld->stack_cap = ld->stack_cap ? ld->stack_cap * 2 : 8;
-        ld->stack = realloc(ld->stack, sizeof(Mod *) * ld->stack_cap);
-        if (!ld->stack) { fputs("emeraldc: out of memory\n", stderr); exit(1); }
+        ld->stack = xrealloc(ld->stack, sizeof(Mod *) * ld->stack_cap);
     }
     ld->stack[ld->depth++] = m;
 

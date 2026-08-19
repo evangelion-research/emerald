@@ -323,8 +323,11 @@ int main(int argc, char **argv) {
     }
 
     errors = check_program(prog, file, &diags, proof);
-    if (shape_report)
+    if (shape_report) {
         fprintf(stderr, "shape-crossings: %zu\n", check_shape_crossings());
+        fprintf(stderr, "dim-unresolved: %zu\n", dim_unresolved_count());
+        dim_log_dump(stderr);
+    }
     if (mode == MODE_CHECK) {
         if (diags.json) diag_render(&diags, stdout);
         else if (errors == 0) printf("ok\n");

@@ -1,0 +1,12 @@
+# map()/filter() over a list long enough that the mapping function drives
+# several collections while the result list is live. Guards two things: every
+# result slot holds a real Value from the moment the list becomes reachable,
+# and each store into the (by then tenured) result runs the write barrier so
+# the nursery objects it points at survive the next minor collection.
+xs = range(0, 20000)
+ys = map((x) => [x, x * 2], xs)
+zs = map((p) => p[1], ys)
+ws = filter((p) => p[0] % 2 == 0, ys)
+print(len(ys), ys[0], ys[19999])
+print(len(zs), zs[12345])
+print(len(ws), ws[9999])
