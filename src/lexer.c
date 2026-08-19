@@ -118,12 +118,21 @@ Token lexer_next(Lexer *lx) {
         if (*lx->cur == '>') { lx->col++; lx->cur++; return make(lx, TK_PIPE_GT, start, start_col); }
         return make(lx, TK_PIPE, start, start_col);
     case '&': return make(lx, TK_AMP, start, start_col);
-    case '+': return make(lx, TK_PLUS, start, start_col);
-    case '*': return make(lx, TK_STAR, start, start_col);
-    case '/': return make(lx, TK_SLASH, start, start_col);
+    case '+':
+        if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_PLUS_EQ, start, start_col); }
+        return make(lx, TK_PLUS, start, start_col);
+    case '*':
+        if (*lx->cur == '*') { lx->col++; lx->cur++; return make(lx, TK_POW, start, start_col); }
+        if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_STAR_EQ, start, start_col); }
+        return make(lx, TK_STAR, start, start_col);
+    case '/':
+        if (*lx->cur == '/') { lx->col++; lx->cur++; return make(lx, TK_FLOORDIV, start, start_col); }
+        if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_SLASH_EQ, start, start_col); }
+        return make(lx, TK_SLASH, start, start_col);
     case '%': return make(lx, TK_PERCENT, start, start_col);
     case '-':
         if (*lx->cur == '>') { lx->col++; lx->cur++; return make(lx, TK_ARROW, start, start_col); }
+        if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_MINUS_EQ, start, start_col); }
         return make(lx, TK_MINUS, start, start_col);
     case '=':
         if (*lx->cur == '=') { lx->col++; lx->cur++; return make(lx, TK_EQ, start, start_col); }
@@ -169,6 +178,9 @@ const char *token_kind_name(TokKind k) {
         [TK_PIPE] = "PIPE", [TK_AMP] = "AMP",
         [TK_PLUS] = "PLUS", [TK_MINUS] = "MINUS", [TK_STAR] = "STAR",
         [TK_SLASH] = "SLASH", [TK_PERCENT] = "PERCENT",
+        [TK_FLOORDIV] = "FLOORDIV", [TK_POW] = "POW",
+        [TK_PLUS_EQ] = "PLUS_EQ", [TK_MINUS_EQ] = "MINUS_EQ",
+        [TK_STAR_EQ] = "STAR_EQ", [TK_SLASH_EQ] = "SLASH_EQ",
         [TK_EQ] = "EQ", [TK_NE] = "NE", [TK_LT] = "LT", [TK_LE] = "LE",
         [TK_GT] = "GT", [TK_GE] = "GE",        [TK_FAT_ARROW] = "FAT_ARROW",
         [TK_PIPE_GT] = "PIPE_GT", [TK_GTGT] = "GTGT",

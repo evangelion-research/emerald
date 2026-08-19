@@ -745,6 +745,39 @@ Value em_mod(Value a, Value b) {
     return em_none();
 }
 
+Value em_floordiv(Value a, Value b) {
+    if (a.tag == V_INT && b.tag == V_INT) {
+        if (b.as.i == 0) rt_fatal("division by zero");
+        /* Python `//`: round toward -inf, consistent with `%` above */
+        int64_t r = a.as.i % b.as.i;
+        if (r != 0 && ((r < 0) != (b.as.i < 0))) r += b.as.i;
+        return em_int((a.as.i - r) / b.as.i);
+    }
+    if (is_num(a) && is_num(b)) {
+        double db = as_double(b);
+        if (db == 0.0) rt_fatal("division by zero");
+        return em_float(floor(as_double(a) / db));
+    }
+    rt_fatal("unsupported operand types for //: %s and %s", type_name(a), type_name(b));
+    return em_none();
+}
+
+Value em_pow(Value a, Value b) {
+    if (a.tag == V_INT && b.tag == V_INT && b.as.i >= 0) {
+        int64_t r = 1, base = a.as.i, e = b.as.i;
+        while (e > 0) { /* exponentiation by squaring */
+            if (e & 1) r *= base;
+            base *= base;
+            e >>= 1;
+        }
+        return em_int(r);
+    }
+    if (is_num(a) && is_num(b))
+        return em_float(pow(as_double(a), as_double(b)));
+    rt_fatal("unsupported operand types for **: %s and %s", type_name(a), type_name(b));
+    return em_none();
+}
+
 Value em_neg(Value a) {
     if (is_tensor(a)) return em_tensor_mul(a, em_float(-1.0));
     if (a.tag == V_INT) return em_int(-a.as.i);

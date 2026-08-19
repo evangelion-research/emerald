@@ -1,8 +1,9 @@
 # Builtins
 
-Emerald has **seventy-four builtins**, compiled directly into calls on the
+Emerald has **seventy-six builtins**, compiled directly into calls on the
 runtime (`src/runtime.c`) rather than resolved through a module. They are
-always in scope in every module: thirty-eight core builtins, the eleven
+always in scope in every module: the forty core builtins (core,
+GC-observability, files-and-process, and the stdlib foundation), the eleven
 [green-thread](#green-threads) builtins, and the twenty-five tensor primitives
 of Phase 2 (see the [Tensors](#tensors) section).
 

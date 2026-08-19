@@ -423,6 +423,8 @@ static TypeExpr *parse_type(Parser *p) {
 /* --- expressions -------------------------------------------------------- */
 
 static Expr *parse_expr(Parser *p);
+static Expr *parse_unary(Parser *p);
+static Expr *bin(Parser *p, BinOp op, int line, int col, Expr *lhs, Expr *rhs);
 
 /* `(a: int, b) => body` or `() => body`: the caller has already consumed
  * `(`. Returns NULL when the tokens are not a lambda, so the caller can
@@ -678,6 +680,18 @@ static Expr *parse_postfix(Parser *p) {
     }
 }
 
+/* `a ** b`: exponentiation. Right-associative and tighter than unary minus,
+ * Python-style: `-2 ** 2` is `-(2 ** 2)`, and `2 ** 3 ** 2` is `2 ** (3 ** 2)`. */
+static Expr *parse_power(Parser *p) {
+    Expr *e = parse_postfix(p);
+    if (check(p, TK_POW)) {
+        int line = p->cur.line, col = p->cur.col;
+        advance(p);
+        e = bin(p, B_POW, line, col, e, parse_unary(p));
+    }
+    return e;
+}
+
 static Expr *parse_unary(Parser *p) {
     if (check(p, TK_TRY)) {
         /* `try e` unwraps a Result, returning its error from the enclosing
@@ -697,7 +711,7 @@ static Expr *parse_unary(Parser *p) {
         e->as.un.operand = parse_unary(p);
         return e;
     }
-    return parse_postfix(p);
+    return parse_power(p);
 }
 
 static Expr *bin(Parser *p, BinOp op, int line, int col, Expr *lhs, Expr *rhs) {
@@ -713,9 +727,10 @@ static Expr *parse_mul(Parser *p) {
     Expr *e = parse_unary(p);
     for (;;) {
         int line = p->cur.line, col = p->cur.col;
-        if (match(p, TK_STAR))         e = bin(p, B_MUL, line, col, e, parse_unary(p));
-        else if (match(p, TK_SLASH))   e = bin(p, B_DIV, line, col, e, parse_unary(p));
-        else if (match(p, TK_PERCENT)) e = bin(p, B_MOD, line, col, e, parse_unary(p));
+        if (match(p, TK_STAR))            e = bin(p, B_MUL, line, col, e, parse_unary(p));
+        else if (match(p, TK_SLASH))      e = bin(p, B_DIV, line, col, e, parse_unary(p));
+        else if (match(p, TK_FLOORDIV))   e = bin(p, B_FLOORDIV, line, col, e, parse_unary(p));
+        else if (match(p, TK_PERCENT))    e = bin(p, B_MOD, line, col, e, parse_unary(p));
         else return e;
     }
 }
@@ -1234,6 +1249,24 @@ static Stmt *parse_stmt(Parser *p) {
             s->as.assign.target = e;
             s->as.assign.ann = ann;
             s->as.assign.value = parse_expr(p);
+            return s;
+        }
+        /* compound assignment: `x op= v` desugars to `x = x op v` (the target
+         * expression is reused for the read side — fine for the name/index/
+         * field targets the checker accepts) */
+        BinOp cop = B_ADD;
+        bool compound = false;
+        if (match(p, TK_PLUS_EQ)) { cop = B_ADD; compound = true; }
+        else if (match(p, TK_MINUS_EQ)) { cop = B_SUB; compound = true; }
+        else if (match(p, TK_STAR_EQ)) { cop = B_MUL; compound = true; }
+        else if (match(p, TK_SLASH_EQ)) { cop = B_DIV; compound = true; }
+        if (compound) {
+            if (!valid_target(e))
+                perror_at(p, line, col, "invalid assignment target "
+                          "(expected a name, index, or field)");
+            Stmt *s = new_stmt(p, S_ASSIGN, line, col);
+            s->as.assign.target = e;
+            s->as.assign.value = bin(p, cop, line, col, e, parse_expr(p));
             return s;
         }
         if (match(p, TK_ASSIGN)) {

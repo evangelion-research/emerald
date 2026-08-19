@@ -1952,10 +1952,11 @@ static Type *infer_binop(Ck *ck, const Expr *e) {
             return ty_list(ty_join(l->elem, r->elem));
         /* fall through to arithmetic */
         /* FALLTHROUGH */
-    case B_SUB: case B_MUL: case B_DIV: case B_MOD: {
+    case B_SUB: case B_MUL: case B_DIV: case B_MOD:
+    case B_FLOORDIV: case B_POW: {
         if (l->k == TY_ANY || r->k == TY_ANY) return &t_any;
-        /* tensors dispatch elementwise (+ - * /; no % on tensors) */
-        if (op != B_MOD) {
+        /* tensors dispatch elementwise (+ - * / only; no % // ** on tensors) */
+        if (op == B_ADD || op == B_SUB || op == B_MUL || op == B_DIV) {
             Type *tl = tensor_of(l), *tr = tensor_of(r);
             if (tl || tr) {
                 if (tl && tr) return infer_tensor_binop(ck, e, tl, tr);
@@ -1978,15 +1979,23 @@ static Type *infer_binop(Ck *ck, const Expr *e) {
         }
         if (!is_numeric(l) || !is_numeric(r) ||
             l->k == TY_UNION || r->k == TY_UNION) {
-            static const char *names[] = {"+", "-", "*", "/", "%"};
+            static const char *names[] = {"+", "-", "*", "/", "%", "//", "**"};
             ck_error(ck, "E_TYPE_OPERAND", e->line, e->col,
                      "unsupported operand types for %s: %s and %s",
                      names[op], type_str(l), type_str(r));
             return &t_any;
         }
         if (op == B_DIV) return &t_float; /* Python 3 semantics */
+        if (op == B_POW) {
+            /* int ** (nonnegative int literal) stays int; a negative or
+             * fractional exponent produces a fraction */
+            if (l->k == TY_INT && r->k == TY_INT &&
+                e->as.bin.rhs->kind == E_INT && e->as.bin.rhs->as.ival >= 0)
+                return &t_int;
+            return &t_float;
+        }
         if (l->k == TY_FLOAT || r->k == TY_FLOAT) return &t_float;
-        return &t_int;
+        return &t_int; /* // stays int on int operands, like + - * % */
     }
     }
     return &t_any;

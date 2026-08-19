@@ -19,6 +19,8 @@ typedef enum {
     TK_COMMA, TK_DOT, TK_COLON, TK_SEMI, TK_ASSIGN, TK_ARROW,
     TK_PIPE, TK_AMP,
     TK_PLUS, TK_MINUS, TK_STAR, TK_SLASH, TK_PERCENT,
+    TK_FLOORDIV, TK_POW,
+    TK_PLUS_EQ, TK_MINUS_EQ, TK_STAR_EQ, TK_SLASH_EQ,
     TK_EQ, TK_NE, TK_LT, TK_LE, TK_GT, TK_GE,
     TK_FAT_ARROW,  /* =>  (lambda) */
     TK_PIPE_GT,    /* |>  (pipe) */

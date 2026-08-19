@@ -298,6 +298,7 @@ static const char *binop_fn(BinOp op) {
     case B_ADD: return "em_add"; case B_SUB: return "em_sub";
     case B_MUL: return "em_mul"; case B_DIV: return "em_div";
     case B_MOD: return "em_mod";
+    case B_FLOORDIV: return "em_floordiv"; case B_POW: return "em_pow";
     case B_EQ: return "em_eq";   case B_NE: return "em_ne";
     case B_LT: return "em_lt";   case B_LE: return "em_le";
     case B_GT: return "em_gt";   case B_GE: return "em_ge";

@@ -4,6 +4,13 @@ Status of the tree at `main` (working tree includes the uncommitted `seq[T]` /
 covariance-soundness work). This is a gap analysis, not a roadmap: everything
 below is something that would be noticed by the first outside user of a v1.
 
+> **Resolved.** The suggested v1 cut below has been implemented: the test suite
+> is green (180 passing), `//`/`**`/compound assignment are in, `--version`,
+> `task install`, `task dist`, a relocatable stdlib, CI, `CHANGELOG.md`, and the
+> README's install instructions / "not in v1" list / overflow rule all landed.
+> Only the `v1.0.0` tag remains a manual step. The body below is kept as the
+> original gap analysis.
+
 **Verdict: not shippable today.** Two blockers (a red test suite, no release
 plumbing) and a handful of language holes that a Python-shaped language is
 expected to have. The core — lexer, parser, checker, codegen, GC, modules,

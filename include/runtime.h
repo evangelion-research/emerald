@@ -150,6 +150,8 @@ Value em_sub(Value a, Value b);
 Value em_mul(Value a, Value b);
 Value em_div(Value a, Value b);
 Value em_mod(Value a, Value b);
+Value em_floordiv(Value a, Value b);
+Value em_pow(Value a, Value b);
 Value em_neg(Value a);
 Value em_eq(Value a, Value b);
 Value em_ne(Value a, Value b);

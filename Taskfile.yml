@@ -10,6 +10,7 @@ version: '3'
 vars:
   CC: '{{default "cc" .CC}}'
   CFLAGS: -std=c11 -Wall -Wextra -O2 -g -Iinclude
+  VERSION: 1.0.0
   SRCDIR:
     sh: echo "$PWD/src"
   STDLIBDIR:
@@ -30,7 +31,8 @@ tasks:
     cmds:
       - mkdir -p bin
       - >-
-        {{.CC}} {{.CFLAGS}} -DEMERALD_SRC_DIR='"{{.SRCDIR}}"'
+        {{.CC}} {{.CFLAGS}} -DEMERALD_VERSION='"{{.VERSION}}"'
+        -DEMERALD_SRC_DIR='"{{.SRCDIR}}"'
         -DEMERALD_STDLIB_DIR='"{{.STDLIBDIR}}"'
         -o bin/emeraldc {{.COMPILER_SRCS}}
 
@@ -159,10 +161,33 @@ tasks:
           rm -f "${f%.rald}.bin"
         done
 
+  install:
+    desc: Install emeraldc and the stdlib under PREFIX (default /usr/local)
+    deps: [build]
+    vars:
+      PREFIX: '{{default "/usr/local" .PREFIX}}'
+    cmds:
+      - mkdir -p "{{.PREFIX}}/bin" "{{.PREFIX}}/lib/emerald/stdlib"
+      - install -m 0755 bin/emeraldc "{{.PREFIX}}/bin/emeraldc"
+      - install -m 0644 stdlib/*.rald "{{.PREFIX}}/lib/emerald/stdlib/"
+
+  dist:
+    desc: Build a relocatable release tarball (emerald-{{.VERSION}}.tar.gz)
+    deps: [build]
+    cmds:
+      - rm -rf dist emerald-{{.VERSION}}.tar.gz
+      - mkdir -p dist/emerald/bin dist/emerald/lib/emerald/stdlib
+      - cp bin/emeraldc dist/emerald/bin/emeraldc
+      - cp stdlib/*.rald dist/emerald/lib/emerald/stdlib/
+      - cp README.md CHANGELOG.md dist/emerald/ 2>/dev/null || cp README.md dist/emerald/
+      - tar -C dist -czf emerald-{{.VERSION}}.tar.gz emerald
+      - rm -rf dist
+
   clean:
     desc: Remove build outputs and generated C
     cmds:
-      - rm -rf bin
+      - rm -rf bin dist
+      - rm -f emerald-*.tar.gz
       - rm -f examples/*.gen.c tests/e2e/*.gen.c tests/imports/*/main.bin*
       - rm -f tests/stdlib/*.bin tests/stdlib/*.gen.c
       - for f in examples/*.rald tests/e2e/*.rald examples/*/main.rald; do rm -f "${f%.rald}"; done

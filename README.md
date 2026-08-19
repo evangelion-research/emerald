@@ -163,27 +163,23 @@ See [`docs/repl.md`](docs/repl.md).
 
 ## Builtins
 
-Sixty builtins compile straight into runtime calls and are in scope in
-every module. Thirty-five are the core set: `print`, `eprint`, `write_out`,
-`write_err`, `flush`, `len`, `range`, `str`, `int`, `float`, `sqrt`, `tan`,
-`rand`, `append`, `slice`, `ord`, `chr`, `argv`, `exit`, `map`, `filter`,
-`reduce`, `input`, `read_line`, `read_all`, `read_file`, `read_file_opt`,
-`file_exists`, `write_file`, `append_file`, `run`, `now`, `seed_rand`,
-`gc_stats`, `gc_collect`.
-The other twenty-five are the Phase 2 tensor primitives: `zeros`, `ones`,
-`full`, `arange`, `tensor`, `randn`, `exp`, `log`, `tanh`, `relu`, `matmul`,
-`reshape`, `transpose`, `permute`, `expand`, `sum`, `mean`, `max`, `argmax`,
-`tslice`, `item`, `shape`, `ndim`, `dtype`, `astype`. They are not values
-(`f = print` is an error — there is no closure to hand out) and cannot be
-redefined.
+Seventy-six builtins compile straight into runtime calls and are in scope in
+every module: the forty core builtins (`print`, `len`, `range`, `str`, `int`,
+`float`, `append`, `slice`, `freeze`, `thaw`, `map`, `filter`, `reduce`,
+`read_file`, `argv`, `run`, `gc_stats`, and friends), the eleven green-thread
+builtins (`spawn`, `join`, `chan`, `send`, `recv`, `sleep`, `task_yield`, …),
+and the twenty-five Phase 2 tensor primitives (`zeros`, `ones`, `matmul`,
+`reshape`, `transpose`, `astype`, …). They are not values (`f = print` is an
+error — there is no closure to hand out) and cannot be redefined.
 
 A builtin exists only when it cannot be written in Emerald: allocation-level
 (`append`, `slice`, `len`, `range`), formatting (`str`, `print`), foreign
 (`read_file`, `argv`, `run`), privileged (`gc_stats`), or a tensor shape
 obligation (`matmul`, `reshape`). `append` is the load-bearing core one —
 without amortized in-place growth, every list built in a loop is quadratic.
-See [`docs/builtins.md`](docs/builtins.md), [`docs/tensors.md`](docs/tensors.md),
-and [`docs/shapes.md`](docs/shapes.md).
+The authoritative list is [`include/builtins.def`](include/builtins.def), the
+one table the checker and codegen share. See [`docs/builtins.md`](docs/builtins.md),
+[`docs/tensors.md`](docs/tensors.md), and [`docs/shapes.md`](docs/shapes.md).
 
 ## Green threads
 
@@ -294,11 +290,24 @@ Requires a C compiler and [go-task](https://taskfile.dev) (`brew install go-task
 
 ```sh
 task                 # build bin/emeraldc
-task test            # 123 tests across 7 stage suites (incl. proof mode)
+task test            # golden suite: lexer/parser/check/json/proof/e2e/imports/...
 task examples        # compile & run every example
 
 bin/emeraldc examples/fib.rald && ./examples/fib
 ```
+
+Install a release build (`PREFIX` defaults to `/usr/local`):
+
+```sh
+task install PREFIX=/usr/local   # emeraldc -> $PREFIX/bin, stdlib -> $PREFIX/lib/emerald/stdlib
+task dist                        # relocatable emerald-1.0.0.tar.gz
+```
+
+The installed binary finds its stdlib with no flags or env vars: `$EMERALD_STDLIB`
+overrides when set, otherwise the compiler looks next to the executable
+(`../stdlib`, `../lib/emerald/stdlib`, …) and finally the compile-time default,
+so a copied binary works from any directory. `emeraldc --version` prints the
+version.
 
 ## Pipeline
 
@@ -315,6 +324,29 @@ emeraldc [--emit-tokens|--emit-ast|--emit-shapes|--check|--emit-c]
 ```
 
 See [`docs/architecture.md`](docs/architecture.md).
+
+## Language status
+
+"Python-flavored" sets expectations, so the gaps are stated explicitly. Not in
+v1 — roadmap, not a design stance:
+
+- **tuples** — no `(a, b)`; a multiple return needs a record;
+- **comprehensions** — use `map` / `filter` / `reduce` and lambdas;
+- **dict/set literals** — `{` always begins a record; `dict` and `set` are
+  stdlib modules, string-keyed only;
+- **slicing** — no `xs[1:3]`; `slice` takes explicit bounds;
+- **default / keyword arguments**;
+- **f-strings**;
+- **bitwise operators** — `|` and `&` are type-level only.
+
+Two semantic choices worth knowing before you rely on them:
+
+- **Integer arithmetic wraps.** `9223372036854775807 + 1` is
+  `-9223372036854775808`, with no diagnostic: `int` is fixed-width
+  two's-complement (64-bit), `float` is IEEE-754 double.
+- **`dict`/`set` are library, not builtin.** They are stdlib modules over
+  records, string-keyed only — there is no general "hashable key" constraint
+  to hang a `dict[K, V]` on.
 
 ---
 
@@ -385,6 +417,6 @@ provably out-of-range index at compile time.
 | `src/` | compiler (`lexer` → `parser` → `module` → `check` → `codegen` → `main`, plus `diag`) and `runtime.c` (Value model + GC, compiled into every program) |
 | `docs/` | **start at [`docs/README.md`](docs/README.md)** — grammar, type system, builtins, modules, diagnostics, architecture, GC, proofs, research directions, plus the Phase 2 [`tensors.md`](docs/tensors.md) and [`shapes.md`](docs/shapes.md) |
 | `stdlib/` | the standard library, in Emerald — **start at [`stdlib/SPEC.md`](stdlib/SPEC.md)** |
-| `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `e2e`, `imports`, `stdlib`, `shape`) + `run_tests.sh` |
+| `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `json`, `proof`, `e2e`, `imports`, `stdlib`, `repl`, `shape`, warnings, proof report) + `run_tests.sh` |
 | `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `functional/` (a seven-part tour of the functional core), `modules/` (a multi-file program), `ray_tracer/` (the experiment), `mlp/` (a hand-written MLP trained on XOR, and its `shape_bug` compile error) |
-| `Taskfile.yml` | build / test / examples / bless / clean |
+| `Taskfile.yml` | build / test / examples / install / dist / bless / clean |

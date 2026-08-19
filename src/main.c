@@ -30,12 +30,19 @@
 #include "parser.h"
 #include "repl.h"
 
+#include <libgen.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #ifndef EMERALD_SRC_DIR
 #define EMERALD_SRC_DIR "src"
+#endif
+
+#ifndef EMERALD_VERSION
+#define EMERALD_VERSION "1.0.0"
 #endif
 
 static char *read_file(const char *path) {
@@ -268,6 +275,34 @@ static char *default_output(const char *path) {
     return out;
 }
 
+/* A stdlib root guessed from the executable's location: <exe_dir>/stdlib, then
+ * <exe_dir>/../stdlib (the `prefix/bin` + `prefix/stdlib` layout). Returns a
+ * malloc'd path or NULL. */
+static char *find_exe_stdlib(const char *argv0) {
+    char real[PATH_MAX];
+    if (!argv0 || !*argv0 || !realpath(argv0, real)) return NULL;
+    char *copy = strdup(real);
+    char *dir = dirname(copy);
+    /* Search order relative to the executable: a sibling `stdlib/` next to the
+     * binary (source-tree layout), then `../stdlib` (prefix/bin + prefix/stdlib),
+     * then the two conventional install layouts. */
+    static const char *suffixes[] = {
+        "/stdlib",
+        "/../stdlib",
+        "/../lib/emerald/stdlib",
+        "/../share/emerald/stdlib",
+    };
+    for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+        char *cand = malloc(strlen(dir) + strlen(suffixes[i]) + 1);
+        if (!cand) break;
+        sprintf(cand, "%s%s", dir, suffixes[i]);
+        if (access(cand, F_OK) == 0) { free(copy); return cand; }
+        free(cand);
+    }
+    free(copy);
+    return NULL;
+}
+
 static void usage(void) {
     fputs("usage: emeraldc [--emit-tokens|--emit-ast|--emit-shapes|--check|--emit-c]\n"
           "                [--json] [--proof] [--shape-report] [--proof-report] [--keep-c]\n"
@@ -329,6 +364,10 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--check") == 0) mode = MODE_CHECK;
         else if (strcmp(argv[i], "--repl") == 0) mode = MODE_REPL;
         else if (strcmp(argv[i], "--emit-c") == 0) mode = MODE_C;
+        else if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+            printf("emeraldc %s\n", EMERALD_VERSION);
+            return 0;
+        }
         else if (strcmp(argv[i], "--json") == 0) json_errors = true;
         else if (strcmp(argv[i], "--proof") == 0) proof = true;
         else if (strcmp(argv[i], "--shape-report") == 0) shape_report = true;
@@ -376,6 +415,8 @@ int main(int argc, char **argv) {
     }
 
     int errors = 0;
+    /* RELEASE_V1 B3: a copied binary still finds the stdlib relative to itself */
+    module_set_exe_stdlib(find_exe_stdlib(argv[0]));
     Program *prog = module_link(file, inc, ninc, &diags, &errors);
     if (!prog) {
         if (diags.count) diag_render(&diags, diags.json ? stdout : stderr);

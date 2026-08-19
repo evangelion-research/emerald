@@ -86,7 +86,7 @@ typedef struct {
 } CatchArm;
 
 typedef enum {
-    B_ADD, B_SUB, B_MUL, B_DIV, B_MOD,
+    B_ADD, B_SUB, B_MUL, B_DIV, B_MOD, B_FLOORDIV, B_POW,
     B_EQ, B_NE, B_LT, B_LE, B_GT, B_GE,
     B_AND, B_OR,
     B_PIPE,     /* x |> f  ==  f(x) */

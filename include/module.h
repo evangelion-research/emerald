@@ -20,4 +20,9 @@
 Program *module_link(const char *entry, const char *const *roots, size_t nroots,
                      DiagList *diags, int *errors);
 
+/* A stdlib search root derived from the executable's location (RELEASE_V1 B3),
+ * tried after $EMERALD_STDLIB and before the compile-time default. NULL clears
+ * it. The pointer must stay valid for the lifetime of the process. */
+void module_set_exe_stdlib(const char *path);
+
 #endif

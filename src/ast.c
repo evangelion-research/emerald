@@ -25,6 +25,7 @@ static const char *binop_name(BinOp op) {
     switch (op) {
     case B_ADD: return "+";  case B_SUB: return "-";  case B_MUL: return "*";
     case B_DIV: return "/";  case B_MOD: return "%";
+    case B_FLOORDIV: return "//"; case B_POW: return "**";
     case B_EQ: return "==";  case B_NE: return "!=";
     case B_LT: return "<";   case B_LE: return "<=";
     case B_GT: return ">";   case B_GE: return ">=";

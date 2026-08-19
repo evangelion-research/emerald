@@ -14,7 +14,7 @@ native binary. Everything here is implemented and covered by `task test`.
 | [`type-system.md`](type-system.md) | Records, structural subtyping, `&`/`\|`, literal types, flow narrowing, `never`, generics, and where the checker is deliberately gradual. |
 | [`errors.md`](errors.md) | Expected errors: `error` declarations, `Result[T, E]`, `try` propagation, exhaustive `catch`, the Effect-style combinators, and what it all compiles to. |
 | [`core-calculus.md`](core-calculus.md) | The formal fragment: syntax, subtyping, narrowing, generics, and the shape/`Fin` rules as judgments — the paper-style spec the research track calls for. |
-| [`builtins.md`](builtins.md) | The seventy-four builtins, exactly — and the rule for what earns a place among them rather than a place in the library. |
+| [`builtins.md`](builtins.md) | The seventy-six builtins, exactly — and the rule for what earns a place among them rather than a place in the library. |
 | [`tensors.md`](tensors.md) | Phase 2 numerics: the tensor runtime model, dtypes, zero-copy views, and byte-aware GC. |
 | [`shapes.md`](shapes.md) | Phase 2 shapes: nominal `dim`s, the canonical-form solver, the per-op typing rules, `Fin[n]`, and the gradual boundary. |
 | [`../stdlib/SPEC.md`](../stdlib/SPEC.md) | The standard library: twelve modules written in Emerald, why it has Python's shape but not Python's signatures, and the compiler bugs writing it exposed. |
