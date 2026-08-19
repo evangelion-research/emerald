@@ -1,0 +1,81 @@
+# Expected errors: `error` declarations, `try` propagation, `catch` handling.
+from result import Result, ok, err, map_error, catch_all, catch_if, either,
+                   option, or_else, retry, all, oks, tag_of, unwrap_or, opt_or
+
+error ParseError { line: int }
+error Overflow { limit: int }
+error Wrapped { cause: str }
+
+def digits(s: str) -> bool pure {
+    if len(s) == 0 { return False }
+    for c in s {
+        if c < "0" or c > "9" { return False }
+    }
+    return True
+}
+
+def parse(s: str) -> Result[int, ParseError | Overflow] {
+    if not digits(s) { return err(ParseError { line: 1 }) }
+    if len(s) > 3 { return err(Overflow { limit: 999 }) }
+    return ok(int(s))
+}
+
+# `try` unwraps, or hands the failure straight back to this function's caller.
+def sum_two(a: str, b: str) -> Result[int, ParseError | Overflow] {
+    const x = try parse(a)
+    const y = try parse(b)
+    return ok(x + y)
+}
+
+# `catch` names every error the expression can produce; the checker rejects it
+# otherwise. Its value is the success value, or the matching arm's.
+def describe(a: str, b: str) -> str {
+    return catch sum_two(a, b) {
+        ParseError e -> "parse error on line " + str(e.line)
+        Overflow o -> "over " + str(o.limit)
+    } |> as_str
+}
+
+def as_str(v: int | str) -> str { return str(v) }
+
+print(describe("2", "3"))
+print(describe("x", "3"))
+print(describe("12345", "3"))
+
+# A catch-all arm covers the rest, and may bind the remaining errors.
+def first_line(a: str) -> int {
+    return catch parse(a) {
+        ParseError e -> e.line
+        _ rest -> 0 - 1
+    }
+}
+print(first_line("7"), first_line("no"), first_line("9999"))
+
+# The combinators mirror Effect's expected-error API.
+print(unwrap_or(map_error(parse("no"), (e) => Wrapped { cause: tag_of(e) }), 0))
+print(catch_all(parse("nope"), (e) => 0 - 1))
+print(unwrap_or(catch_if(parse("nope"), (e) => tag_of(e) == "ParseError",
+                         (e) => 42), 0))
+print(unwrap_or(or_else(parse("bad"), () => parse("8")), 0))
+
+# `either` moves the failure into the value channel, so nothing can fail here.
+def inspect(s: str) -> Result[str, never] {
+    const outcome = try either(parse(s))
+    if outcome.ok == True { return ok("ok " + str(outcome.val)) }
+    return ok("failed with " + tag_of(outcome.err))
+}
+print(unwrap_or(inspect("5"), ""), unwrap_or(inspect("bad"), ""))
+
+print(opt_or(option(parse("4")), 0), opt_or(option(parse("!")), 0))
+print(unwrap_or(all([parse("1"), parse("2")]), []))
+print(unwrap_or(all([parse("1"), parse("!")]), []))
+print(oks([parse("1"), parse("!"), parse("3")]))
+
+# retry calls the thunk until it succeeds, at most `attempts` times.
+attempts = 0
+def flaky() -> Result[int, ParseError] {
+    attempts = attempts + 1
+    if attempts < 3 { return err(ParseError { line: attempts }) }
+    return ok(attempts)
+}
+print(unwrap_or(retry(flaky, 5), 0))

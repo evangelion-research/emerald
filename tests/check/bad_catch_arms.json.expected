@@ -1,0 +1,45 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_CATCH",
+    "file": "tests/check/bad_catch_arms.rald",
+    "line": 13,
+    "column": 12,
+    "message": "'catch' is not exhaustive: B is never handled (add an arm for it, or a catch-all '_')",
+    "expected": "{_tag: \"A\", x: int} | {_tag: \"B\", y: int}",
+    "source_line": "    return catch fails(n) { A e -> e.x }"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_CATCH",
+    "file": "tests/check/bad_catch_arms.rald",
+    "line": 17,
+    "column": 41,
+    "message": "'C' is not one of the errors this expression can fail with ({_tag: \"A\", x: int} | {_tag: \"B\", y: int})",
+    "expected": "{_tag: \"A\", x: int} | {_tag: \"B\", y: int}",
+    "source_line": "    return catch fails(n) { A e -> e.x, C e -> 0, B e -> e.y }"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_CATCH",
+    "file": "tests/check/bad_catch_arms.rald",
+    "line": 21,
+    "column": 41,
+    "message": "error 'A' is already handled by an earlier arm",
+    "source_line": "    return catch fails(n) { A e -> e.x, A e -> 0, B e -> e.y }"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_CATCH",
+    "file": "tests/check/bad_catch_arms.rald",
+    "line": 25,
+    "column": 12,
+    "message": "'catch' needs a result value ({ ok: True, val: T } | { ok: False, err: E }), got int",
+    "actual": "int",
+    "source_line": "    return catch n { A e -> e.x }"
+  }
+]

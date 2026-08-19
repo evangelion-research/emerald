@@ -670,6 +670,7 @@ typedef struct {
     bool cur_pure;    /* purity of the function whose body is being checked */
     bool proof;       /* --proof: `any` and `partial` are banned */
     bool in_sig;      /* resolving a function signature: proof `any` reports here */
+    bool in_lambda;   /* checking a lambda body: `try` has no channel there */
     TyEnv *tyenv;     /* type parameters of the function being checked: in
                        * scope for annotations in its body as well as its
                        * signature (`out: list[T] = []` inside def f[T]) */
@@ -1064,8 +1065,11 @@ static Type *infer_lambda_with(Ck *ck, const Expr *e, Type **ptypes) {
         v->bound = true;
     }
     Scope *saved = ck->scope;
+    bool saved_lam = ck->in_lambda;
     ck->scope = &sc;
+    ck->in_lambda = true;
     Type *ret = infer(ck, e->as.lam.body);
+    ck->in_lambda = saved_lam;
     ck->scope = saved;
     free(sc.locals.items);
     return ty_func(ptypes, e->as.lam.param_count, ret);
@@ -2011,8 +2015,204 @@ static Type *infer_call(Ck *ck, const Expr *e) {
     return ft->fun.ret;
 }
 
+
+/* --- expected errors (try / catch) ---------------------------------------
+ * A "result" here is structural, not a privileged stdlib name: any type that
+ * is discriminated by a boolean-literal `ok` field, carrying `val` on the
+ * True side and `err` on the False side. stdlib spells the canonical one
+ *     type Result[T, E] = { ok: True, val: T } | { ok: False, err: E }
+ * but `try` and `catch` work on anything of that shape, so a program that
+ * grows its own result type keeps the language support.
+ *
+ * An error *type* is likewise just a record with a literal `_tag` field —
+ * what `error Name { ... }` desugars to — so a union of errors narrows and
+ * proves exhaustive with exactly the machinery `match` already uses.
+ */
+static const Type *field_type(const Type *t, const char *f);
+
+/* Split a result type into its success and failure payloads. Returns false
+ * when `t` is not result-shaped, leaving the outputs untouched. */
+static bool result_split(const Type *t, Type **val, Type **err) {
+    const Type *r = ty_resolve(t);
+    size_t n = r->k == TY_UNION ? r->uni.count : 1;
+    Type *v = &t_never, *e = &t_never;
+    bool ok_seen = false;
+    for (size_t i = 0; i < n; i++) {
+        const Type *alt = ty_resolve(r->k == TY_UNION ? r->uni.alts[i] : r);
+        if (alt->k != TY_REC) return false;
+        const Type *ok = field_type(alt, "ok");
+        if (!ok) return false;
+        ok = ty_resolve(ok);
+        if (ok->k != TY_LIT || ok->lit.base != TY_BOOL) return false;
+        const Type *load = field_type(alt, ok->lit.ival ? "val" : "err");
+        if (!load) return false;
+        if (ok->lit.ival) v = ty_join(v, (Type *)load);
+        else e = ty_join(e, (Type *)load);
+        ok_seen = true;
+    }
+    if (!ok_seen) return false;
+    if (val) *val = v;
+    if (err) *err = e;
+    return true;
+}
+
+/* The alternatives of an error type, as a flat array (a lone error type is a
+ * one-element array). The caller owns the returned array. */
+static Type **err_alts(Type *err, size_t *count) {
+    Type *r = ty_resolve(err);
+    size_t n = r->k == TY_UNION ? r->uni.count : (r->k == TY_NEVER ? 0 : 1);
+    Type **out = xmalloc(sizeof(Type *) * (n ? n : 1));
+    for (size_t i = 0; i < n; i++)
+        out[i] = r->k == TY_UNION ? r->uni.alts[i] : r;
+    *count = n;
+    return out;
+}
+
+/* The `_tag` discriminant of an error alternative, or NULL when it has none
+ * (a plain record used as an error payload, which `catch` cannot name). */
+static const char *err_tag(const Type *t) {
+    const Type *tag = field_type(t, "_tag");
+    if (!tag) return NULL;
+    tag = ty_resolve(tag);
+    if (tag->k != TY_LIT || tag->lit.base != TY_STR) return NULL;
+    return tag->lit.sval;
+}
+
+/* `try e`: unwrap a result, propagating its failure to the caller. The
+ * enclosing function must declare a result type whose error side can carry
+ * everything `e` can fail with — the same obligation Rust's `?` imposes. */
+static Type *infer_try(Ck *ck, const Expr *e) {
+    Type *st = infer(ck, e->as.try_expr);
+    Type *val = NULL, *err = NULL;
+    if (ty_resolve(st)->k == TY_ANY) return &t_any;
+    if (!result_split(st, &val, &err)) {
+        ck_error_t(ck, "E_TYPE_TRY", e->line, e->col, NULL, st,
+                   "'try' needs a result value ({ ok: True, val: T } | "
+                   "{ ok: False, err: E }), got %s", type_str(st));
+        return &t_any;
+    }
+    if (ck->in_lambda) {
+        ck_error(ck, "E_TYPE_TRY", e->line, e->col,
+                 "'try' inside a lambda has no error channel to propagate to: "
+                 "give the lambda body a nested 'def' with a declared result "
+                 "type, or handle the failure here with 'catch'");
+        return val;
+    }
+    if (!ck->scope || !ck->cur_ret) {
+        ck_error(ck, "E_TYPE_TRY", e->line, e->col,
+                 "'try' outside of a function");
+        return val;
+    }
+    if (ty_resolve(ck->cur_ret)->k == TY_ANY) return val; /* gradual: unchecked */
+    Type *ret_err = NULL;
+    if (!result_split(ck->cur_ret, NULL, &ret_err)) {
+        ck_error_t(ck, "E_TYPE_ERRCHAN", e->line, e->col, NULL, ck->cur_ret,
+                   "'try' can only propagate out of a function that returns a "
+                   "result; this one returns %s", type_str(ck->cur_ret));
+        return val;
+    }
+    if (!assignable(ret_err, err))
+        ck_error_t(ck, "E_TYPE_ERRCHAN", e->line, e->col, ret_err, err,
+                   "unhandled error: 'try' can fail with %s, which this "
+                   "function does not declare (it fails with %s)",
+                   type_str(err), type_str(ret_err));
+    return val;
+}
+
+/* `catch e { Tag b -> body, ... }`: the value of `e` when it succeeded, and
+ * the matching arm's value when it failed. Every error the subject can carry
+ * must be named by an arm, or by a single catch-all `_`. */
+static Type *infer_catch(Ck *ck, const Expr *e) {
+    Type *st = infer(ck, e->as.ctch.subject);
+    Type *val = NULL, *err = NULL;
+    if (!result_split(st, &val, &err)) {
+        if (ty_resolve(st)->k == TY_ANY) { val = &t_any; err = &t_any; }
+        else {
+            ck_error_t(ck, "E_TYPE_CATCH", e->line, e->col, NULL, st,
+                       "'catch' needs a result value ({ ok: True, val: T } | "
+                       "{ ok: False, err: E }), got %s", type_str(st));
+            return &t_any;
+        }
+    }
+    size_t nalts = 0;
+    Type **alts = err_alts(err, &nalts);
+    bool *covered = xmalloc(sizeof(bool) * (nalts ? nalts : 1));
+    for (size_t i = 0; i < nalts; i++) covered[i] = false;
+
+    VarEnv *env = ck->scope ? &ck->scope->locals : &ck->globals;
+    Type *result = val;
+    bool has_wild = false;
+    for (size_t i = 0; i < e->as.ctch.count; i++) {
+        const CatchArm *a = &e->as.ctch.arms[i];
+        Type *bound = &t_any;
+        if (a->tag) {
+            bound = &t_never;
+            bool found = false;
+            for (size_t j = 0; j < nalts; j++) {
+                const char *tag = err_tag(alts[j]);
+                if (!tag || strcmp(tag, a->tag) != 0) continue;
+                if (covered[j])
+                    ck_error(ck, "E_TYPE_CATCH", a->line, a->col,
+                             "error '%s' is already handled by an earlier arm",
+                             a->tag);
+                covered[j] = true;
+                bound = ty_join(bound, alts[j]);
+                found = true;
+            }
+            if (!found) {
+                if (ty_resolve(err)->k == TY_ANY) bound = &t_any;
+                else
+                    ck_error_t(ck, "E_TYPE_CATCH", a->line, a->col, err, NULL,
+                               "'%s' is not one of the errors this expression "
+                               "can fail with (%s)", a->tag, type_str(err));
+            }
+        } else {
+            if (has_wild)
+                ck_error(ck, "E_TYPE_CATCH", a->line, a->col,
+                         "'catch' has more than one catch-all arm");
+            /* the catch-all binds whatever the named arms did not take */
+            Type *rest = &t_never;
+            for (size_t j = 0; j < nalts; j++)
+                if (!covered[j]) rest = ty_join(rest, alts[j]);
+            bound = ty_resolve(err)->k == TY_ANY ? &t_any : rest;
+            has_wild = true;
+        }
+        size_t mark = env->count; /* the binding is scoped to its own arm */
+        if (a->bind) {
+            Var *v = env_add(env, a->bind, bound, true);
+            v->bound = true;
+            v->is_const = true;
+        }
+        result = ty_join(result, infer(ck, a->body));
+        env->count = mark;
+    }
+    if (!has_wild) {
+        if (ty_resolve(err)->k == TY_ANY) {
+            /* nothing is known about what this can fail with, so only a
+             * catch-all can cover it */
+            ck_error(ck, "E_TYPE_CATCH", e->line, e->col,
+                     "'catch' on a value of type 'any' needs a catch-all "
+                     "arm ('_')");
+        } else {
+            for (size_t j = 0; j < nalts; j++) {
+                if (covered[j]) continue;
+                const char *tag = err_tag(alts[j]);
+                ck_error_t(ck, "E_TYPE_CATCH", e->line, e->col, err, NULL,
+                           "'catch' is not exhaustive: %s is never handled "
+                           "(add an arm for it, or a catch-all '_')",
+                           tag ? tag : type_str(alts[j]));
+            }
+        }
+    }
+    free(alts);
+    free(covered);
+    return result;
+}
+
 static Type *infer(Ck *ck, const Expr *e) {
     switch (e->kind) {
+    case E_TRY: return infer_try(ck, e);
+    case E_CATCH: return infer_catch(ck, e);
     case E_INT: {
         Type *t = ty_lit_int(e->as.ival);
         t->fresh = true;
@@ -2069,8 +2269,19 @@ static Type *infer(Ck *ck, const Expr *e) {
         t->rec.names = e->as.rec.names;
         t->rec.types = xmalloc(sizeof(Type *) * e->as.rec.count);
         t->rec.count = e->as.rec.count;
-        for (size_t i = 0; i < e->as.rec.count; i++)
-            t->rec.types[i] = infer(ck, e->as.rec.values[i]);
+        for (size_t i = 0; i < e->as.rec.count; i++) {
+            Type *ft = infer(ck, e->as.rec.values[i]);
+            /* `_tag` is a discriminant, not a string that happens to be
+             * constant here: it keeps its literal type instead of widening to
+             * `str`, so a tagged error still matches the type `error Name`
+             * declared even after passing through a generic like `err`. */
+            if (strcmp(e->as.rec.names[i], "_tag") == 0 && ft->k == TY_LIT &&
+                ft->fresh && ft->lit.base == TY_STR) {
+                Type *lit = ty_lit_str(ft->lit.sval);
+                ft = lit; /* born non-fresh: widen() leaves it alone */
+            }
+            t->rec.types[i] = ft;
+        }
         return t;
     }
     case E_BINOP:

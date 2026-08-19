@@ -52,6 +52,39 @@ type Pair[A, B] = { first: A, second: B }
 Types are erased at runtime — there is no class, vtable, or nominal tag — so
 structural subtyping costs nothing.
 
+## Expected errors
+
+There are no exceptions. A function that can fail says so in its return type,
+and the checker holds both sides to it — the callee's declared errors are the
+complete list, and every caller either handles them or declares that it passes
+them on:
+
+```
+error NotFound { key: str }
+error Malformed { key: str, saw: str }
+
+def field(key: str) -> Result[str, NotFound | Malformed] { ... }
+
+def port() -> Result[int, NotFound | Malformed] {
+    const raw = try field("port")    # or return the failure to my caller
+    return ok(int(raw))
+}
+
+const n = catch port() {             # an expression: the value, or an arm's
+    NotFound e -> 80
+    Malformed e -> 0 - 1             # a missing arm is a compile error
+}
+```
+
+`error N { ... }` is sugar for a record with a literal `_tag`, so errors are
+ordinary discriminated unions and `catch` proves exhaustive with the same
+machinery as `match`. `try` compiles to a comparison and a `return`: no
+unwinding, no handler search, no hidden control flow. Rust's obligations,
+Effect's vocabulary — `map_error`, `catch_all`, `either`, `retry` and the rest
+live in [`stdlib/result.rald`](stdlib/result.rald). See
+[`docs/errors.md`](docs/errors.md) and
+[`examples/errors.rald`](examples/errors.rald).
+
 ## Totality, purity, proof mode
 
 Three properties separate "well-typed" from "a claim you can defend", and each
@@ -131,7 +164,7 @@ import strings
 import dict
 from result import Result, unwrap_or
 
-def parse_flag(arg: str) -> Result[{ name: str, val: str }] {
+def parse_flag(arg: str) -> Result[{ name: str, val: str }, str] {
     p = strings.partition(arg, "=")
     if p.found == False { return { ok: False, err: "expected name=value" } }
     return { ok: True, val: { name: p.before, val: p.after } }

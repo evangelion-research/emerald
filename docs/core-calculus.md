@@ -259,6 +259,60 @@ literal-tagged records. The checker proves the patterns cover the subject's
 declared type; a match with no catch-all arm is rejected when the proof fails
 (`E_TYPE_MATCH`).
 
+### Expected errors
+
+A **result type** is any type of the shape
+
+```
+  R(T, E)  =  { ok: True, val: T } | { ok: False, err: E }
+```
+
+recognised structurally, not by name (`Result[T, E]` in the standard library is
+one spelling of it). An **error type** is a record carrying a literal
+discriminant, `{ _tag: "N", ... }`, which is what `error N { ... }` declares.
+
+`try` eliminates a result inside a function whose own return type is a result,
+and the rule is the propagation obligation stated as a subtyping side condition
+(`ret` is the enclosing function's declared return type):
+
+```
+  Γ ⊢ e : R(T, E)    ret = R(U, F)    Γ ⊢ E <: F
+  ------------------------------------------------   [T-TRY]
+  Γ ⊢ try e : T
+```
+
+When the side condition fails the escaping alternatives are reported
+(`E_TYPE_ERRCHAN`); when `ret` is `any` the rule is not applied (gradualness);
+when there is no enclosing `def` — at top level, or in a lambda, which has no
+declared return type — `try` is rejected outright.
+
+`catch` eliminates the error side of a result by case analysis on `_tag`. With
+`E = E1 | ... | En` (each `Ei` an error type with tag `ti`) and arms
+`t1 x -> b1, ..., tn x -> bn`:
+
+```
+  Γ ⊢ e : R(T, E)    E = E1|...|En    ∀i. Γ, x:Ei ⊢ bi : Si
+  ------------------------------------------------------------   [T-CATCH]
+  Γ ⊢ catch e { t1 x -> b1, ..., tn x -> bn } : T ⊔ S1 ⊔ ... ⊔ Sn
+```
+
+The premise ranges over **all** alternatives of `E`: that universal quantifier
+is the exhaustiveness proof, and failing it is `E_TYPE_CATCH`. A catch-all arm
+`_ x -> b` discharges the remaining alternatives at once, binding `x` to their
+union (not to `any`), which keeps the rule total without weakening the
+narrowing:
+
+```
+  covered = {Ei : some arm names ti}     rest = ⊔ (E \ covered)
+  Γ ⊢ e : R(T, E)    Γ, x:rest ⊢ b : S   (arms as above for `covered`)
+  -----------------------------------------------------------------   [T-CATCH-ALL]
+  Γ ⊢ catch e { ..., _ x -> b } : T ⊔ S1 ⊔ ... ⊔ S
+```
+
+Both rules are ordinary elimination forms over the union machinery of §4 — no
+effect row, no monadic type, and no rule that mentions control flow. The
+operational reading of `try` is `return`, and of `catch` is a conditional.
+
 ## 6. The shape-obligation rules
 
 Each shape-carrying tensor operation generates an obligation that must be
@@ -357,6 +411,7 @@ The claims the checker *does* make, and where each is conditional:
 | `list[T]` means "elements are `T`" | Unsound: covariant lists admit mutation through a supertype alias. |
 | Shape obligations are correct | As correct as `dim_eq`/`dim_le`; the decidable fragment is conservative (it may *reject*, it never silently *accepts* a false equality). |
 | `Fin[δ]` indices are in bounds | Statically, for provably-bad cases only; the runtime check is not eliminated. |
+| A function's declared errors are all it can fail with | Holds for `try` inside an annotated `def`; an `any` return type is unchecked, and a `catch` arm may still call an aborting builtin. |
 
 None of these are secrets — they are the content of
 [`research-directions.md`](research-directions.md) §1 and §6. The point of this
@@ -370,8 +425,13 @@ is a diff against written rules rather than against `src/check.c`'s behavior.
   eliminator, so claims about inductive data are limited to parametricity.
 - **No dependent product/equality types** — `Eq[a, b]` and Π-types are §6
   (Track E/F) future work; shapes are the only index arithmetic.
-- **No effect rows** — `pure` is a call-level check, not a type.
-- **No bounds on type parameters** — no `T: Numeric`, no type classes.
+- **No effect rows** — `pure` is a call-level check, not a type. The error
+  channel of §5 is *not* an effect row either: it is the second type argument
+  of an ordinary union, visible in the signature, with `try` as its only
+  introduction rule and `return` as its only semantics.
+- **No bounds on type parameters** — no `T: Numeric`, no type classes. This is
+  what stops the standard library from writing
+  `catch_tag[T, E: { _tag: str }]`; see [`errors.md`](errors.md) §5.
 
 See [`type-system.md`](type-system.md) §"Deliberate omissions" for the
 language-level account of the same boundaries.

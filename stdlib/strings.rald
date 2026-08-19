@@ -246,7 +246,7 @@ def to_chars(s: str) -> list[str] {
 # script and wrong for a parser. These validate first and report the failure as
 # a value.
 
-def parse_int_radix(s: str, radix: int) -> Result[int] pure {
+def parse_int_radix(s: str, radix: int) -> Result[int, str] pure {
     t = strip(s)
     if len(t) == 0 { return { ok: False, err: "empty string" } }
     if radix < 2 or radix > 16 {
@@ -273,9 +273,9 @@ def parse_int_radix(s: str, radix: int) -> Result[int] pure {
     return { ok: True, val: total }
 }
 
-def parse_int(s: str) -> Result[int] pure { return parse_int_radix(s, 10) }
+def parse_int(s: str) -> Result[int, str] pure { return parse_int_radix(s, 10) }
 
-def parse_float(s: str) -> Result[float] pure {
+def parse_float(s: str) -> Result[float, str] pure {
     t = strip(s)
     if len(t) == 0 { return { ok: False, err: "empty string" } }
     i = 0
@@ -345,7 +345,7 @@ def _hex_digit(n: int) -> str pure {
     return chr(87 + n)
 }
 
-def unescape(s: str) -> Result[str] {
+def unescape(s: str) -> Result[str, str] {
     b = builder.new()
     i = 0
     while i < len(s) {

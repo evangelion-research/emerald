@@ -395,6 +395,39 @@ static int gen_call(Cg *cg, const Expr *e) {
     return t;
 }
 
+/* The arms of a `catch`, as an if/else chain over the error's `_tag`. The
+ * checker has already proved the chain is exhaustive, so the final `else`
+ * only exists to keep the generated C total. */
+static void gen_catch_arms(Cg *cg, const Expr *e, int err, int dst,
+                           size_t arm) {
+    char eb[32], db[32], vb[32];
+    const CatchArm *a = &e->as.ctch.arms[arm];
+    bool last = arm + 1 >= e->as.ctch.count;
+    if (a->tag) {
+        SB tag = {0};
+        sb_c_string(&tag, a->tag);
+        emit(cg, "if (em_truthy(em_eq(em_getattr(%s, \"_tag\"), "
+                 "em_str_new(%s)))) {", slotref(err, eb), tag.buf);
+        free(tag.buf);
+        cg->indent++;
+    }
+    if (a->bind) gen_var_write(cg, a->bind, slotref(err, eb));
+    int v = gen_expr(cg, a->body);
+    emit(cg, "%s = %s;", slotref(dst, db), slotref(v, vb));
+    if (a->tag) {
+        cg->indent--;
+        emit(cg, "} else {");
+        cg->indent++;
+        if (last)
+            emit(cg, "rt_fatal(\"catch: unhandled error (exhaustiveness "
+                     "check failed)\");");
+        else
+            gen_catch_arms(cg, e, err, dst, arm + 1);
+        cg->indent--;
+        emit(cg, "}");
+    }
+}
+
 static int gen_expr(Cg *cg, const Expr *e) {
     char tb[32], ab[32], bb[32];
     switch (e->kind) {
@@ -529,6 +562,37 @@ static int gen_expr(Cg *cg, const Expr *e) {
         else
             emit(cg, "%s = em_bool(!em_truthy(%s));", slotref(t, tb),
                  slotref(s, ab));
+        return t;
+    }
+    case E_TRY: {
+        /* `try e`: hand the whole failed result straight back to the caller —
+         * it is already the value this function must return, so no error is
+         * rebuilt and nothing is copied. */
+        int r = gen_expr(cg, e->as.try_expr);
+        emit(cg, "if (!em_truthy(em_getattr(%s, \"ok\"))) "
+                 "{ Value __r = %s; rt_pop_frame(); return __r; }",
+             slotref(r, ab), slotref(r, ab));
+        int t = new_temp(cg);
+        emit(cg, "%s = em_getattr(%s, \"val\");", slotref(t, tb),
+             slotref(r, ab));
+        return t;
+    }
+    case E_CATCH: {
+        int r = gen_expr(cg, e->as.ctch.subject);
+        int t = new_temp(cg);
+        emit(cg, "if (em_truthy(em_getattr(%s, \"ok\"))) {", slotref(r, ab));
+        cg->indent++;
+        emit(cg, "%s = em_getattr(%s, \"val\");", slotref(t, tb),
+             slotref(r, ab));
+        cg->indent--;
+        emit(cg, "} else {");
+        cg->indent++;
+        int err = new_temp(cg);
+        emit(cg, "%s = em_getattr(%s, \"err\");", slotref(err, bb),
+             slotref(r, ab));
+        gen_catch_arms(cg, e, err, t, 0);
+        cg->indent--;
+        emit(cg, "}");
         return t;
     }
     case E_CALL:
@@ -945,6 +1009,14 @@ static void collect_used_expr(const Expr *e, Names *out) {
     case E_ATTR:
         collect_used_expr(e->as.attr.obj, out);
         break;
+    case E_TRY:
+        collect_used_expr(e->as.try_expr, out);
+        break;
+    case E_CATCH:
+        collect_used_expr(e->as.ctch.subject, out);
+        for (size_t i = 0; i < e->as.ctch.count; i++)
+            collect_used_expr(e->as.ctch.arms[i].body, out);
+        break;
     case E_LAMBDA:
         /* a lambda is its own function: its free variables are captured by
          * its own FuncInfo, not by the enclosing scope */
@@ -1139,6 +1211,14 @@ static void collect_lambdas_expr(const Expr *e, Expr ***lams, size_t *count,
     case E_ATTR:
         collect_lambdas_expr(e->as.attr.obj, lams, count, cap);
         break;
+    case E_TRY:
+        collect_lambdas_expr(e->as.try_expr, lams, count, cap);
+        break;
+    case E_CATCH:
+        collect_lambdas_expr(e->as.ctch.subject, lams, count, cap);
+        for (size_t i = 0; i < e->as.ctch.count; i++)
+            collect_lambdas_expr(e->as.ctch.arms[i].body, lams, count, cap);
+        break;
     default:
         break;
     }
@@ -1165,6 +1245,59 @@ static void pat_bind_names(const Pat *p,
     }
 }
 
+/* Names bound by `catch` arms. They live in expressions rather than
+ * statements, so this walks expression positions the way pat_bind_names walks
+ * a pattern. Lambda bodies are skipped: a lambda is compiled as its own
+ * function, and its binds become locals there. */
+static void collect_catch_binds(const Expr *e,
+                                void (*fn)(const char *, const char *, int,
+                                           void *),
+                                const char *file, void *ud) {
+    if (!e) return;
+    switch (e->kind) {
+    case E_CATCH:
+        collect_catch_binds(e->as.ctch.subject, fn, file, ud);
+        for (size_t i = 0; i < e->as.ctch.count; i++) {
+            const CatchArm *a = &e->as.ctch.arms[i];
+            if (a->bind) fn(a->bind, file, a->line, ud);
+            collect_catch_binds(a->body, fn, file, ud);
+        }
+        break;
+    case E_TRY:
+        collect_catch_binds(e->as.try_expr, fn, file, ud);
+        break;
+    case E_LIST:
+        for (size_t i = 0; i < e->as.list.count; i++)
+            collect_catch_binds(e->as.list.items[i], fn, file, ud);
+        break;
+    case E_REC:
+        for (size_t i = 0; i < e->as.rec.count; i++)
+            collect_catch_binds(e->as.rec.values[i], fn, file, ud);
+        break;
+    case E_BINOP:
+        collect_catch_binds(e->as.bin.lhs, fn, file, ud);
+        collect_catch_binds(e->as.bin.rhs, fn, file, ud);
+        break;
+    case E_UNOP:
+        collect_catch_binds(e->as.un.operand, fn, file, ud);
+        break;
+    case E_CALL:
+        collect_catch_binds(e->as.call.fn, fn, file, ud);
+        for (size_t i = 0; i < e->as.call.count; i++)
+            collect_catch_binds(e->as.call.args[i], fn, file, ud);
+        break;
+    case E_INDEX:
+        collect_catch_binds(e->as.index.seq, fn, file, ud);
+        collect_catch_binds(e->as.index.idx, fn, file, ud);
+        break;
+    case E_ATTR:
+        collect_catch_binds(e->as.attr.obj, fn, file, ud);
+        break;
+    default:
+        break;
+    }
+}
+
 static void collect_match_pats_stmt(const Stmt *s,
                                     void (*fn)(const char *, const char *,
                                                int, void *),
@@ -1184,25 +1317,39 @@ static void collect_match_pats_stmt(const Stmt *s,
                                     void *ud) {
     switch (s->kind) {
     case S_MATCH:
+        collect_catch_binds(s->as.mtch.subject, fn, s->file, ud);
         for (size_t j = 0; j < s->as.mtch.count; j++) {
             pat_bind_names(s->as.mtch.pats[j], fn, s->file, ud);
             collect_match_pats_block(&s->as.mtch.blocks[j], fn, ud);
         }
         break;
     case S_IF:
-        for (size_t j = 0; j < s->as.ifs.count; j++)
+        for (size_t j = 0; j < s->as.ifs.count; j++) {
+            collect_catch_binds(s->as.ifs.conds[j], fn, s->file, ud);
             collect_match_pats_block(&s->as.ifs.blocks[j], fn, ud);
+        }
         if (s->as.ifs.has_else)
             collect_match_pats_block(&s->as.ifs.else_block, fn, ud);
         break;
     case S_WHILE:
+        collect_catch_binds(s->as.wh.cond, fn, s->file, ud);
         collect_match_pats_block(&s->as.wh.body, fn, ud);
         break;
     case S_FOR:
+        collect_catch_binds(s->as.fr.seq, fn, s->file, ud);
         collect_match_pats_block(&s->as.fr.body, fn, ud);
         break;
     case S_BLOCK:
         collect_match_pats_block(&s->as.block, fn, ud);
+        break;
+    case S_EXPR:
+        collect_catch_binds(s->as.expr, fn, s->file, ud);
+        break;
+    case S_ASSIGN:
+        collect_catch_binds(s->as.assign.value, fn, s->file, ud);
+        break;
+    case S_RETURN:
+        collect_catch_binds(s->as.ret, fn, s->file, ud);
         break;
     default:
         break; /* S_FUNC: nested bodies are separate scopes */

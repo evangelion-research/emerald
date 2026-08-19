@@ -113,6 +113,32 @@ type Expr = Lit | Add | Neg | Mul
 That error is the proof obligation reopening — the reason to write the
 `never` binding even when the function already returns on every path.
 
+### The same proof, about failure
+
+`catch` is the same obligation wearing a different keyword. An `error`
+declaration is a record with a literal `_tag`, so a function's error type is a
+discriminated union and handling it is exhaustive case analysis:
+
+```
+def port() -> Result[int, NotFound | Malformed] { ... }
+
+const n = catch port() {
+    NotFound e -> 80
+    Malformed e -> 0 - 1
+}
+```
+
+Delete the second arm and the proof reopens as `E_TYPE_CATCH`, naming the
+alternative that is no longer covered — the `never` binding's job, done by the
+elimination form itself. The claim being checked is worth stating plainly:
+*every failure this expression can produce is handled here.* Its dual, on the
+other side of `try`, is *this function's declared errors are the complete list
+of what it can fail with* (`E_TYPE_ERRCHAN`).
+
+Both are conditional in the same way everything here is conditional: a function
+that declines to annotate its return type gets `any`, and `any` is unchecked.
+See [`errors.md`](errors.md).
+
 ## Proof by enumeration
 
 A union of literal types is a finite domain. Membership claims about it are

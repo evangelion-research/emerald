@@ -12,6 +12,7 @@ native binary. Everything here is implemented and covered by `task test`.
 |---|---|
 | [`grammar.md`](grammar.md) | What is the syntax? Lexical rules, EBNF, precedence table, the record-vs-block ambiguity and how it is resolved. |
 | [`type-system.md`](type-system.md) | Records, structural subtyping, `&`/`\|`, literal types, flow narrowing, `never`, generics, and where the checker is deliberately gradual. |
+| [`errors.md`](errors.md) | Expected errors: `error` declarations, `Result[T, E]`, `try` propagation, exhaustive `catch`, the Effect-style combinators, and what it all compiles to. |
 | [`core-calculus.md`](core-calculus.md) | The formal fragment: syntax, subtyping, narrowing, generics, and the shape/`Fin` rules as judgments — the paper-style spec the research track calls for. |
 | [`builtins.md`](builtins.md) | The fifty-two builtins, exactly — and the rule for what earns a place among them rather than a place in the library. |
 | [`tensors.md`](tensors.md) | Phase 2 numerics: the tensor runtime model, dtypes, zero-copy views, and byte-aware GC. |
@@ -51,8 +52,8 @@ statistically where not, with a machine-checkable certificate at the end.**
 ## Suggested reading order
 
 - **"I want to write a program."** [`grammar.md`](grammar.md) →
-  [`type-system.md`](type-system.md) → [`builtins.md`](builtins.md) →
-  [`modules.md`](modules.md).
+  [`type-system.md`](type-system.md) → [`errors.md`](errors.md) →
+  [`builtins.md`](builtins.md) → [`modules.md`](modules.md).
 - **"I want to hack on the compiler."** [`architecture.md`](architecture.md) →
   [`diagnostics.md`](diagnostics.md) → [`gc.md`](gc.md), then read
   `src/check.c` with [`type-system.md`](type-system.md) open beside it.

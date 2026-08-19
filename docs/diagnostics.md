@@ -119,6 +119,12 @@ etc.
 | `E_TYPE_CONST`                | assigning to a `const` binding          |
 | `E_TYPE_MATCH`                | `match` not exhaustive (no arm covers every remaining value) |
 | `E_TYPE_BIND`                 | pattern binding already defined in scope / duplicate binding |
+| `E_TYPE_TRY`                  | `try` on a non-result, outside a function, or inside a lambda |
+| `E_TYPE_ERRCHAN`              | `try` propagates an error the enclosing function does not declare |
+| `E_TYPE_CATCH`                | `catch` not exhaustive, on a non-result, or naming an error that cannot occur |
+
+The three error-handling codes are documented with worked examples in
+[`errors.md`](errors.md) §9.
 
 ### Shape errors (`E_SHAPE_*`)
 

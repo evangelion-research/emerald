@@ -136,6 +136,14 @@ static void emit_expr_shapes(FILE *out, const Expr *e) {
             emit_type_shapes(out, e->as.lam.param_types[i]);
         emit_expr_shapes(out, e->as.lam.body);
         break;
+    case E_TRY:
+        emit_expr_shapes(out, e->as.try_expr);
+        break;
+    case E_CATCH:
+        emit_expr_shapes(out, e->as.ctch.subject);
+        for (size_t i = 0; i < e->as.ctch.count; i++)
+            emit_expr_shapes(out, e->as.ctch.arms[i].body);
+        break;
     case E_LIST:
         for (size_t i = 0; i < e->as.list.count; i++)
             emit_expr_shapes(out, e->as.list.items[i]);

@@ -1,0 +1,28 @@
+# `try` may only propagate errors the enclosing function declares.
+from result import Result, ok, err
+
+error A { x: int }
+error B { y: int }
+
+def fails(n: int) -> Result[int, A | B] {
+    if n > 0 { return err(A { x: n }) }
+    return err(B { y: n })
+}
+
+def narrow(n: int) -> Result[int, A] {
+    const v = try fails(n)
+    return ok(v)
+}
+
+def no_channel(n: int) -> int {
+    return try fails(n)
+}
+
+def outside(n: int) -> Result[int, A] {
+    const f = (x) => try fails(x)
+    return ok(1)
+}
+
+def not_a_result(n: int) -> Result[int, A] {
+    return ok(try n)
+}

@@ -1,0 +1,26 @@
+# `catch` must name every error, exactly once, and only errors that exist.
+from result import Result, ok, err
+
+error A { x: int }
+error B { y: int }
+
+def fails(n: int) -> Result[int, A | B] {
+    if n > 0 { return err(A { x: n }) }
+    return err(B { y: n })
+}
+
+def missing(n: int) -> int {
+    return catch fails(n) { A e -> e.x }
+}
+
+def unknown(n: int) -> int {
+    return catch fails(n) { A e -> e.x, C e -> 0, B e -> e.y }
+}
+
+def twice(n: int) -> int {
+    return catch fails(n) { A e -> e.x, A e -> 0, B e -> e.y }
+}
+
+def not_a_result(n: int) -> int {
+    return catch n { A e -> e.x }
+}

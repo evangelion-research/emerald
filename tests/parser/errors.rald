@@ -1,0 +1,10 @@
+error Empty
+error ParseError { line: int, msg: str }
+
+def run(s: str) -> int {
+    const n = try parse(s)
+    return catch step(n) {
+        ParseError e -> e.line
+        _ -> 0
+    }
+}

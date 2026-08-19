@@ -26,11 +26,11 @@ c.rald ─┘                                        │
 | Stage    | File            | Responsibility                                                        | Driver flag      |
 |----------|-----------------|-----------------------------------------------------------------------|------------------|
 | Lexer    | `src/lexer.c`   | Tokens, keywords, numbers, strings, comments.                          | `--emit-tokens`  |
-| Parser   | `src/parser.c`  | Recursive descent → AST; record/block disambiguation.                  | `--emit-ast`     |
+| Parser   | `src/parser.c`  | Recursive descent → AST; record/block disambiguation; `error` desugaring. | `--emit-ast`   |
 | Modules  | `src/module.c`  | Import resolution, cycle detection, name mangling, linking.            | `-I <dir>`       |
 | Shapes   | `src/dim.c`     | Canonical-form dimension solver (`dim_eq`/`dim_le`), escalation log.   | `--emit-shapes`  |
-| Checker  | `src/check.c`   | Structural type checking, flow narrowing, scope/return, tensor shapes. | `--check`        |
-| Codegen  | `src/codegen.c` | AST → C with GC-rooted slot frames; short-circuit lowering.            | `--emit-c`       |
+| Checker  | `src/check.c`   | Structural type checking, flow narrowing, scope/return, error channels, tensor shapes. | `--check` |
+| Codegen  | `src/codegen.c` | AST → C with GC-rooted slot frames; short-circuit, `try`/`catch` lowering. | `--emit-c`   |
 | Runtime  | `src/runtime.c` | Tagged `Value` model, operators, builtins, generational GC.            | `runtime-check`  |
 | Diags    | `src/diag.c`    | Structured errors: code, location, caret, expected/actual, JSON.       | `--json`         |
 | Driver   | `src/main.c`    | CLI, file I/O, invokes `cc`, cleanup.                                  | —                |

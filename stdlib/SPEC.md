@@ -145,15 +145,23 @@ Rules that hold across every module. Deviations must be justified in the module'
 own section.
 
 **Errors are values.** No function aborts on bad input except where the
-equivalent builtin already does. Fallible operations return `Result[T]`;
+equivalent builtin already does. Fallible operations return `Result[T, E]`;
 operations that are merely absent return `Option[T]`. Both are unions with a
-literal discriminant, so `match` proves you handled the failure
-(`E_TYPE_MATCH`), which is the whole reason this shape is worth the friction.
+literal discriminant, so the failure cannot be ignored: `catch` proves you
+handled it (`E_TYPE_CATCH`), and `match` does the same for anyone who prefers
+to destructure by hand. That is the whole reason this shape is worth the
+friction.
 
 ```
-type Result[T] = { ok: True, val: T } | { ok: False, err: str }
+type Result[T, E] = { ok: True, val: T } | { ok: False, err: E }
 type Option[T] = { some: True, val: T } | { some: False }
 ```
+
+The library's own `E` is `str` throughout — these modules predate `error`
+declarations and their failures are one-of-a-kind messages, not a union a
+caller dispatches on. New code that wants dispatchable failures declares
+`error` types and puts their union in `E`; see
+[`docs/errors.md`](../docs/errors.md).
 
 **Free functions, not methods.** Python's `s.split(",")` is `strings.split(s, ",")`.
 The subject is always the first parameter. There is no `self` and no way to fake
@@ -237,26 +245,58 @@ entire value of writing the stdlib during Phase 3 instead of before it.
 
 ### `result` — errors as values
 
-Depends on nothing. Pure throughout.
+Depends on nothing. Pure where it can be.
 
 ```
-type Result[T] = { ok: True, val: T } | { ok: False, err: str }
+type Result[T, E] = { ok: True, val: T } | { ok: False, err: E }
 type Option[T] = { some: True, val: T } | { some: False }
 
-def ok[T](v: T) -> Result[T] pure
-def err[T](msg: str) -> Result[T] pure
+def ok[T, E](v: T) -> Result[T, E] pure
+def err[T, E](e: E) -> Result[T, E] pure
 def some[T](v: T) -> Option[T] pure
 def none[T]() -> Option[T] pure
 
-def is_ok[T](r: Result[T]) -> bool pure       # and is_err / is_some / is_none
-def unwrap_or[T](r: Result[T], d: T) -> T pure
+def is_ok[T, E](r: Result[T, E]) -> bool pure   # and is_err / is_some / is_none
+def unwrap_or[T, E](r: Result[T, E], d: T) -> T pure
 def opt_or[T](o: Option[T], d: T) -> T pure
-def why[T](r: Result[T]) -> str pure          # the message, or "" on success
-def map_ok[T, U](r: Result[T], f: (T) -> U) -> Result[U]
-def and_then[T, U](r: Result[T], f: (T) -> Result[U]) -> Result[U]
+def why[T](r: Result[T, str]) -> str pure       # the message, or "" on success
+def tag_of(e: { _tag: str }) -> str pure        # an `error` value's discriminant
+
+def map_ok[T, U, E](r: Result[T, E], f: (T) -> U) -> Result[U, E]
+def and_then[T, U, E](r: Result[T, E], f: (T) -> Result[U, E]) -> Result[U, E]
+def map_error[T, E, F](r: Result[T, E], f: (E) -> F) -> Result[T, F]
 def map_some[T, U](o: Option[T], f: (T) -> U) -> Option[U]
-def ok_or[T](o: Option[T], msg: str) -> Result[T] pure
+
+def catch_all[T, E](r: Result[T, E], f: (E) -> T) -> T
+def catch_then[T, E, F](r: Result[T, E], f: (E) -> Result[T, F]) -> Result[T, F]
+def catch_if[T, E](r: Result[T, E], pred: (E) -> bool, f: (E) -> T) -> Result[T, E]
+def catch_tag[T](r: Result[T, { _tag: str }], tag: str,
+                 f: ({ _tag: str }) -> T) -> Result[T, { _tag: str }]
+def tap_error[T, E](r: Result[T, E], f: (E) -> None) -> Result[T, E]
+def or_else[T, E, F](r: Result[T, E], f: () -> Result[T, F]) -> Result[T, F]
+def retry[T, E](f: () -> Result[T, E], attempts: int) -> Result[T, E]
+
+def either[T, E](r: Result[T, E]) -> Result[Result[T, E], never] pure
+def option[T, E](r: Result[T, E]) -> Option[T] pure
+def ok_or[T, E](o: Option[T], e: E) -> Result[T, E] pure
+
+def all[T, E](rs: list[Result[T, E]]) -> Result[list[T], E]
+def oks[T, E](rs: list[Result[T, E]]) -> list[T]
 ```
+
+`E` is usually a union of `error` declarations — see
+[`docs/type-system.md`](../docs/type-system.md). The language handles the two
+channels directly: `try r` propagates a failure to the caller and `catch r
+{ ... }` must name every error it can carry. These combinators are for the
+cases where a function value reads better than an expression, and they mirror
+Effect's expected-error API.
+
+Two of them cannot be as precise as the language forms, because Emerald's
+generics are unbounded — a `[E]` could be an `int`, so nothing may read `_tag`
+off it. `catch_if` takes a predicate and keeps `E` exact; `catch_tag` matches
+the tag itself and therefore has to name the error type structurally, widening
+the result's error channel to `{ _tag: str }`. Reach for `catch` when the
+narrowing has to be proved.
 
 No `unwrap()` that aborts. The point of the type is that the failure is in the
 signature; a function that throws it away belongs at the call site, written out,
@@ -321,13 +361,13 @@ def pad_left(s: str, width: int, fill: str) -> str
 def pad_right(s: str, width: int, fill: str) -> str
 
 # parsing — Result, not a runtime abort, unlike the int() builtin
-def parse_int(s: str) -> Result[int] pure
-def parse_int_radix(s: str, radix: int) -> Result[int] pure
-def parse_float(s: str) -> Result[float] pure
+def parse_int(s: str) -> Result[int, str] pure
+def parse_int_radix(s: str, radix: int) -> Result[int, str] pure
+def parse_float(s: str) -> Result[float, str] pure
 
 # escaping — the compiler needs both directions
 def escape(s: str) -> str                # -> a valid Emerald string literal body
-def unescape(s: str) -> Result[str]      # \n \t \r \0 \\ \" \'  per grammar.md
+def unescape(s: str) -> Result[str, str] # \n \t \r \0 \\ \" \'  per grammar.md
 def to_chars(s: str) -> list[str]
 def reverse(s: str) -> str
 ```
@@ -518,7 +558,7 @@ that cannot write its own `exp` has a gap worth knowing about.
 
 `log` of a non-positive number returns `NEG_INF` rather than aborting. That is a
 lie the caller should not catch by accident, and the honest fix — returning
-`Result[float]` — poisons the ergonomics of every use. Flagged rather than
+`Result[float, str]` — poisons the ergonomics of every use. Flagged rather than
 solved.
 
 ### `io` — files and streams
@@ -526,11 +566,11 @@ solved.
 Wraps the existing file builtins so failure is a `Result` rather than an abort.
 
 ```
-def read(path: str) -> Result[str]
-def read_lines(path: str) -> Result[list[str]]
-def write(path: str, content: str) -> Result[None]
-def append_to(path: str, content: str) -> Result[None]   # `append` is a builtin
-def write_lines(path: str, lines: list[str]) -> Result[None]
+def read(path: str) -> Result[str, str]
+def read_lines(path: str) -> Result[list[str], str]
+def write(path: str, content: str) -> Result[None, str]
+def append_to(path: str, content: str) -> Result[None, str]  # `append` is a builtin
+def write_lines(path: str, lines: list[str]) -> Result[None, str]
 def exists(path: str) -> bool
 def say(line: str) -> None                   # stdout
 def warn(line: str) -> None                  # stderr, via the eprint builtin
@@ -636,7 +676,8 @@ than no spec.
    i.e. barely generic. `check.c` now carries the function's `TyEnv` on the
    checker context.
 2. **Unification looks through unions on both sides.** `def map_ok[T, U](r:
-   Result[T], f: (T) -> U)` bound `T = any` from a `Result[int]`, because no
+   Result[T], f: (T) -> U)` — `Result` took one parameter at the time — bound
+   `T = any` from a `Result[int]`, because no
    single alternative of the parameter union accepts the whole argument union.
    Function parameters are invariant, so the lambda then failed to typecheck.
 3. **A global is only updatable from the module that declared it.** This was a

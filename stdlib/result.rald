@@ -5,23 +5,38 @@
 # checker prove at every call site that the failure was handled: `match` over a
 # Result with a missing arm is E_TYPE_MATCH, not a crash at 3am.
 #
+# `Result[T, E]` names both channels: the value it produces and the errors it
+# expects. `E` is usually a union of `error` declarations, each of which is a
+# record carrying a literal `_tag`:
+#
+#     error NotFound { path: str }
+#     error Denied { path: str }
+#
+#     def load(p: str) -> Result[str, NotFound | Denied] { ... }
+#
+# The language handles those two channels directly — `try load(p)` propagates
+# the failure to the caller, and `catch load(p) { NotFound e -> "" ... }` must
+# name every error the expression can produce. The combinators below are for
+# the cases where a function value reads better than a statement, and mirror
+# Effect's expected-error API.
+#
 # There is deliberately no `unwrap()` that aborts. If a caller wants to give up
 # on a failure it writes that out, where a reader can see it.
 
-type Result[T] = { ok: True, val: T } | { ok: False, err: str }
+type Result[T, E] = { ok: True, val: T } | { ok: False, err: E }
 type Option[T] = { some: True, val: T } | { some: False }
 
-def ok[T](v: T) -> Result[T] pure { return { ok: True, val: v } }
-def err[T](msg: str) -> Result[T] pure { return { ok: False, err: msg } }
+def ok[T, E](v: T) -> Result[T, E] pure { return { ok: True, val: v } }
+def err[T, E](e: E) -> Result[T, E] pure { return { ok: False, err: e } }
 def some[T](v: T) -> Option[T] pure { return { some: True, val: v } }
 def none[T]() -> Option[T] pure { return { some: False } }
 
-def is_ok[T](r: Result[T]) -> bool pure { return r.ok == True }
-def is_err[T](r: Result[T]) -> bool pure { return r.ok == False }
+def is_ok[T, E](r: Result[T, E]) -> bool pure { return r.ok == True }
+def is_err[T, E](r: Result[T, E]) -> bool pure { return r.ok == False }
 def is_some[T](o: Option[T]) -> bool pure { return o.some == True }
 def is_none[T](o: Option[T]) -> bool pure { return o.some == False }
 
-def unwrap_or[T](r: Result[T], d: T) -> T pure {
+def unwrap_or[T, E](r: Result[T, E], d: T) -> T pure {
     if r.ok == True { return r.val }
     return d
 }
@@ -32,20 +47,30 @@ def opt_or[T](o: Option[T], d: T) -> T pure {
 }
 
 # The error message, or "" for a success. For diagnostics, where the caller has
-# already established which case it is in.
-def why[T](r: Result[T]) -> str pure {
+# already established which case it is in. Only for results whose errors are
+# plain strings; a tagged error carries its own fields.
+def why[T](r: Result[T, str]) -> str pure {
     if r.ok == False { return r.err }
     return ""
 }
 
-def map_ok[T, U](r: Result[T], f: (T) -> U) -> Result[U] {
+# --- transforming the two channels ---------------------------------------
+
+def map_ok[T, U, E](r: Result[T, E], f: (T) -> U) -> Result[U, E] {
     if r.ok == True { return { ok: True, val: f(r.val) } }
     return { ok: False, err: r.err }
 }
 
-def and_then[T, U](r: Result[T], f: (T) -> Result[U]) -> Result[U] {
+def and_then[T, U, E](r: Result[T, E], f: (T) -> Result[U, E]) -> Result[U, E] {
     if r.ok == True { return f(r.val) }
     return { ok: False, err: r.err }
+}
+
+# Rewrite the error channel, leaving the value channel alone. The usual reason
+# is to wrap a low-level failure in one this layer's callers know about.
+def map_error[T, E, F](r: Result[T, E], f: (E) -> F) -> Result[T, F] {
+    if r.ok == False { return { ok: False, err: f(r.err) } }
+    return { ok: True, val: r.val }
 }
 
 def map_some[T, U](o: Option[T], f: (T) -> U) -> Option[U] {
@@ -53,8 +78,114 @@ def map_some[T, U](o: Option[T], f: (T) -> U) -> Option[U] {
     return { some: False }
 }
 
-# Option -> Result, supplying the message the Option did not carry.
-def ok_or[T](o: Option[T], msg: str) -> Result[T] pure {
+# --- recovering ------------------------------------------------------------
+
+# The discriminant that `error Name { ... }` bakes into every value it builds.
+# The parameter is the structural bound rather than a type parameter, because
+# Emerald's generics are unbounded: a `[E]` could be an int, and the checker
+# would have no `_tag` to read.
+def tag_of(e: { _tag: str }) -> str pure { return e._tag }
+
+# Handle every error, producing a value: the result cannot fail afterwards.
+def catch_all[T, E](r: Result[T, E], f: (E) -> T) -> T {
+    if r.ok == False { return f(r.err) }
+    return r.val
+}
+
+# Handle every error with another fallible computation.
+def catch_then[T, E, F](r: Result[T, E], f: (E) -> Result[T, F]) -> Result[T, F] {
+    if r.ok == False { return f(r.err) }
+    return { ok: True, val: r.val }
+}
+
+# Handle just the errors `pred` selects, leaving the rest untouched. The choice
+# is made at run time, so the error channel keeps its declared type: unlike the
+# `catch` expression, this cannot prove the remaining errors are narrower.
+# Reach for `catch` when you want that proof, and for these when the handler is
+# a function value being passed around.
+def catch_if[T, E](r: Result[T, E], pred: (E) -> bool, f: (E) -> T) -> Result[T, E] {
+    if r.ok == False {
+        if pred(r.err) { return { ok: True, val: f(r.err) } }
+    }
+    return r
+}
+
+# The same thing keyed on the tag, spelled the way Effect spells it. This one
+# has to name the error type structurally, so the result's error channel widens
+# to `{ _tag: str }` and can no longer flow back into a declared union — use
+# `catch_if` with `tag_of` when the channel has to stay precise:
+#
+#     catch_if(load(p), (e) => tag_of(e) == "NotFound", (e) => "")
+def catch_tag[T](r: Result[T, { _tag: str }], tag: str,
+                 f: ({ _tag: str }) -> T) -> Result[T, { _tag: str }] {
+    return catch_if(r, (e) => tag_of(e) == tag, f)
+}
+
+# Run `f` for its effects when the result failed; the result is unchanged.
+def tap_error[T, E](r: Result[T, E], f: (E) -> None) -> Result[T, E] {
+    if r.ok == False { f(r.err) }
+    return r
+}
+
+# Fall back to another computation. `f` is a thunk, so the fallback does no
+# work when the first attempt succeeded.
+def or_else[T, E, F](r: Result[T, E], f: () -> Result[T, F]) -> Result[T, F] {
+    if r.ok == False { return f() }
+    return { ok: True, val: r.val }
+}
+
+# Call `f` until it succeeds, up to `attempts` times in total. Returns the last
+# failure when every attempt failed. `attempts <= 0` calls `f` once.
+def retry[T, E](f: () -> Result[T, E], attempts: int) -> Result[T, E] {
+    r = f()
+    n = 1
+    while r.ok == False and n < attempts {
+        r = f()
+        n = n + 1
+    }
+    return r
+}
+
+# --- moving errors between channels ---------------------------------------
+
+# Move the failure into the value channel: the outcome becomes an ordinary
+# value that a caller inspects, and the result itself can no longer fail. This
+# is what makes `const outcome = try either(risky())` legal in a function that
+# declares no errors of its own.
+def either[T, E](r: Result[T, E]) -> Result[Result[T, E], never] pure {
+    return { ok: True, val: r }
+}
+
+# Discard the error, keeping only whether there was a value.
+def option[T, E](r: Result[T, E]) -> Option[T] pure {
+    if r.ok == True { return { some: True, val: r.val } }
+    return { some: False }
+}
+
+# Option -> Result, supplying the error the Option did not carry.
+def ok_or[T, E](o: Option[T], e: E) -> Result[T, E] pure {
     if o.some == True { return { ok: True, val: o.val } }
-    return { ok: False, err: msg }
+    return { ok: False, err: e }
+}
+
+# --- collections -----------------------------------------------------------
+
+# All of the values, or the first failure. The short-circuit is the point:
+# nothing after the first error is inspected.
+def all[T, E](rs: list[Result[T, E]]) -> Result[list[T], E] {
+    out: list[T] = []
+    for r in rs {
+        if r.ok == False { return { ok: False, err: r.err } }
+        out = out + [r.val]
+    }
+    return { ok: True, val: out }
+}
+
+# Every value that succeeded, dropping the failures.
+def oks[T, E](rs: list[Result[T, E]]) -> list[T] {
+    out: list[T] = []
+    for r in rs {
+        if r.ok == True { out = out + [r.val] }
+    }
+    return out
 }

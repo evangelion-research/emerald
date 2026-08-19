@@ -190,6 +190,24 @@ static void print_expr(FILE *out, const Expr *e) {
         print_expr(out, e->as.attr.obj);
         fprintf(out, " %s)", e->as.attr.name);
         break;
+    case E_TRY:
+        fputs("(try ", out);
+        print_expr(out, e->as.try_expr);
+        fputs(")", out);
+        break;
+    case E_CATCH:
+        fputs("(catch ", out);
+        print_expr(out, e->as.ctch.subject);
+        for (size_t i = 0; i < e->as.ctch.count; i++) {
+            const CatchArm *a = &e->as.ctch.arms[i];
+            fprintf(out, " (%s", a->tag ? a->tag : "_");
+            if (a->bind) fprintf(out, " %s", a->bind);
+            fputs(" ", out);
+            print_expr(out, a->body);
+            fputs(")", out);
+        }
+        fputs(")", out);
+        break;
     case E_LAMBDA:
         fputs("(lambda (", out);
         for (size_t i = 0; i < e->as.lam.param_count; i++) {

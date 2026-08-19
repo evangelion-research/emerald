@@ -1,7 +1,7 @@
 from result import Result, Option, ok, err, some, none, unwrap_or, opt_or, map_ok, and_then, is_ok, ok_or, why
 
-r: Result[int] = ok(3)
-b: Result[int] = err("boom")
+r: Result[int, str] = ok(3)
+b: Result[int, str] = err("boom")
 print(unwrap_or(r, 0), unwrap_or(b, 0), is_ok(r), is_ok(b), why(b))
 print(unwrap_or(map_ok(r, (x: int) => x * 2), 0))
 print(unwrap_or(and_then(r, (x: int) => ok(x + 1)), 0))

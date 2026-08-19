@@ -23,6 +23,7 @@ static const struct { const char *word; TokKind kind; } keywords[] = {
     {"pure", TK_PURE}, {"partial", TK_PARTIAL},
     {"import", TK_IMPORT}, {"from", TK_FROM}, {"as", TK_AS},
     {"dim", TK_DIM},
+    {"error", TK_ERROR_KW}, {"try", TK_TRY}, {"catch", TK_CATCH},
 };
 
 static Token make(Lexer *lx, TokKind k, const char *start, int start_col) {
@@ -158,6 +159,8 @@ const char *token_kind_name(TokKind k) {
         [TK_PURE] = "PURE", [TK_PARTIAL] = "PARTIAL",
         [TK_IMPORT] = "IMPORT", [TK_FROM] = "FROM", [TK_AS] = "AS",
         [TK_DIM] = "DIM",
+        [TK_ERROR_KW] = "ERROR_KW", [TK_TRY] = "TRY",
+        [TK_CATCH] = "CATCH",
         [TK_LBRACE] = "LBRACE", [TK_RBRACE] = "RBRACE",
         [TK_LPAREN] = "LPAREN", [TK_RPAREN] = "RPAREN",
         [TK_LBRACK] = "LBRACK", [TK_RBRACK] = "RBRACK",

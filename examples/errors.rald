@@ -1,0 +1,119 @@
+# Expected errors: failures a function declares, and the caller must handle.
+#
+# Emerald has no exceptions and no `unwrap()` that aborts. A function that can
+# fail says so in its return type, and every caller either handles the failure
+# or declares that it passes it on. Both halves are checked, so "I forgot that
+# this could fail" is a compile error rather than a 3am pager.
+
+from result import Result, ok, err, tag_of, unwrap_or, map_error, catch_if
+
+# --- declaring the failures -----------------------------------------------
+#
+# `error Name { ... }` declares a record carrying a literal discriminant:
+#     type NotFound = { _tag: "NotFound", key: str }
+# That literal is what lets the checker tell one error from another, and prove
+# a `catch` covers all of them. A payload-free error may omit the braces.
+
+error NotFound { key: str }
+error Malformed { key: str, saw: str }
+error Empty
+
+# --- a fallible function --------------------------------------------------
+#
+# `Result[T, E]`: produces a `T`, or fails with an `E`. The error side is an
+# ordinary union, so it says exactly which failures are expected here.
+
+const rows = ["port=8080", "host=localhost", "debug", "retries=three"]
+
+def field(key: str) -> Result[str, NotFound | Malformed | Empty] {
+    if key == "" { return err(Empty {}) }
+    for row in rows {
+        if starts_with(row, key + "=") {
+            const v = drop(row, len(key) + 1)
+            if v == "" { return err(Malformed { key: key, saw: row }) }
+            return ok(v)
+        }
+        if row == key { return err(Malformed { key: key, saw: row }) }
+    }
+    return err(NotFound { key: key })
+}
+
+def starts_with(s: str, prefix: str) -> bool pure {
+    if len(prefix) > len(s) { return False }
+    n = 0
+    while n < len(prefix) {
+        if s[n] != prefix[n] { return False }
+        n = n + 1
+    }
+    return True
+}
+
+def drop(s: str, n: int) -> str pure {
+    out = ""
+    i = n
+    while i < len(s) {
+        out = out + s[i]
+        i = i + 1
+    }
+    return out
+}
+
+def digits_of(s: str) -> Result[int, Malformed] {
+    for c in s {
+        if c < "0" or c > "9" { return err(Malformed { key: "int", saw: s }) }
+    }
+    return ok(int(s))
+}
+
+# --- try: propagate ---------------------------------------------------------
+#
+# `try e` unwraps a result, or hands its failure straight back to this
+# function's caller. It is only legal when the caller's own error channel can
+# carry that failure — drop `Malformed` from the return type below and the
+# checker names the error that would escape.
+
+def port() -> Result[int, NotFound | Malformed | Empty] {
+    const raw = try field("port")
+    const n = try digits_of(raw)
+    return ok(n)
+}
+
+# `map_error` rewrites the error channel, which is how a layer converts a
+# failure into one its own callers know about.
+def retries() -> Result[int, Malformed] {
+    return map_error(digits_of(unwrap_or(field("retries"), "0")),
+                     (e) => Malformed { key: "retries", saw: tag_of(e) })
+}
+
+# --- catch: handle ----------------------------------------------------------
+#
+# `catch` is an expression: its value is the success value, or the value of the
+# arm that matched. Every declared error must be named by an arm, or by a
+# single catch-all `_` — a missing arm is E_TYPE_CATCH, not a surprise at run
+# time. Arms may bind the error to read its fields.
+
+def port_or_default() -> int {
+    return catch port() {
+        NotFound e -> 80
+        Malformed e -> 0 - 1
+        Empty -> 0
+    }
+}
+
+def host() -> str {
+    return catch field("host") {
+        _ e -> "unknown (" + tag_of(e) + ")"
+    }
+}
+
+print("port:", port_or_default())
+print("host:", host())
+print("retries:", unwrap_or(retries(), 0))
+print("debug:", catch field("debug") { _ -> "malformed" })
+print("missing:", catch field("nope") { _ e -> tag_of(e) })
+
+# The combinators are for the cases where a function value reads better than an
+# expression — `catch_if` recovers from just the failures a predicate selects.
+const recovered = catch_if(field("nope"), (e) => tag_of(e) == "NotFound",
+                           (e) => "default")
+print("recovered:", unwrap_or(recovered, "?"))

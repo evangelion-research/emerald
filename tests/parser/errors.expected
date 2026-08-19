@@ -1,0 +1,8 @@
+(program
+  (type Empty {_tag: "Empty"})
+  (type ParseError {_tag: "ParseError", line: int, msg: str})
+  (def run (s:str) -> int
+    (const n (try (call parse s)))
+    (return (catch (call step n) (ParseError e (attr e line)) (_ 0)))
+  )
+)

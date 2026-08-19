@@ -13,29 +13,29 @@
 import strings
 from result import Result
 
-def read(path: str) -> Result[str] {
+def read(path: str) -> Result[str, str] {
     content = read_file_opt(path)
     if content == None { return { ok: False, err: "cannot read '" + path + "'" } }
     return { ok: True, val: content }
 }
 
-def read_lines(path: str) -> Result[list[str]] {
+def read_lines(path: str) -> Result[list[str], str] {
     content = read_file_opt(path)
     if content == None { return { ok: False, err: "cannot read '" + path + "'" } }
     return { ok: True, val: strings.split_lines(content) }
 }
 
-def write(path: str, content: str) -> Result[None] {
+def write(path: str, content: str) -> Result[None, str] {
     write_file(path, content)
     return { ok: True, val: None }
 }
 
-def append_to(path: str, content: str) -> Result[None] {
+def append_to(path: str, content: str) -> Result[None, str] {
     append_file(path, content)
     return { ok: True, val: None }
 }
 
-def write_lines(path: str, lines: list[str]) -> Result[None] {
+def write_lines(path: str, lines: list[str]) -> Result[None, str] {
     return write(path, strings.join("\n", lines) + "\n")
 }
 

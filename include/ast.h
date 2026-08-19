@@ -68,7 +68,19 @@ typedef enum {
     E_NAME, E_LIST, E_REC,
     E_BINOP, E_UNOP, E_CALL, E_INDEX, E_ATTR,
     E_LAMBDA,   /* (a: int, b) => body: anonymous function value */
+    E_TRY,      /* try e: unwrap a Result, propagating its error to the caller */
+    E_CATCH,    /* catch e { Tag b -> expr, ... }: handle every expected error */
 } ExprKind;
+
+/* One arm of a `catch`. `tag` is the error type's name, or NULL for the
+ * catch-all arm `_`. `bind`, when non-NULL, names the error value inside
+ * `body` — an arm that does not need the payload omits it. */
+typedef struct {
+    char *tag;
+    char *bind;
+    struct Expr *body;
+    int line, col;
+} CatchArm;
 
 typedef enum {
     B_ADD, B_SUB, B_MUL, B_DIV, B_MOD,
@@ -101,6 +113,12 @@ struct Expr {
         struct { Expr *fn; Expr **args; size_t count; } call; /* fn is E_NAME */
         struct { Expr *seq, *idx; } index;
         struct { Expr *obj; char *name; } attr;
+        Expr *try_expr;                   /* E_TRY */
+        struct {                          /* E_CATCH */
+            Expr *subject;
+            CatchArm *arms;
+            size_t count;
+        } ctch;
         struct {                            /* E_LAMBDA */
             char **params;
             TypeExpr **param_types;          /* entries may be NULL (=any) */

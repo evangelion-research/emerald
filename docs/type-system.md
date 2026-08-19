@@ -211,9 +211,9 @@ Inference notes:
 - A function's type parameters are in scope in its **body** as well as its
   signature, so a generic function can declare a local of its own type
   parameter: `out: list[T] = []` inside `def f[T](...)`.
-- Unification looks through unions on both sides, so `def f[T](r: Result[T])`
-  binds `T = int` from a `Result[int]` argument even though `Result` expands to
-  a two-alternative union.
+- Unification looks through unions on both sides, so `def f[T, E](r: Result[T, E])`
+  binds `T = int` from a `Result[int, str]` argument even though `Result`
+  expands to a two-alternative union.
 - A variable bound from several arguments takes the join (union) of them.
 - Inferred arguments are widened, so `head([1, 2])` gives `int`, not `1 | 2`.
 - An unconstrained variable falls back to `any` rather than erroring.
@@ -254,6 +254,81 @@ Inference notes:
 Errors carry `file:line:` and don't stop the checker — you get the full
 list. (Top-level errors print before function-body errors, because bodies
 are checked in a later pass once global types are known.)
+
+## Expected errors
+
+Failure is a value, and the type that carries it is an ordinary tagged union:
+
+```
+type Result[T, E] = { ok: True, val: T } | { ok: False, err: E }
+```
+
+Nothing about `Result` is built in. What the language adds is *checking* on
+values of that shape — `try` and `catch` recognise any type discriminated by a
+boolean-literal `ok` field carrying `val` on the True side and `err` on the
+False side, so a program that grows its own result type keeps the support.
+
+`error Name { ... }` declares one expected failure. It desugars to a record
+with a literal discriminant:
+
+```
+error NotFound { key: str }     ==     type NotFound = { _tag: "NotFound", key: str }
+```
+
+The literal `_tag` is what makes a union of errors *discriminated*: the same
+machinery that proves a `match` exhaustive tells `NotFound` from `Denied`. A
+record literal `NotFound { key: "port" }` fills the `_tag` in, and — unlike an
+ordinary string literal field — that one does not widen to `str` when it flows
+through a generic, so an error still matches its declaration after a round trip
+through `err(...)`.
+
+### `try`: the error channel
+
+`try e` is the value of `e` when it succeeded, and an early `return` of the
+failure when it did not. The obligation is on the enclosing function, and it is
+exactly Rust's rule for `?`:
+
+```
+def port() -> Result[int, NotFound | Malformed] {
+    const raw = try field("port")     # field can fail with NotFound
+    const n = try digits_of(raw)      # digits_of can fail with Malformed
+    return ok(n)
+}
+```
+
+Drop `Malformed` from that signature and the checker names the escaping error
+(`E_TYPE_ERRCHAN`) — a function's declared errors are the complete list of what
+it can fail with, and the compiler holds it to that. A function whose return
+type is unannotated (`any`) is unchecked here, like everywhere else in the
+gradual type system. A lambda has no declared return type at all, so `try`
+inside one is rejected outright (`E_TYPE_TRY`) rather than silently propagating
+out of a function whose type says it cannot fail.
+
+### `catch`: handling, exhaustively
+
+`catch` is an expression whose value is the subject's success value, or the
+value of the arm that matched:
+
+```
+const n = catch port() {
+    NotFound e -> 80
+    Malformed e -> 0 - 1
+}
+```
+
+Every error the subject can produce must be named by an arm or by a single
+catch-all `_` (which binds whatever the named arms did not take). A missing arm
+is `E_TYPE_CATCH`, an arm naming an error that cannot occur is also
+`E_TYPE_CATCH`, and so is a second arm for an error already handled. The type
+of the whole expression is the join of the success type and the arms' types —
+so a `catch` whose arms all produce the success type produces exactly that.
+
+This is not exception handling. There is no unwinding, no handler search, and
+no invisible control flow: `try` compiles to a comparison and a `return`, and
+`catch` to a chain over `_tag`. The cost is what it looks like.
+
+[`errors.md`](errors.md) is the full reference: the combinator table against
+Effect's API, the module-boundary rule, and what each form lowers to.
 
 ## Purity, totality, and proof mode
 

@@ -503,6 +503,25 @@ static void rw_expr(RW *rw, Expr *e, const RScope *sc) {
         rw_expr(rw, e->as.index.seq, sc);
         rw_expr(rw, e->as.index.idx, sc);
         break;
+    case E_TRY:
+        rw_expr(rw, e->as.try_expr, sc);
+        break;
+    case E_CATCH: {
+        /* An arm's error tag names a *type*, matched by the `_tag` string the
+         * declaration baked in, so it is never renamed. The arm's binding is
+         * a fresh local, and shadows anything the linker would rewrite. */
+        rw_expr(rw, e->as.ctch.subject, sc);
+        for (size_t i = 0; i < e->as.ctch.count; i++) {
+            const CatchArm *a = &e->as.ctch.arms[i];
+            RScope asc;
+            memset(&asc, 0, sizeof(asc));
+            asc.parent = sc;
+            if (a->bind) names_add(&asc.bound, a->bind);
+            rw_expr(rw, a->body, &asc);
+            free(asc.bound.items);
+        }
+        break;
+    }
     case E_LAMBDA: {
         /* lambda parameters bind like function parameters */
         RScope lsc;

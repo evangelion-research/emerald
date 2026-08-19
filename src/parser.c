@@ -431,6 +431,66 @@ static Expr *try_parse_lambda(Parser *p, int line, int col) {
     return e;
 }
 
+static Expr *parse_header_expr(Parser *p);
+
+/* Is the parser looking at `Tag { field: v, ... }` or `Tag {}` — a tagged
+ * error literal — rather than a name followed by a block? Deciding needs
+ * three tokens of lookahead, so snapshot and restore around the probe. */
+static bool tagged_rec_ahead(Parser *p) {
+    PSave save = psave(p);
+    bool yes = false;
+    advance(p); /* past the name */
+    if (check(p, TK_LBRACE)) {
+        advance(p);
+        if (check(p, TK_RBRACE)) {
+            yes = true;
+        } else if (check(p, TK_IDENT)) {
+            advance(p);
+            yes = check(p, TK_COLON);
+        }
+    }
+    prestore(p, save);
+    return yes;
+}
+
+/* `catch subject { Tag bind -> expr, _ -> expr }`: handle every error the
+ * subject can produce. Arm bodies are single expressions, like lambda
+ * bodies; separating commas are optional. */
+static Expr *parse_catch(Parser *p) {
+    int line = p->cur.line, col = p->cur.col;
+    advance(p); /* catch */
+    Expr *e = new_expr(E_CATCH, line, col);
+    e->as.ctch.subject = parse_header_expr(p);
+    expect(p, TK_LBRACE, "'{' opening catch arms");
+    CatchArm *arms = NULL;
+    size_t n = 0, cap = 0;
+    while (!check(p, TK_RBRACE) && !check(p, TK_EOF)) {
+        if (n == cap) {
+            cap = cap ? cap * 2 : 4;
+            arms = xrealloc(arms, sizeof(CatchArm) * cap);
+        }
+        CatchArm *a = &arms[n++];
+        memset(a, 0, sizeof *a);
+        a->line = p->cur.line;
+        a->col = p->cur.col;
+        Token t = expect(p, TK_IDENT, "an error type name or '_' in a catch arm");
+        a->tag = tok_text(t);
+        if (strcmp(a->tag, "_") == 0) a->tag = NULL; /* the catch-all arm */
+        if (check(p, TK_IDENT)) {
+            a->bind = tok_text(p->cur);
+            advance(p);
+        }
+        expect(p, TK_ARROW, "'->' after a catch arm's error type");
+        a->body = parse_expr(p);
+        match(p, TK_COMMA); /* optional separator */
+    }
+    expect(p, TK_RBRACE, "'}' closing catch");
+    if (n == 0) perror_at(p, line, col, "catch needs at least one arm");
+    e->as.ctch.arms = arms;
+    e->as.ctch.count = n;
+    return e;
+}
+
 static Expr *parse_primary(Parser *p) {
     int line = p->cur.line, col = p->cur.col;
     switch (p->cur.kind) {
@@ -455,7 +515,38 @@ static Expr *parse_primary(Parser *p) {
     case TK_TRUE:  advance(p); return new_expr(E_TRUE, line, col);
     case TK_FALSE: advance(p); return new_expr(E_FALSE, line, col);
     case TK_NONE:  advance(p); return new_expr(E_NONE, line, col);
+    case TK_CATCH:
+        return parse_catch(p);
     case TK_IDENT: {
+        if (!p->no_rec && tagged_rec_ahead(p)) {
+            /* `ParseError { line: 1 }` — a record carrying the discriminant
+             * `_tag: "ParseError"`, which is exactly what `error ParseError`
+             * declared as a type. Construction needs no special node. */
+            char *tag = tok_text(p->cur);
+            advance(p);
+            advance(p); /* past '{' */
+            Expr *e = new_expr(E_REC, line, col);
+            PtrVec names = {0}, values = {0};
+            Expr *tage = new_expr(E_STR, line, col);
+            tage->as.sval = tag;
+            vec_push(&names, (char *)"_tag");
+            vec_push(&values, tage);
+            bool saved = p->no_rec;
+            p->no_rec = false;
+            while (!check(p, TK_RBRACE)) {
+                Token nm = expect(p, TK_IDENT, "field name in error literal");
+                expect(p, TK_COLON, "':' after field name");
+                vec_push(&names, tok_text(nm));
+                vec_push(&values, parse_expr(p));
+                if (!match(p, TK_COMMA)) break;
+            }
+            p->no_rec = saved;
+            expect(p, TK_RBRACE, "'}' closing error literal");
+            e->as.rec.names = (char **)names.items;
+            e->as.rec.values = (Expr **)values.items;
+            e->as.rec.count = names.count;
+            return e;
+        }
         Expr *e = new_expr(E_NAME, line, col);
         e->as.sval = tok_text(p->cur);
         advance(p);
@@ -571,6 +662,16 @@ static Expr *parse_postfix(Parser *p) {
 }
 
 static Expr *parse_unary(Parser *p) {
+    if (check(p, TK_TRY)) {
+        /* `try e` unwraps a Result, returning its error from the enclosing
+         * function when there is one. It binds tighter than every binary
+         * operator, so `try f(x) |> g` pipes the *unwrapped* value. */
+        int line = p->cur.line, col = p->cur.col;
+        advance(p);
+        Expr *e = new_expr(E_TRY, line, col);
+        e->as.try_expr = parse_unary(p);
+        return e;
+    }
     if (check(p, TK_MINUS)) {
         int line = p->cur.line, col = p->cur.col;
         advance(p);
@@ -1050,6 +1151,41 @@ static Stmt *parse_stmt(Parser *p) {
         } while (match(p, TK_COMMA));
         s->as.dim.names = (char **)names.items;
         s->as.dim.count = names.count;
+        return s;
+    }
+    case TK_ERROR_KW: {
+        /* `error Name { field: T }` is sugar for a type alias whose record
+         * carries a literal discriminant:
+         *     type Name = { _tag: "Name", field: T }
+         * Nothing downstream needs to know about `error`: the checker sees an
+         * ordinary tagged record, so unions of errors narrow and prove
+         * exhaustive with the machinery `match` already uses. */
+        advance(p);
+        Token name = expect(p, TK_IDENT, "error type name after 'error'");
+        Stmt *s = new_stmt(p, S_TYPEDEF, line, col);
+        s->as.tdef.name = tok_text(name);
+        s->as.tdef.dispname = s->as.tdef.name;
+        TypeExpr *rec = new_type(TE_REC, line, col);
+        PtrVec fnames = {0}, ftypes = {0};
+        TypeExpr *tag = new_type(TE_LIT, line, col);
+        tag->lit.kind = LIT_STR;
+        tag->lit.sval = s->as.tdef.name;
+        vec_push(&fnames, (char *)"_tag");
+        vec_push(&ftypes, tag);
+        if (match(p, TK_LBRACE)) { /* a payload-free error may omit the braces */
+            while (!check(p, TK_RBRACE)) {
+                Token f = expect(p, TK_IDENT, "field name in error declaration");
+                expect(p, TK_COLON, "':' after field name");
+                vec_push(&fnames, tok_text(f));
+                vec_push(&ftypes, parse_type(p));
+                if (!match(p, TK_COMMA)) break;
+            }
+            expect(p, TK_RBRACE, "'}' closing error declaration");
+        }
+        rec->fields.names = (char **)fnames.items;
+        rec->fields.types = (TypeExpr **)ftypes.items;
+        rec->fields.count = fnames.count;
+        s->as.tdef.value = rec;
         return s;
     }
     case TK_TYPE: {

@@ -1,0 +1,23 @@
+error[E_TYPE_CATCH]: 'catch' is not exhaustive: B is never handled (add an arm for it, or a catch-all '_')
+  --> tests/check/bad_catch_arms.rald:13:12
+     |
+ 13 |     return catch fails(n) { A e -> e.x }
+    |            ^
+   = expected: {_tag: "A", x: int} | {_tag: "B", y: int}
+error[E_TYPE_CATCH]: 'C' is not one of the errors this expression can fail with ({_tag: "A", x: int} | {_tag: "B", y: int})
+  --> tests/check/bad_catch_arms.rald:17:41
+     |
+ 17 |     return catch fails(n) { A e -> e.x, C e -> 0, B e -> e.y }
+    |                                         ^
+   = expected: {_tag: "A", x: int} | {_tag: "B", y: int}
+error[E_TYPE_CATCH]: error 'A' is already handled by an earlier arm
+  --> tests/check/bad_catch_arms.rald:21:41
+     |
+ 21 |     return catch fails(n) { A e -> e.x, A e -> 0, B e -> e.y }
+    |                                         ^
+error[E_TYPE_CATCH]: 'catch' needs a result value ({ ok: True, val: T } | { ok: False, err: E }), got int
+  --> tests/check/bad_catch_arms.rald:25:12
+     |
+ 25 |     return catch n { A e -> e.x }
+    |            ^
+   = actual:   int

@@ -1,0 +1,24 @@
+error[E_TYPE_ERRCHAN]: unhandled error: 'try' can fail with {_tag: "A", x: int} | {_tag: "B", y: int}, which this function does not declare (it fails with {_tag: "A", x: int})
+  --> tests/check/bad_try_channel.rald:13:15
+     |
+ 13 |     const v = try fails(n)
+    |               ^
+   = expected: {_tag: "A", x: int}
+   = actual:   {_tag: "A", x: int} | {_tag: "B", y: int}
+error[E_TYPE_ERRCHAN]: 'try' can only propagate out of a function that returns a result; this one returns int
+  --> tests/check/bad_try_channel.rald:18:12
+     |
+ 18 |     return try fails(n)
+    |            ^
+   = actual:   int
+error[E_TYPE_TRY]: 'try' inside a lambda has no error channel to propagate to: give the lambda body a nested 'def' with a declared result type, or handle the failure here with 'catch'
+  --> tests/check/bad_try_channel.rald:22:22
+     |
+ 22 |     const f = (x) => try fails(x)
+    |                      ^
+error[E_TYPE_TRY]: 'try' needs a result value ({ ok: True, val: T } | { ok: False, err: E }), got int
+  --> tests/check/bad_try_channel.rald:27:15
+     |
+ 27 |     return ok(try n)
+    |               ^
+   = actual:   int

@@ -22,7 +22,7 @@ comment    = "#" .* to end of line ;
 - Strings support escapes: `\\`, `\"`, `\'`, `\n`, `\t`, `\r`, `\0`.
 - Keywords: `def if else elif while for in return and or not
   True False None break continue pass type pure partial import from as
-  const match dim`.
+  const match dim error try catch`.
 - Operators/punct: `{ } ( ) [ ] , . : ; = + - * / % == != < <= > >= | & ->
   => |> >>` (`=>` lambda, `|>` pipe, `>>` compose).
 - Semicolons `;` are optional statement separators.
@@ -45,6 +45,7 @@ statement     := func_def
                | break_stmt | continue_stmt | pass_stmt
                | match_stmt
                | type_def
+               | error_def
                | dim_def
                | import_stmt
                | block | simple_stmt
@@ -68,6 +69,9 @@ while_stmt    := "while" expr block
 for_stmt      := "for" IDENT "in" expr block
 return_stmt   := "return" [expr]
 type_def      := "type" IDENT [tparams] "=" type
+error_def     := "error" IDENT ["{" [field ("," field)*] "}"]
+                 (* sugar: `error E { f: T }` == `type E = { _tag: "E", f: T }` *)
+field         := IDENT ":" type
 dim_def       := "dim" IDENT ("," IDENT)*   (* nominal dimension names *)
 block         := "{" statement* "}"
 simple_stmt   := "const" IDENT [":" type] "=" expr  (* immutable binding *)
@@ -88,6 +92,40 @@ pattern_field := IDENT [":" pattern]        (* `{ x }` binds field x to x *)
 - `match` is exhaustive: the checker proves the patterns cover the subject's
   type and rejects a match with no catch-all when it cannot (`E_TYPE_MATCH`).
   Patterns bind names only in their own arm. `_` matches anything.
+- `error Name { ... }` declares an expected failure. It is pure sugar for a
+  record type carrying a literal discriminant, so nothing downstream needs a
+  special case: `error Empty` is `type Empty = { _tag: "Empty" }`. Build one
+  with `Name { field: v }`, which fills in the `_tag` for you. See
+  `docs/type-system.md` for how `try` and `catch` use them.
+
+## Expected Errors
+
+```
+try_expr      := "try" unary        (* unwrap a result, or return its failure *)
+catch_expr    := "catch" expr "{" catch_arm ("," catch_arm)* [","] "}"
+catch_arm     := (IDENT | "_") [IDENT] "->" expr
+```
+
+- `try e` evaluates `e`, which must have a *result* type — `{ ok: True, val: T }
+  | { ok: False, err: E }`, spelled `Result[T, E]` in the standard library. On
+  success it is the `T`; on failure the enclosing function returns the failure
+  unchanged. It binds tighter than every binary operator, so `try f(x) |> g`
+  pipes the unwrapped value.
+- The enclosing function must declare a result type whose error side can carry
+  everything `e` can fail with, or the escaping error is `E_TYPE_ERRCHAN`. A
+  lambda has no declared return type and so no channel: `try` inside one is
+  `E_TYPE_TRY` (use a nested `def`).
+- `catch e { ... }` is an **expression**: its value is `e`'s success value, or
+  the value of the arm that matched. Each arm names an error type and may bind
+  it (`NotFound e -> e.key`); `_` is the catch-all, and binds whatever the
+  named arms did not take. Every error the subject can produce must be covered
+  (`E_TYPE_CATCH`). Arm bodies are single expressions, like lambda bodies —
+  a `{` there opens a record literal, not a block.
+- Neither form is exception handling: a result is an ordinary value, `try` is
+  an early `return`, and there is no stack unwinding or hidden control flow.
+
+See [`errors.md`](errors.md) for the semantics, and
+[`core-calculus.md`](core-calculus.md) §5 for `[T-TRY]` and `[T-CATCH]`.
 
 ## Type Expressions
 
@@ -139,12 +177,14 @@ not           := "not" not | comparison
 comparison     := additive ( ("=="|"!="|"<"|"<="|">"|">=") additive )*
 additive       := multiplicative ( ("+"|"-") multiplicative )*
 multiplicative := unary ( ("*"|"/"|"%") unary )*
-unary          := "-" unary | postfix
+unary          := "-" unary | "try" unary | postfix
 postfix        := primary ( "(" [expr ("," expr)*] ")"    (* IDENT callee only *)
                           | "[" expr "]"
                           | "." IDENT )*
 primary        := int_lit | float_lit | string_lit
                | "True" | "False" | "None"
+               | catch_expr
+               | IDENT "{" [IDENT ":" expr ("," IDENT ":" expr)*] "}" (* error literal *)
                | IDENT | "(" expr ")"
                | "(" [param ("," param)*] ")" "=>" expr   (* lambda *)
                | "[" [expr ("," expr)*] "]"
@@ -176,6 +216,12 @@ forbidden at the top level of a control-flow header expression — in
 record there: `if (p == { x: 1 }) { ... }`. Everywhere else (assignments,
 call arguments, list elements, nested in parens/brackets) records parse
 normally.
+
+The error literal `Name { field: v }` extends that rule: `IDENT {` opens one
+only when the brace is followed by `field:` or closes immediately, and only
+where a record literal is allowed at all. The one construction it takes away
+is a statement that is a bare name followed by a block statement — write the
+block's first statement first, or parenthesize the name.
 
 ## Semantics Notes
 

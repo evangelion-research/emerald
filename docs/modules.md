@@ -153,6 +153,14 @@ rewritten keeps the spelling the user wrote, and diagnostics quote *that*:
 error[E_TYPE_ARG]: argument 1 of lib.takes_int(): expected int, got "not an int"
 ```
 
+One thing is deliberately *not* renamed: the `_tag` an `error` declaration
+bakes into its values. The type alias is mangled like any other name
+(`errs.NotFound` → `errs__NotFound`), but the discriminant stays the
+source-level `"NotFound"`, so an error declared in one module is caught by its
+written name in another. The consequence is structural, like the rest of the
+language: two modules that both declare `error NotFound` produce values nothing
+can tell apart. See [`errors.md`](errors.md) §7.
+
 Modules are concatenated into one translation unit, which preserves the existing
 GC shadow-stack setup and avoids designing a linking story on day one. Splitting
 into separate `.gen.c` files is a later change, when compile times justify it.
