@@ -54,6 +54,9 @@ EM_BUILTIN(     "chr",           "em_chr",            1, true)
 EM_BUILTIN(     "map",           "em_map",            2, true)
 EM_BUILTIN(     "filter",        "em_filter",         2, true)
 EM_BUILTIN(     "reduce",        "em_reduce",         3, true)
+EM_BUILTIN(     "read_line",     "em_read_line",      0, false)
+EM_BUILTIN(     "now",           "em_now",            0, false)
+EM_BUILTIN_VOID("seed_rand",     "em_seed",           1, false)
 
 /* --- tensor primitives (tensors.md) -------------------------------------- */
 EM_BUILTIN(     "zeros",         "em_tensor_zeros",   1, true)

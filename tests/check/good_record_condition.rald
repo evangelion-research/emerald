@@ -1,0 +1,16 @@
+# Record literals in control-flow conditions are fine when parenthesized —
+# without the parens the `{` would open a block (see bad_record_condition.rald).
+
+type Point = { x: int, y: int }
+
+def is_origin(p: Point) -> bool {
+    return p == { x: 0, y: 0 }
+}
+
+p: Point = { x: 0, y: 0 }
+q: Point = { x: 1, y: 2 }
+
+if (p == { x: 0, y: 0 }) { print("origin") }
+if (p == { x: 0, y: 0 } and q == { x: 1, y: 2 }) { print("both match") }
+while ({ x: 0 } == { x: 0 } and is_origin(p)) { break }
+print(is_origin(q))

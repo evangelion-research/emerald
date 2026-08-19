@@ -1,0 +1,44 @@
+# strings_tour — the Python-shaped string methods, one quick tour.
+#
+# stdlib/strings spells Python's `s.method(...)` as `strings.method(s, ...)`,
+# and stdlib/fmt provides the positional-hole core of str.format.
+#
+#   task examples    (or: bin/emeraldc examples/strings_tour.rald && ./examples/strings_tour)
+
+import strings
+import fmt
+
+# Casing
+print(strings.capitalize("hELLO"), strings.title("they're bill's"), strings.swapcase("Hello World"))
+
+# Alignment: a right-aligned price column with a centered header
+print(strings.rjust("item", 12, " "), strings.rjust("price", 8, " "))
+print(strings.rjust("apple", 12, " "), strings.rjust("1.25", 8, " "))
+print(strings.center("--- totals ---", 20, "-"))
+
+# Zero-fill keeps a leading sign in front, like Python's zfill
+print(strings.zfill("-42", 5), strings.zfill("7", 5))
+
+# Tabs expand to the next multiple of the tab size
+print("[" + strings.expandtabs("a\tb\tc", 4) + "]")
+
+# Prefix/suffix surgery
+print(strings.removeprefix("file.rald", "file."), strings.removesuffix("file.rald", ".rald"))
+
+# Split from the right, so the last field is always intact
+print(strings.rsplit("a,b,c,d", ",", 2))
+
+# Whole-string predicates
+for word in ["123", "abc", "AbC", "Hello World", "  "] {
+    print(fmt.f("is_digit({})={} is_alpha({})={} is_upper({})={}",
+                [word, strings.is_digit(word), word, strings.is_alpha(word), word, strings.is_upper(word)]))
+}
+
+# translate: a 256-byte table maps or deletes, like Python's maketrans/translate
+t = strings.make_trans("aeiou", "41230")
+print(strings.translate("hello world", t))
+print(strings.translate("hello world", strings.make_delete("lo")))
+
+# fmt: positional holes, `{{`/`}}` for literal braces
+print(fmt.f("{} + {} = {}", [2, 3, 5]))
+print(fmt.f("{{curly}} braces in {}", ["Emerald"]))

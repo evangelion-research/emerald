@@ -1,0 +1,10 @@
+a of b
+1 + 2 = 3
+pi is 3.14
+{literal} and x
+too few: 1 {} {}
+extra: 1
+list: [1, 'a']
+lone brace: {x}
+True 2 s
+mixed: 1 a 2.5

@@ -895,6 +895,51 @@ Value em_rand(void) {
                     (double)(1ULL << 53));
 }
 
+/* seed(n): make the PRNG reproducible. Zero is not a usable xorshift state,
+ * so it maps to the default seed rather than wedging the generator. */
+void em_seed(Value n) {
+    if (n.tag != V_INT)
+        rt_fatal("seed_rand() argument must be int, not %s", type_name(n));
+    uint64_t s = (uint64_t)n.as.i;
+    rng_state = s ? s : 88172645463325252ULL;
+}
+
+/* now(): monotonic seconds. The epoch is unspecified; only differences mean
+ * anything, which is all a stopwatch or a benchmark harness needs. */
+Value em_now(void) {
+    struct timespec ts;
+#if defined(CLOCK_MONOTONIC)
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
+        return em_float((double)ts.tv_sec + (double)ts.tv_nsec * 1e-9);
+#endif
+    return em_float((double)clock() / (double)CLOCKS_PER_SEC);
+}
+
+/* read_line(): one line from stdin without its newline, or None at EOF. The
+ * line is read into a growing buffer because stdin has no seekable length. */
+Value em_read_line(void) {
+    size_t cap = 128, len = 0;
+    char *buf = xmalloc(cap);
+    int c;
+    while ((c = fgetc(stdin)) != EOF) {
+        if (c == '\n') break;
+        if (len + 1 >= cap) {
+            cap *= 2;
+            buf = xrealloc(buf, cap);
+        }
+        buf[len++] = (char)c;
+    }
+    if (c == EOF && len == 0) {
+        free(buf);
+        return em_none();
+    }
+    /* A trailing \r is dropped so a CRLF file reads the same as an LF one,
+     * matching strings.split_lines. */
+    if (len > 0 && buf[len - 1] == '\r') len--;
+    buf[len] = '\0';
+    return str_take(buf, len);
+}
+
 Value em_gc_collect(void) {
     rt_gc_collect();
     return em_none();

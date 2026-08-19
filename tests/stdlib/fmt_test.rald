@@ -1,0 +1,12 @@
+import fmt
+
+print(fmt.f("{} of {}", ["a", "b"]))
+print(fmt.f("{} + {} = {}", [1, 2, 3]))
+print(fmt.f("pi is {}", [3.14]))
+print(fmt.f("{{literal}} and {}", ["x"]))
+print(fmt.f("too few: {} {} {}", [1]))
+print(fmt.f("extra: {}", [1, 2, 3]))
+print(fmt.f("list: {}", [[1, "a"]]))
+print(fmt.f("lone brace: {x}", ["y"]))
+print(fmt.f("{} {} {}", [True, 2, "s"]))
+print(fmt.f("mixed: {} {} {}", [1, "a", 2.5]))

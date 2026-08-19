@@ -181,6 +181,9 @@ Value em_chr(Value n);               /* 0..255 as a one-byte string */
 Value em_float_of(Value v);          /* float(), the counterpart of int() */
 void  em_eprint(size_t n, ...);      /* print(), to stderr */
 Value em_argv(void);                 /* the process's argument vector */
+Value em_read_line(void);            /* a line from stdin, or None at EOF */
+Value em_now(void);                  /* monotonic seconds; only diffs mean anything */
+void  em_seed(Value n);              /* reseed the PRNG for reproducibility */
 void  em_exit(Value code);           /* terminate with an exit status */
 void  rt_set_args(int argc, char **argv); /* called by main() before anything */
 

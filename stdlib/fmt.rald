@@ -1,0 +1,62 @@
+# fmt — the positional-hole core of Python's str.format / f-strings.
+#
+#   fmt.f("{} of {}", [a, b])     # -> "a of b"
+#
+# `{}` is replaced by the next argument, rendered with the str() builtin, so
+# ints, floats, bools, strings, lists and records all work. `{{` and `}}`
+# produce literal braces. A hole with no argument left is left as `{}`; surplus
+# arguments are ignored — both choices keep the signature a plain `str` rather
+# than a Result, which is what the SPEC's sketch promises.
+#
+# Real f-strings ("{x}" with the name in the string) are a lexer feature and
+# belong in the language, not here — see stdlib/SPEC.md §5.
+#
+# This module is deliberately not proof-clean: it takes `list[any]`, and proof
+# mode bans `any`. It is Tier 1, not bootstrap.
+
+import builder
+
+def f(template: str, args: list[any]) -> str {
+    b = builder.new()
+    i = 0
+    ai = 0
+    n = len(template)
+    while i < n {
+        c = slice(template, i, i + 1)
+        if c == "{" {
+            nxt = slice(template, i + 1, i + 2)
+            if nxt == "{" {
+                builder.push(b, "{")
+                i = i + 2
+            } elif nxt == "}" {
+                # a real hole: consume the closing brace with it
+                if ai < len(args) {
+                    builder.push(b, str(args[ai]))
+                    ai = ai + 1
+                } else {
+                    builder.push(b, "{}")
+                }
+                i = i + 2
+            } else {
+                # a lone `{` (e.g. "{x}" with no format spec) is literal
+                builder.push(b, "{")
+                i = i + 1
+            }
+        } else {
+            if c == "}" {
+                nxt = slice(template, i + 1, i + 2)
+                if nxt == "}" {
+                    builder.push(b, "}")
+                    i = i + 2
+                } else {
+                    builder.push(b, "}")
+                    i = i + 1
+                }
+            } else {
+                builder.push(b, c)
+                i = i + 1
+            }
+        }
+    }
+    return builder.build(b)
+}

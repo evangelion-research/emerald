@@ -12,6 +12,23 @@ bXXa aaaaaa
 ababab MIXED mixed cba
 [007] [7..]
 ['a', 'b', 'c'] b abc def
+Hello  mixed hELLO wORLD
+They'Re Bill'S Hello World
+[--ab--] [.abc..] [ab]
+00042 -00042 +007 123
+[ab..] [..ab]
+[a   b] [        ] ab
+world world hello hello
+['a,b,c', 'd'] ['a,b', 'c', 'd'] ['a', 'b', 'c'] ['nosep']
+{before: 'key=value', found: True, after: 'rest'} {before: '', found: False, after: 'nope'}
+True False False
+True False True False True False
+True True
+True False False True False
+True False False
+True False True False
+True False False False
+h2ll4 w4rld hll wrld zbc
 42 -17 8
 invalid digit in '4x2' empty string no digits in '-'
 255 11

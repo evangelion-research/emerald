@@ -1,8 +1,8 @@
 # Builtins
 
-Emerald has **fifty-two builtins**, compiled directly into calls on the runtime
+Emerald has **fifty-five builtins**, compiled directly into calls on the runtime
 (`src/runtime.c`) rather than resolved through a module. They are always in
-scope in every module: twenty-seven core builtins plus the twenty-five tensor
+scope in every module: thirty core builtins plus the twenty-five tensor
 primitives of Phase 2 (see the [Tensors](#tensors) section).
 
 They are not the standard library — that lives in [`stdlib/`](../stdlib/) and is
@@ -83,16 +83,19 @@ Radians. Present because the camera in
 
 ### `rand() -> float`
 
-A uniform float in `[0, 1)` from an xorshift64\* generator. **There is no seed
-builtin**, so a program using `rand()` is not reproducible across runs. When
-you need determinism — as the typed ray tracer does — thread an explicit
-generator instead; `examples/ray_tracer/typed/rng.rald` implements a seeded
-Park–Miller LCG in ~30 lines of Emerald and returns a `Draw[T] = { value: T,
-rng: Rng }` from every draw, making randomness a visible dataflow rather than
-an ambient effect.
+A uniform float in `[0, 1)` from an xorshift64\* generator, seeded from the
+clock at startup. `seed_rand(n)` makes a run reproducible; see below.
 
-That is still a gap worth noting: there is no *seeded* RNG builtin. But the
-ambient effect itself is now tracked. Emerald has a `pure` declaration
+Reproducibility does not have to be ambient. When randomness is part of the
+result — as in the typed ray tracer — thread an explicit generator instead;
+`examples/ray_tracer/typed/rng.rald` implements a seeded Park–Miller LCG in
+~30 lines of Emerald and returns a `Draw[T] = { value: T, rng: Rng }` from
+every draw, making randomness a visible dataflow rather than a hidden one.
+`seed_rand` is the cheap answer for a test that just needs the same numbers
+twice; the threaded generator is the honest one for a computation whose
+output is defined by its seed.
+
+The ambient effect itself is tracked. Emerald has a `pure` declaration
 (`def f(...) -> T pure`, see [`type-system.md`](type-system.md)); a pure
 function may call only the **pure builtins** — `len`, `range`, `str`, `int`,
 `sqrt`, `tan`, `gc_stats` — and calling `print`, `rand`, `read_file`,
@@ -230,6 +233,31 @@ def checked(n: int) -> int {
 Together with `while True`, this is the second way to inhabit `never` without
 recursion.
 
+### `seed_rand(n: int) -> None`
+
+Reseeds `rand()`, so the same seed replays the same stream. `0` is not a usable
+xorshift state and maps to the default seed rather than wedging the generator.
+
+Spelled `seed_rand` rather than `seed` because the builtin namespace is flat and
+shared: a builtin named `seed` would make the global `seed = 7` that any
+hand-rolled PRNG writes an `E_TYPE_ASSIGN`. Same reasoning as `io.append_to`
+(see [`stdlib/SPEC.md`](../stdlib/SPEC.md) §8). Tier 1's `random.seed` will wrap
+it under the Python name.
+
+### `now() -> float`
+
+Monotonic seconds. **The epoch is unspecified** — only differences are
+meaningful, which is all a stopwatch or a benchmark harness needs. Monotonic
+means it does not go backwards when the wall clock is adjusted, so it is not a
+calendar and cannot be turned into one.
+
+### `read_line() -> str | None`
+
+One line from stdin **without** its newline, or `None` at EOF — so the read loop
+is `while (line = read_line()) != None`, with no separate EOF test. A trailing
+`\r` is dropped, so a CRLF file reads the same as an LF one, matching
+`strings.split_lines`.
+
 ### `read_file_opt(path: str) -> str | None`
 
 `read_file` aborts on a missing file, which is right for a script and wrong for
@@ -316,9 +344,9 @@ function.
 ## What is deliberately still missing
 
 No dict type, no string methods, no `sorted`, no `min`/`max`, no `abs`, no math
-beyond `sqrt`/`tan`, no stdin, no seeded RNG.
+beyond `sqrt`/`tan`.
 
-The first six of those are not gaps any more — they are
+Those are not gaps any more — they are
 [`stdlib/`](../stdlib/) modules: `dict`, `strings`, `sort`, `lists`, `math`.
 They are *not* builtins on purpose. A standard library belongs in Emerald
 modules resolved through the [module system](modules.md), not in a growing `if
@@ -329,8 +357,5 @@ Still genuinely absent, with no library answer:
 
 | Missing | Why it matters |
 |---|---|
-| `read_line` / stdin | No REPLs, no filters. Nothing in the bootstrap needs it yet |
-| a seeded *scalar* RNG | `rand()` is unseedable. The tensor `randn(shape, seed)` is seeded (Phase 2), but the scalar `rand()` remains ambient; `examples/ray_tracer/typed/rng.rald` threads a Park–Miller LCG explicitly, which should become `stdlib/random` |
-| a monotonic clock | `time` and any benchmark harness need one |
 | bitwise operators | `\|` and `&` are type-level only, so there is no xor. `dict.hash_str` is djb2 rather than the FNV-1a the spec called for |
 | integer division | `/` is float division, so `math.floor_div` rounds through a double and is exact only under 2^53 |

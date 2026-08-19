@@ -1,0 +1,5 @@
+error[E_SYNTAX]: record literal not allowed here (wrap it in parentheses, or did you mean a block?)
+  --> tests/check/bad_record_condition.rald:5:4
+    |
+ 5 | if { x: 1 } == { x: 1 } { print("equal") }
+   |    ^

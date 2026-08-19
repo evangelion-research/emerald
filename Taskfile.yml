@@ -140,8 +140,9 @@ tasks:
 
       - |
         for f in tests/stdlib/*.rald; do
+          stdin="${f%.rald}.stdin"; [ -f "$stdin" ] || stdin=/dev/null
           ./bin/emeraldc -o "${f%.rald}.bin" "$f" &&
-            "${f%.rald}.bin" > "${f%.rald}.expected" 2>&1 || true
+            "${f%.rald}.bin" < "$stdin" > "${f%.rald}.expected" 2>&1 || true
           rm -f "${f%.rald}.bin"
         done
 

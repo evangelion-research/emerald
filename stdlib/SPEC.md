@@ -2,10 +2,11 @@
 
 **Status:** Tier 0 is **implemented**. Twelve modules (`result`, `chars`,
 `math`, `builder`, `lists`, `strings`, `sort`, `dict`, `set`, `io`, `sys`,
-`path`) compile and are covered by `tests/stdlib/` — `task test:stdlib`. Tier 1
-(§5) is not started.
+`path`) compile and are covered by `tests/stdlib/` — `task test:stdlib`. The
+first Tier 1 module, `fmt` (§5), is also done — it was the cheap one, and
+`strings` had just grown the methods that make it worth having.
 
-Building it changed three things in the compiler beyond the ten new builtins:
+Building it changed three things in the compiler beyond the thirteen new builtins:
 generic type parameters are now in scope inside a function body, unification
 looks through unions on both sides, and a global is only updatable from the
 module that declared it. The last was a linking bug the library found on its
@@ -53,7 +54,7 @@ These cannot be written in Emerald, or cannot be written at an acceptable
 complexity. **The stdlib does not start until the blockers land.** Each is a
 runtime function plus a `check.c` signature, in the existing builtin style.
 
-All ten below are now **implemented** as builtins; `docs/builtins.md` documents
+All thirteen below are now **implemented** as builtins; `docs/builtins.md` documents
 their behaviour. The reasoning is kept because it is the argument for why each
 one had to be a builtin rather than library code.
 
@@ -74,14 +75,19 @@ one had to be a builtin rather than library code.
 | `float` | `float(x: any) -> float` | `int()` exists; its float counterpart does not. Emerald's own lexer must parse float literals |
 | `stderr` | `eprint(...) -> None` | Diagnostics must not go to stdout, or `--emit-c` output is corrupted |
 
-**Wanted, deferrable:**
+**Wanted, deferrable — now implemented too:**
 
 | Primitive | Signature | Note |
 |---|---|---|
-| `read_line` | `read_line() -> str \| None` | `None` at EOF. Unlocks REPLs and filters; nothing in the bootstrap needs it. **Not implemented** |
-| `now` | `now() -> float` | Monotonic seconds. `time` and any benchmark harness need it. **Not implemented** |
-| `seed` | `seed(n: int) -> None` | The reproducibility gap `docs/builtins.md` already admits to. **Not implemented** |
+| `read_line` | `read_line() -> str \| None` | `None` at EOF, so the loop is `while (line = read_line()) != None`. A trailing `\r` is dropped, matching `strings.split_lines`. Unlocks REPLs and filters |
+| `now` | `now() -> float` | Monotonic seconds, unspecified epoch — only differences mean anything. `time` and any benchmark harness need it |
+| `seed_rand` | `seed_rand(n: int) -> None` | The reproducibility gap `docs/builtins.md` admitted to. `0` maps to the default seed rather than wedging the xorshift state. **Named `seed_rand`, not `seed`** — see §8 |
 | `list_set` (slice-assign) | — | Not proposed. `xs[i] = v` plus `append` covers it |
+
+These three were deferrable because nothing in the bootstrap needs them; they
+landed because Tier 1's `time`, `random` and `testing` all block on them and
+each is a dozen lines of runtime. All three are impure, so `--proof` code
+cannot call them, which is the right answer for a clock, a PRNG and stdin.
 
 Two more were added that this section did not anticipate, both so `io` could
 report failure as a value without breaking the aborting builtins every existing
@@ -203,8 +209,10 @@ stdlib/
   result.rald  chars.rald   math.rald    builder.rald
   lists.rald   strings.rald sort.rald    dict.rald
   set.rald     io.rald      sys.rald     path.rald
+  fmt.rald     (Tier 1)
 tests/stdlib/
   strings_test.rald + strings_test.expected     (one pair per area)
+  fmt_test.rald + fmt_test.expected
 ```
 
 Flat, one file per module, no packages until a module exceeds ~400 lines. Dotted
@@ -214,8 +222,10 @@ The dependency graph is a DAG, deepest first: `result` and `math` depend on
 nothing; `chars` on the `ord`/`chr` builtins; `builder` on `append`; `lists` on
 `result`; `strings` on `chars`, `builder` and `result`; `sort` on `lists`;
 `dict` on `result`; `set` on `dict` and `sort`; `io` and `path` on `strings`;
-`sys` on `lists`. `builder` deliberately does not import `strings`, because
-`strings` builds its results in `builder`.
+`sys` on `lists`; `fmt` on `builder`. `builder` deliberately does not import
+`strings`, because `strings` builds its results in `builder`. `fmt` is the one
+module that is not proof-clean — it takes `list[any]` — so it is Tier 1, not
+bootstrap, and no proof test imports it.
 
 **Resolution.** `module.c` searches a final root after the `-I` list, taken from
 `$EMERALD_STDLIB` and defaulting to a path baked in at build time, so `import
@@ -348,6 +358,8 @@ def split_lines(s: str) -> list[str]                  # \n, tolerates \r\n
 def split_ws(s: str) -> list[str]                     # runs of whitespace
 def join(sep: str, parts: list[str]) -> str
 def partition(s: str, sep: str) -> { before: str, found: bool, after: str } pure
+def rpartition(s: str, sep: str) -> { before: str, found: bool, after: str } pure  # last occurrence
+def rsplit(s: str, sep: str, maxsplit: int) -> list[str]  # split at the rightmost maxsplit seps
 
 # transformation
 def strip(s: str) -> str pure
@@ -359,6 +371,40 @@ def upper(s: str) -> str
 def lower(s: str) -> str
 def pad_left(s: str, width: int, fill: str) -> str
 def pad_right(s: str, width: int, fill: str) -> str
+def ljust(s: str, width: int, fill: str) -> str        # pad_right, under Python's name
+def rjust(s: str, width: int, fill: str) -> str        # pad_left, under Python's name
+def center(s: str, width: int, fill: str) -> str
+def zfill(s: str, width: int) -> str                   # zero-pad, sign kept in front
+def expandtabs(s: str, tabsize: int) -> str
+def removeprefix(s: str, prefix: str) -> str pure
+def removesuffix(s: str, suffix: str) -> str pure
+
+# casing
+def capitalize(s: str) -> str                 # first char upper, rest lower
+def casefold(s: str) -> str                   # lower, over bytes
+def swapcase(s: str) -> str
+def title(s: str) -> str                      # first letter of each word run upper
+
+# predicates (the whole-string versions of chars.*; empty is False everywhere
+# except is_ascii and is_printable, which are vacuously True like Python's)
+def is_digit(s: str) -> bool pure
+def is_alpha(s: str) -> bool pure
+def is_alnum(s: str) -> bool pure
+def is_space(s: str) -> bool pure
+def is_decimal(s: str) -> bool pure           # = is_digit over ASCII
+def is_numeric(s: str) -> bool pure           # = is_digit over ASCII
+def is_upper(s: str) -> bool pure             # a cased byte exists and all are upper
+def is_lower(s: str) -> bool pure
+def is_title(s: str) -> bool pure
+def is_ascii(s: str) -> bool pure
+def is_printable(s: str) -> bool pure
+def is_identifier(s: str) -> bool pure        # Emerald's own ident rule
+
+# translation — Python's str.translate, the table as a 256-byte list[int]:
+# table[ord(c)] is the replacement byte, or -1 to delete c
+def make_trans(from_chars: str, to_chars: str) -> list[int]
+def make_delete(chars: str) -> list[int]      # those bytes -> -1 (delete)
+def translate(s: str, table: list[int]) -> str
 
 # parsing — Result, not a runtime abort, unlike the int() builtin
 def parse_int(s: str) -> Result[int, str] pure
@@ -615,15 +661,16 @@ the difference is where the CVEs live.
 
 ## 5. Tier 1 — after the bootstrap runs
 
-Built when a real program asks for them, in roughly this order.
+Built when a real program asks for them, in roughly this order. `fmt` is
+**done** (see §4); the rest wait for a real user.
 
 | Module | Python analogue | Notes |
 |---|---|---|
 | `json` | `json` | Parse to a `Json` union (`{kind:"obj", ...} \| {kind:"arr", ...} \| ...`), not to native records — a structural type system cannot describe an unknown object's fields. Serialization is the easy half. The parser is the best exhaustiveness-proof demo in the library |
-| `fmt` | `str.format`, f-strings | `fmt.f("{} of {}", [a, b])` with positional holes. Real f-strings are a *lexer* feature and belong in the language, not here |
+| `fmt` | `str.format`, f-strings | `fmt.f("{} of {}", [a, b])` with positional holes: `{}` takes the next argument (rendered with `str()`), `{{`/`}}` are literal braces, a hole with no argument is left in place. **Done.** Real f-strings are a *lexer* feature and belong in the language, not here |
 | `testing` | `unittest` | `assert_eq`, `assert_true`, a runner returning a nonzero exit. The golden-file harness is shell today; this makes assertions writable in Emerald |
-| `random` | `random` | Seeded LCG, promoting `examples/ray_tracer/typed/rng.rald` — which already threads state explicitly and is a better design than the `rand()` builtin. `choice`, `shuffle`, `uniform`, `normal` |
-| `time` | `time` | `now()`, `elapsed`, a `stopwatch` record. Needs the `now` builtin |
+| `random` | `random` | Seeded LCG, promoting `examples/ray_tracer/typed/rng.rald` — which already threads state explicitly and is a better design than the `rand()` builtin. `choice`, `shuffle`, `uniform`, `normal`, and a `seed` that wraps the `seed_rand` builtin |
+| `time` | `time` | `now()`, `elapsed`, a `stopwatch` record. The `now` builtin it needed now exists |
 | `iter` | `itertools` | Thunk-based lazy sequences: `type Stream[T] = () -> Option[{ head: T, tail: Stream[T] }]`. **Blocked** — this needs recursive generic aliases, which are rejected today. Track it as a language item, not a library one |
 | `argparse` | `argparse` | Flags, positionals, `--help`. The self-hosted compiler's own driver is the first user |
 | `csv` | `csv` | Trivial once `strings` exists; good stdlib-shaped test material |
@@ -650,10 +697,11 @@ fielding it repeatedly.
 | When | What | Why then |
 |---|---|---|
 | **Phase 2** | `tensor` only, per `SPEC_V2.md` §7 | Dogfoods the module system against real library code before the compiler depends on it. Nothing else in this document blocks Phase 2 |
-| **Done** | The §1.1 primitives, as ten builtins | Nothing above is writable first |
+| **Done** | The §1.1 primitives, as thirteen builtins | Nothing above is writable first |
 | **Done** | `result`, `chars`, `builder`, `strings`, `lists` | What a lexer needs |
 | **Done** | `dict`, `set`, `sort`, `math` | What a parser and symbol table need |
 | **Done** | `io`, `sys`, `path` | What a compiler driver needs |
+| **Done** | `fmt` | The first Tier 1 module, pulled forward because `strings` had just grown the methods it formats |
 | **Next (Phase 3)** | The Emerald lexer, written against these | The first real user. Delete what it never calls |
 | **Phase 3, after bootstrap** | Tier 1, on demand | By construction, nothing there is speculative |
 
@@ -696,6 +744,12 @@ than no spec.
   is **`io.append_to`**. Same for `lists.push` rather than `lists.append`. The
   builtin namespace is flat and shared, which is a real cost of adding ten
   builtins and worth watching as the library grows.
+- `seed` is **`seed_rand`**, the third builtin-namespace collision after
+  `io.append_to` and `lists.push`, and the most annoying: a builtin named `seed`
+  makes the global `seed = 7` that every hand-rolled PRNG writes an
+  `E_TYPE_ASSIGN`, and `tests/stdlib/collections_test.rald` did exactly that.
+  Parameters and locals shadow builtins fine; only globals collide. Tier 1's
+  `random.seed` will wrap it under the Python name.
 - `sort` is iterative merge sort rather than recursive, because a recursive one
   splitting on `len(xs) / 2` is not a structural descent and would need
   `partial` — the library would have opted out of totality on its first sort.

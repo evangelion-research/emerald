@@ -153,7 +153,11 @@ run_stdlib() {
             continue
         fi
         rm -f /tmp/emerald_std.$$
-        report "$f" "${f%.rald}.expected" "$("$bin" 2>&1)"
+        # stdin comes from an optional X.stdin, and /dev/null otherwise, so a
+        # test calling read_line() sees EOF rather than the terminal.
+        stdin="${f%.rald}.stdin"
+        [ -f "$stdin" ] || stdin=/dev/null
+        report "$f" "${f%.rald}.expected" "$("$bin" <"$stdin" 2>&1)"
         rm -f "$bin"
     done
 }

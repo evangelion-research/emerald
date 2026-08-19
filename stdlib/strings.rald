@@ -152,6 +152,52 @@ def partition(s: str, sep: str) -> { before: str, found: bool, after: str } pure
              after: slice(s, i + len(sep), len(s)) }
 }
 
+# Python's str.rpartition: split at the *last* occurrence. On a miss the whole
+# string lands in `after`, mirroring partition's `before`.
+def rpartition(s: str, sep: str) -> { before: str, found: bool, after: str } pure {
+    i = rfind(s, sep)
+    if i < 0 { return { before: "", found: False, after: s } }
+    return { before: slice(s, 0, i),
+             found: True,
+             after: slice(s, i + len(sep), len(s)) }
+}
+
+# Python's str.rsplit(sep, maxsplit): split at the rightmost `maxsplit`
+# separators, so the result still has maxsplit + 1 pieces. `maxsplit <= 0`
+# means "no limit", which is plain split.
+def rsplit(s: str, sep: str, maxsplit: int) -> list[str] {
+    out: list[str] = []
+    if len(sep) == 0 {
+        append(out, s)
+        return out
+    }
+    if maxsplit <= 0 { return split(s, sep) }
+    # Positions of every separator, left to right.
+    pos: list[int] = []
+    i = 0
+    while i <= len(s) - len(sep) {
+        if slice(s, i, i + len(sep)) == sep {
+            append(pos, i)
+            i = i + len(sep)
+        } else {
+            i = i + 1
+        }
+    }
+    n = len(pos)
+    if n <= maxsplit { return split(s, sep) }
+    # Split at the last maxsplit separators; everything before the first of
+    # those stays whole.
+    start = 0
+    j = n - maxsplit
+    while j < n {
+        append(out, slice(s, start, pos[j]))
+        start = pos[j] + len(sep)
+        j = j + 1
+    }
+    append(out, slice(s, start, len(s)))
+    return out
+}
+
 # --- transformation --------------------------------------------------------
 
 def lstrip(s: str) -> str pure {
@@ -232,6 +278,248 @@ def pad_right(s: str, width: int, fill: str) -> str {
     if len(fill) == 0 { return s }
     if len(s) >= width { return s }
     return s + repeat(fill, width - len(s))
+}
+
+# Python's str.ljust / str.rjust, under the names Python would look for.
+# ljust left-justifies (pads on the right); rjust right-justifies (pads on the
+# left).
+def ljust(s: str, width: int, fill: str) -> str { return pad_right(s, width, fill) }
+def rjust(s: str, width: int, fill: str) -> str { return pad_left(s, width, fill) }
+
+# Python's str.center: pad on both sides, the extra space going on the right.
+def center(s: str, width: int, fill: str) -> str {
+    if len(fill) == 0 { return s }
+    if len(s) >= width { return s }
+    pad = width - len(s)
+    left = int(pad / 2)
+    return repeat(fill, left) + s + repeat(fill, pad - left)
+}
+
+# Python's str.zfill: zero-pad on the left, keeping a leading +/- sign in front
+# of the zeros.
+def zfill(s: str, width: int) -> str {
+    if len(s) >= width { return s }
+    pad = width - len(s)
+    first = slice(s, 0, 1)
+    if first == "+" or first == "-" {
+        return first + repeat("0", pad) + slice(s, 1, len(s))
+    }
+    return repeat("0", pad) + s
+}
+
+# Python's str.expandtabs: each tab jumps the column to the next multiple of
+# tabsize (default 8). A non-positive tabsize drops the tabs.
+def expandtabs(s: str, tabsize: int) -> str {
+    if tabsize <= 0 { return replace(s, "\t", "") }
+    b = builder.new()
+    col = 0
+    for c in s {
+        if c == "\t" {
+            n = tabsize - (col % tabsize)
+            builder.push(b, repeat(" ", n))
+            col = col + n
+        } else {
+            builder.push(b, c)
+            col = col + 1
+        }
+    }
+    return builder.build(b)
+}
+
+# Python 3.9's str.removeprefix / str.removesuffix.
+def removeprefix(s: str, prefix: str) -> str pure {
+    if starts_with(s, prefix) { return slice(s, len(prefix), len(s)) }
+    return s
+}
+
+def removesuffix(s: str, suffix: str) -> str pure {
+    if ends_with(s, suffix) { return slice(s, 0, len(s) - len(suffix)) }
+    return s
+}
+
+# --- casing ---------------------------------------------------------------
+
+def capitalize(s: str) -> str {
+    if len(s) == 0 { return s }
+    return chars.to_upper(slice(s, 0, 1)) + lower(slice(s, 1, len(s)))
+}
+
+# Python's str.casefold is Unicode-aware; over bytes it is exactly lower.
+def casefold(s: str) -> str { return lower(s) }
+
+def swapcase(s: str) -> str {
+    b = builder.new()
+    for c in s {
+        if chars.is_upper(c) { builder.push(b, chars.to_lower(c)) }
+        elif chars.is_lower(c) { builder.push(b, chars.to_upper(c)) }
+        else { builder.push(b, c) }
+    }
+    return builder.build(b)
+}
+
+# Python's str.title: the first letter of every run of letters is uppercased
+# and the rest lowercased, so "they're" becomes "They'Re".
+def title(s: str) -> str {
+    b = builder.new()
+    prev_alpha = False
+    for c in s {
+        if chars.is_alpha(c) {
+            if prev_alpha { builder.push(b, chars.to_lower(c)) }
+            else { builder.push(b, chars.to_upper(c)) }
+            prev_alpha = True
+        } else {
+            builder.push(b, c)
+            prev_alpha = False
+        }
+    }
+    return builder.build(b)
+}
+
+# --- predicates (pure: these only read) -----------------------------------
+#
+# The whole-string versions of chars.*: chars.is_digit(c) tests one byte,
+# these test every byte. Empty strings answer False everywhere except
+# is_printable and is_ascii, which (like Python) are vacuously True.
+
+def is_digit(s: str) -> bool pure {
+    if len(s) == 0 { return False }
+    for c in s { if chars.is_digit(c) == False { return False } }
+    return True
+}
+
+def is_alpha(s: str) -> bool pure {
+    if len(s) == 0 { return False }
+    for c in s { if chars.is_alpha(c) == False { return False } }
+    return True
+}
+
+def is_alnum(s: str) -> bool pure {
+    if len(s) == 0 { return False }
+    for c in s { if chars.is_alnum(c) == False { return False } }
+    return True
+}
+
+def is_space(s: str) -> bool pure {
+    if len(s) == 0 { return False }
+    for c in s { if chars.is_space(c) == False { return False } }
+    return True
+}
+
+# ASCII has no separate digit/decimal/numeric classes; all three coincide.
+def is_decimal(s: str) -> bool pure { return is_digit(s) }
+def is_numeric(s: str) -> bool pure { return is_digit(s) }
+
+# Python's isupper/islower: at least one cased byte, and every cased byte on
+# the requested side. Uncased bytes (digits, punctuation) are ignored.
+def is_upper(s: str) -> bool pure {
+    seen = False
+    for c in s {
+        if chars.is_lower(c) { return False }
+        if chars.is_upper(c) { seen = True }
+    }
+    return seen
+}
+
+def is_lower(s: str) -> bool pure {
+    seen = False
+    for c in s {
+        if chars.is_upper(c) { return False }
+        if chars.is_lower(c) { seen = True }
+    }
+    return seen
+}
+
+# Python's istitle: an uppercase byte may only follow a non-letter, a lowercase
+# byte may only follow a letter, and at least one letter must be present.
+def is_title(s: str) -> bool pure {
+    prev_cased = False
+    seen = False
+    for c in s {
+        if chars.is_upper(c) {
+            if prev_cased { return False }
+            seen = True
+            prev_cased = True
+        } else {
+            if chars.is_lower(c) {
+                if prev_cased == False { return False }
+                seen = True
+                prev_cased = True
+            } else {
+                prev_cased = False
+            }
+        }
+    }
+    return seen
+}
+
+def is_ascii(s: str) -> bool pure {
+    for c in s { if ord(c) >= 128 { return False } }
+    return True
+}
+
+def is_printable(s: str) -> bool pure {
+    for c in s {
+        n = ord(c)
+        if n < 32 or n == 127 { return False }
+    }
+    return True
+}
+
+# Python's isidentifier: a letter or `_` followed by letters, digits or `_` —
+# the same rule Emerald's own lexer uses (chars.is_ident_start / _cont).
+def is_identifier(s: str) -> bool pure {
+    if len(s) == 0 { return False }
+    if chars.is_ident_start(slice(s, 0, 1)) == False { return False }
+    i = 1
+    while i < len(s) {
+        if chars.is_ident_cont(slice(s, i, i + 1)) == False { return False }
+        i = i + 1
+    }
+    return True
+}
+
+# --- translation -----------------------------------------------------------
+#
+# Python's str.maketrans / str.translate, with the table spelled out as a
+# list[int] of 256 replacements: table[ord(c)] is the byte c becomes, or -1 to
+# delete c. A table is just data, so it can be built once and reused.
+
+def make_trans(from_chars: str, to_chars: str) -> list[int] {
+    table: list[int] = []
+    i = 0
+    while i < 256 {
+        append(table, i)
+        i = i + 1
+    }
+    n = len(from_chars)
+    if len(to_chars) < n { n = len(to_chars) }
+    i = 0
+    while i < n {
+        table[ord(slice(from_chars, i, i + 1))] = ord(slice(to_chars, i, i + 1))
+        i = i + 1
+    }
+    return table
+}
+
+# A table that deletes the given bytes, for Python's `maketrans("", "", chars)`.
+def make_delete(chars: str) -> list[int] {
+    table: list[int] = []
+    i = 0
+    while i < 256 {
+        append(table, i)
+        i = i + 1
+    }
+    for c in chars { table[ord(c)] = -1 }
+    return table
+}
+
+def translate(s: str, table: list[int]) -> str {
+    b = builder.new()
+    for c in s {
+        r = table[ord(c)]
+        if r >= 0 { builder.push(b, chr(r)) }
+    }
+    return builder.build(b)
 }
 
 def to_chars(s: str) -> list[str] {

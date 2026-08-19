@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "syntax",
+    "severity": "error",
+    "code": "E_SYNTAX",
+    "file": "tests/check/bad_record_condition.rald",
+    "line": 5,
+    "column": 4,
+    "message": "record literal not allowed here (wrap it in parentheses, or did you mean a block?)",
+    "source_line": "if { x: 1 } == { x: 1 } { print(\"equal\") }"
+  }
+]

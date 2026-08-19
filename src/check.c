@@ -1841,6 +1841,20 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                          type_str(argt[0]));
             return ty_join(&t_str, &t_none);
         }
+        if (strcmp(name, "read_line") == 0) {
+            ck_arity(ck, e, dname, 0);
+            return ty_join(&t_str, &t_none);
+        }
+        if (strcmp(name, "now") == 0) {
+            ck_arity(ck, e, dname, 0);
+            return &t_float;
+        }
+        if (strcmp(name, "seed_rand") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_int, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "seed_rand() argument must be int, got %s", type_str(argt[0]));
+            return &t_none;
+        }
         if (strcmp(name, "file_exists") == 0) {
             if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
                 ck_error(ck, "E_TYPE_ARG", e->line, e->col,

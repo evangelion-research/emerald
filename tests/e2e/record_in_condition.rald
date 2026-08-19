@@ -1,0 +1,32 @@
+# The `{` ambiguity: `{` opens both blocks and record literals, so a record
+# literal is forbidden at the *top level* of an if/while header — the `{` is
+# read as the block. Parens force a record there: `if (p == { x: 1 }) { ... }`.
+# Everywhere else (call args, assignments, list elements) records parse
+# normally. See docs/grammar.md "The { ambiguity".
+
+type Point = { x: int, y: int }
+
+p: Point = { x: 1, y: 2 }
+q: Point = { x: 9, y: 2 }
+
+# parens force a record literal at the top of a condition
+if (p == { x: 1, y: 2 }) { print("p matches") }
+if (p == { x: 9, y: 2 }) { print("p is q") } else { print("p is not q") }
+if ({ x: 1 } == { x: 1 }) { print("anonymous equal") }
+if ({ x: 1 } == { x: 2 }) { print("anonymous not equal") } else { print("distinct") }
+
+# records combine with and/or inside the parens
+if (p == { x: 1, y: 2 } and q == { x: 9, y: 2 }) { print("both match") }
+if (p == { x: 1, y: 2 } or q == { x: 1, y: 2 }) { print("one matches") }
+
+# while header, same rule
+n = 0
+while ({ x: 1 } != { x: 2 } and n < 2) {
+    print("loop", n)
+    n = n + 1
+}
+
+# every other position needs no parens: call args, assignments, list elements
+print({ a: 1 } == { a: 1 })
+xs = [{ x: 1 }, { x: 2 }]
+print(xs[0] == { x: 1 })
