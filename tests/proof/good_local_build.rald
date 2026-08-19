@@ -1,0 +1,36 @@
+# §1.2 local-mutation purity: a `pure` function may `append` to a list it
+# allocated itself and has not let escape. That is an unobservable effect, so
+# the function stays pure — and proof-mode code can finally *build* lists.
+
+def squares(n: int) -> list[int] pure {
+    out: list[int] = []
+    i = 0
+    while i < n {
+        append(out, i * i)
+        i = i + 1
+    }
+    return out
+}
+
+def doubled(xs: list[int]) -> list[int] pure {
+    out: list[int] = []
+    for x in xs { append(out, x * 2) }
+    return out
+}
+
+def words() -> list[str] pure {
+    out: list[str] = []
+    append(out, "a")
+    append(out, "b")
+    return out
+}
+
+# a slice of a list copies, so appending to it is safe even when the source
+# is an external (parameter) list
+def tail_plus(xs: list[int]) -> list[int] pure {
+    out = slice(xs, 1, len(xs))
+    append(out, 99)
+    return out
+}
+
+print(squares(4), doubled([1, 2]), words(), tail_plus([1, 2, 3]))

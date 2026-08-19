@@ -1,0 +1,23 @@
+3
+42
+emerald
+49
+an effect
+ABC
+[1, 2, 3]
+3
+1 + 2
+x = 41
+x + 1
+"emerald"
+def sq(n: int) -> int {
+    return n * n
+}
+sq(7)
+print("an effect")
+import strings
+strings.upper("abc")
+xs = [1, 2]
+append(xs, 3)
+xs
+len(xs)

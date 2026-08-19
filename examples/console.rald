@@ -1,0 +1,29 @@
+# The console: prompts, lines, and everything-at-once.
+#
+# Run it interactively (`./console`) and it asks; run it with stdin closed
+# (`./console < /dev/null`) and every read hands back a value it can branch on
+# rather than hanging. That is the whole reason input() ends in `| None`.
+
+import io
+
+name = io.ask_or("your name: ", "stranger")
+print("hello,", name)
+
+# A prompt loop. read_line() returns None at EOF, so the loop needs no separate
+# end test — Ctrl-D ends it.
+total = 0
+count = 0
+while True {
+    line = input("a number (blank to stop): ")
+    if line == None { break }
+    if line == "" { break }
+    total = total + int(line)
+    count = count + 1
+}
+
+if count > 0 {
+    write_out("sum " + str(total) + ", mean ")
+    print(float(total) / float(count))
+} else {
+    io.warn("nothing to average")
+}

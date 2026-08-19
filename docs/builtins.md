@@ -1,8 +1,8 @@
 # Builtins
 
-Emerald has **fifty-five builtins**, compiled directly into calls on the runtime
+Emerald has **sixty builtins**, compiled directly into calls on the runtime
 (`src/runtime.c`) rather than resolved through a module. They are always in
-scope in every module: thirty core builtins plus the twenty-five tensor
+scope in every module: thirty-five core builtins plus the twenty-five tensor
 primitives of Phase 2 (see the [Tensors](#tensors) section).
 
 They are not the standard library — that lives in [`stdlib/`](../stdlib/) and is
@@ -41,6 +41,29 @@ print("hi", 1, [1, "a"], { x: 1 })
 ```
 
 `print()` with no arguments prints an empty line.
+
+### `eprint(...) -> None`
+
+`print` to stderr. Same formatting, same variadic rule. Diagnostics and
+progress belong here so a pipeline's data stays clean on stdout.
+
+### `write_out(x) -> None` / `write_err(x) -> None`
+
+One value, formatted as `print` formats it, with **no trailing newline and no
+separator** — the spelling a prompt or a progress dot needs. Both flush what
+they wrote, because stdout is line-buffered on a terminal and a prompt with no
+newline would otherwise sit in the buffer until after the read it precedes.
+
+```
+write_out("name? ")
+name = read_line()
+```
+
+### `flush() -> None`
+
+Flushes stdout and stderr. `write_out` already flushes, so this is for the case
+where `print` output must be on screen before a long computation that has not
+printed its own newline yet.
 
 ## Sequences and conversion
 
@@ -257,6 +280,24 @@ One line from stdin **without** its newline, or `None` at EOF — so the read lo
 is `while (line = read_line()) != None`, with no separate EOF test. A trailing
 `\r` is dropped, so a CRLF file reads the same as an LF one, matching
 `strings.split_lines`.
+
+### `input(prompt: str) -> str | None`
+
+`write_out(prompt)` then `read_line()`: the prompt is on screen before the read
+blocks, and the result is the line without its newline, or `None` at EOF. The
+`None` is the point — a script run with its stdin closed gets a value it can
+branch on rather than a hang or an abort. `io.ask_or` folds it into a default.
+
+```
+answer = input("continue? [y/N] ")
+if answer == None or answer == "" { exit(0) }
+```
+
+### `read_all() -> str`
+
+Every remaining byte of stdin as one string; `""` at EOF, so a second call is
+empty rather than an error. This is the filter idiom — read it all, transform,
+print — where `read_line` is the streaming one. `io.stdin_lines` splits it.
 
 ### `read_file_opt(path: str) -> str | None`
 

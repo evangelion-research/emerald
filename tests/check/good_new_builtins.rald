@@ -1,0 +1,8 @@
+# §1.1's last three builtins typecheck: read_line -> str | None, now -> float,
+# seed_rand(int) -> None.
+
+line: str | None = read_line()
+if line == None { print("eof") } else { print(line) }
+t = now()
+print(t >= 0.0)
+seed_rand(1)

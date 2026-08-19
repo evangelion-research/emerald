@@ -1,0 +1,30 @@
+# The console surface: unterminated writes, prompted reads, and stdin as text.
+#
+# stdout and stderr both land in the golden output, so the writes here are
+# ordered to make the interleaving readable rather than to prove anything about
+# buffering: write_out flushes, which is what a prompt needs.
+
+import io
+
+write_out("no newline ")
+write_out("yet")
+print("")
+write_err("stderr, unterminated ")
+write_err("too\n")
+flush()
+
+# input(): the prompt is written first, then a line without its newline.
+name = input("name? ")
+print("hello,", name)
+
+# io.ask_or turns EOF and a bare Enter into the default.
+print(io.ask_or("nick? ", "anon"))
+
+io.out("out ")
+io.err("err ")
+print("")
+
+# read_all() takes the rest of stdin in one gulp; a second call sees EOF.
+rest = io.stdin_lines()
+print("rest:", rest)
+print("again:", read_all() == "")

@@ -115,19 +115,43 @@ Three ways out, in preference order:
 3. **Persistent lists.** A cons-cell module with structural sharing, pure by
    construction, slow and awkward without recursive generic aliases.
 
-**Recommendation: (2) now, (1) when a proof in `docs/proofs.md` actually needs a
-built list.** Do not do (1) speculatively. Mark every stdlib function's purity in
-its signature so the migration is mechanical when it happens.
+**Done: (2), then (1).** The two-tier split came first: every function that
+only reads is `pure` — the whole of `chars` and `math`, the searching half of
+`strings` and `lists`, both parsers, and all of `result`. Then the safe escape
+landed: a `pure` function may `append` to a list it allocated itself and has
+not let escape. That mutation is unobservable from the caller, so the function
+stays pure — and proof-mode code can finally *produce* lists and strings.
 
-**Done: (2).** Every function that only reads is `pure` — the whole of `chars`
-and `math`, the searching half of `strings` and `lists`, both parsers, and all
-of `result`. Everything that builds is not. The split is visible in the
-signatures, so migrating to (1) means deleting the impurity, not re-deriving it.
+**The rule.** The checker tracks ownership per variable. A variable is *owned*
+when its last assignment was a fresh list literal, or a fresh-list pure builtin
+(`range`, `map`/`filter`/`reduce`, or a `slice` of a list — slicing copies); a
+parameter, a global, a field or element read, and a user-function call are
+never owned. `append(xs, v)` inside a `pure` function is allowed exactly when
+`xs` is owned; anything else is `E_TYPE_PURE_CALL`. Ownership is revoked when
+the list escapes — assigned into a global, a record field, or a list element,
+because the list can then be mutated through that alias. Returning the list is
+the sanctioned escape: the returned value is still a pure function of the
+inputs.
 
-The line falls in a slightly surprising place worth recording: `strings.find`,
-`strip`, `parse_int` and `parse_float` are pure, but `split` and `join` are not,
-because they build. So proof-mode code can *inspect* strings and cannot
-*produce* them.
+**What moved.** The direct list builders are pure now: `strings.split`,
+`split_lines`, `rsplit`, `to_chars`; `lists.concat`, `reverse`, `chunk`,
+`unique`, `zip`, `enumerate`, `flatten`, `repeat`; `dict.keys`, `values`,
+`items`, `new_map` and the reading half of `dict`; `set`'s reading half;
+`path.join`/`join_all`/`split_parts`; `builder.new` and `builder.build`.
+`tests/proof/good_local_build.rald` pins the rule; the `pure` markers in
+`tests/proof/good_stdlib.rald` keep the migration honest — a wrongly-marked
+function is an `E_TYPE_PURE_CALL` the moment it compiles.
+
+**What stays impure, and why.** Anything that mutates through a parameter or a
+parameter's field: `builder.push` (appends to `b.parts`) and everything built
+on it — so the *string* builders (`strings.join`, `replace`, `upper`, `escape`,
+...) are still impure even though the *list* builders are not — plus `dict.set`
+and `remove`, `lists.push` and `extend`, and `sort.sorted`, whose `_merge_runs`
+helper takes an output-buffer parameter. That out-parameter pattern needs
+ownership *transfer* from caller to callee, which is the natural next step and
+is not done. The honest line to remember: a function that builds by appending
+to its own `out: list[T] = []` is pure; a function that hands that `out` to a
+helper is not.
 
 **Purity and proof mode are separate axes, and the second is stricter than it
 looks.** `--proof` bans `any` and `partial` — not impurity — but it checks the
@@ -353,13 +377,13 @@ def ends_with(s: str, p: str) -> bool pure
 def count(s: str, needle: str) -> int pure            # non-overlapping
 
 # splitting and joining
-def split(s: str, sep: str) -> list[str]
-def split_lines(s: str) -> list[str]                  # \n, tolerates \r\n
-def split_ws(s: str) -> list[str]                     # runs of whitespace
-def join(sep: str, parts: list[str]) -> str
+def split(s: str, sep: str) -> list[str] pure
+def split_lines(s: str) -> list[str] pure             # \n, tolerates \r\n
+def split_ws(s: str) -> list[str]                     # runs of whitespace; built on builder, so impure
+def join(sep: str, parts: list[str]) -> str           # built on builder, so impure
 def partition(s: str, sep: str) -> { before: str, found: bool, after: str } pure
 def rpartition(s: str, sep: str) -> { before: str, found: bool, after: str } pure  # last occurrence
-def rsplit(s: str, sep: str, maxsplit: int) -> list[str]  # split at the rightmost maxsplit seps
+def rsplit(s: str, sep: str, maxsplit: int) -> list[str] pure  # split at the rightmost maxsplit seps
 
 # transformation
 def strip(s: str) -> str pure
@@ -414,7 +438,7 @@ def parse_float(s: str) -> Result[float, str] pure
 # escaping — the compiler needs both directions
 def escape(s: str) -> str                # -> a valid Emerald string literal body
 def unescape(s: str) -> Result[str, str] # \n \t \r \0 \\ \" \'  per grammar.md
-def to_chars(s: str) -> list[str]
+def to_chars(s: str) -> list[str] pure
 def reverse(s: str) -> str
 ```
 
@@ -432,15 +456,15 @@ accumulates fragments in a list and pays one join at the end.
 ```
 type Builder = { parts: list[str], count: int }
 
-def new() -> Builder
+def new() -> Builder pure
 def push(b: Builder, s: str) -> None          # mutates; the point of the type
 def push_char(b: Builder, c: str) -> None
 def push_int(b: Builder, n: int) -> None
-def build(b: Builder) -> str
+def build(b: Builder) -> str pure             # merges locally-owned lists; reads b only
 def clear(b: Builder) -> None
 def size(b: Builder) -> int pure              # bytes pushed, without building
 def is_empty(b: Builder) -> bool pure
-def concat_all(parts: list[str]) -> str       # one-shot, no builder variable
+def concat_all(parts: list[str]) -> str       # one-shot, no builder variable; calls push, so impure
 ```
 
 This is `io.StringIO`, named for what it does. It is the one place the library
@@ -454,13 +478,13 @@ Depends on `append`. `map`/`filter`/`reduce` stay builtins and are not shadowed.
 ```
 def push[T](xs: list[T], v: T) -> None    # `append` is a builtin, so: push
 def extend[T](xs: list[T], ys: list[T]) -> None
-def concat[T](xs: list[T], ys: list[T]) -> list[T]
+def concat[T](xs: list[T], ys: list[T]) -> list[T] pure
 def copy[T](xs: list[T]) -> list[T] pure
 def take[T](xs: list[T], n: int) -> list[T] pure       # slice(xs, 0, n)
 def drop[T](xs: list[T], n: int) -> list[T] pure
-def reverse[T](xs: list[T]) -> list[T]
-def chunk[T](xs: list[T], n: int) -> list[list[T]]
-def unique[T](xs: list[T]) -> list[T]
+def reverse[T](xs: list[T]) -> list[T] pure
+def chunk[T](xs: list[T], n: int) -> list[list[T]] pure
+def unique[T](xs: list[T]) -> list[T] pure
 
 def index_of[T](xs: list[T], v: T) -> int pure         # -1 if absent; uses deep ==
 def contains[T](xs: list[T], v: T) -> bool pure
@@ -472,10 +496,10 @@ def first[T](xs: list[T]) -> Option[T] pure
 def last[T](xs: list[T]) -> Option[T] pure
 def get[T](xs: list[T], i: int) -> Option[T] pure      # total; no index error
 
-def zip[A, B](xs: list[A], ys: list[B]) -> list[{ a: A, b: B }]
-def enumerate[T](xs: list[T]) -> list[{ i: int, v: T }]
-def flatten[T](xss: list[list[T]]) -> list[T]
-def repeat_list[T](v: T, n: int) -> list[T]
+def zip[A, B](xs: list[A], ys: list[B]) -> list[{ a: A, b: B }] pure
+def enumerate[T](xs: list[T]) -> list[{ i: int, v: T }] pure
+def flatten[T](xss: list[list[T]]) -> list[T] pure
+def repeat_list[T](v: T, n: int) -> list[T] pure
 def sum(xs: list[int]) -> int pure
 def sum_f(xs: list[float]) -> float pure
 ```
@@ -515,20 +539,20 @@ type system cannot yet express (no `T extends Hashable`).
 type Entry[V] = { key: str, val: V }
 type Map[V]   = { buckets: list[list[Entry[V]]], size: int }
 
-def new_map[V]() -> Map[V]
-def get[V](m: Map[V], k: str) -> Option[V]
-def get_or[V](m: Map[V], k: str, d: V) -> V
+def new_map[V]() -> Map[V] pure
+def get[V](m: Map[V], k: str) -> Option[V] pure
+def get_or[V](m: Map[V], k: str, d: V) -> V pure
 def set[V](m: Map[V], k: str, v: V) -> None          # mutates, like Python's d[k]=v
-def has[V](m: Map[V], k: str) -> bool
+def has[V](m: Map[V], k: str) -> bool pure
 def remove[V](m: Map[V], k: str) -> bool             # True if it was there
 def clear[V](m: Map[V]) -> None
 def size[V](m: Map[V]) -> int pure
-def merge[V](a: Map[V], b: Map[V]) -> Map[V]         # right wins
+def merge[V](a: Map[V], b: Map[V]) -> Map[V]         # right wins; calls set, so impure
 def bump(m: Map[int], k: str, by: int) -> None       # counters
-def keys[V](m: Map[V]) -> list[str]
-def values[V](m: Map[V]) -> list[V]
-def items[V](m: Map[V]) -> list[Entry[V]]
-def from_items[V](es: list[Entry[V]]) -> Map[V]
+def keys[V](m: Map[V]) -> list[str] pure
+def values[V](m: Map[V]) -> list[V] pure
+def items[V](m: Map[V]) -> list[Entry[V]] pure
+def from_items[V](es: list[Entry[V]]) -> Map[V]      # calls set, so impure
 
 def hash_str(s: str) -> int pure                     # djb2 over ord(); see §8
 ```
@@ -544,9 +568,11 @@ no profile justifying that yet.
 
 ### `set` — membership
 
-`Set = Map[True]`, thin. `new_set`, `add`, `has`, `remove`, `size`, `elements`,
-`union`, `intersect`, `difference`. Exists because the checker will want visited
-sets and the alternative is `Map[bool]` written out at every call site.
+`Set = Map[True]`, thin. `new_set`, `has`, `size`, `is_empty`, `elements`,
+`is_subset` are pure (they read the map or build a fresh one); `add`, `remove`,
+`from_list`, `union`, `intersect`, `difference` mutate, so they are impure.
+Exists because the checker will want visited sets and the alternative is
+`Map[bool]` written out at every call site.
 
 ### `math` — numeric helpers
 
@@ -646,11 +672,13 @@ Pure string work, no syscalls; `os.path`, not `pathlib` (no classes).
 
 ```
 def join(a: str, b: str) -> str pure
+def join_all(parts: list[str]) -> str pure
 def dirname(p: str) -> str pure
 def basename(p: str) -> str pure
 def ext(p: str) -> str pure                  # ".rald", or "" if none
 def without_ext(p: str) -> str pure
 def is_abs(p: str) -> bool pure
+def split_parts(p: str) -> list[str] pure
 def normalize(p: str) -> str                 # collapses . and .. lexically
 ```
 
@@ -781,8 +809,9 @@ say "keys must be hashable". Unchanged, and now backed by a concrete need rather
 than a guess. This is the first real argument for bounded type parameters, which
 `docs/type-system.md` lists as a deliberate omission.
 
-**D4 — Purity and `append`.** Resolved as tier (2); see §1.2 for where the line
-actually fell.
+**D4 — Purity and `append`.** Resolved as (2), then (1): the two-tier split
+first, local-mutation purity once proof-mode code needed to build lists. See
+§1.2 for the ownership rule and where the line actually fell.
 
 **D5 — Namespace collisions.** `lists.take` and `strings.take` coexist under
 module qualification, and `from lists import take` then `from strings import

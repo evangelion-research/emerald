@@ -1,0 +1,20 @@
+error[E_TYPE_PURE_CALL]: pure function calls impure builtin 'append'
+  --> tests/proof/bad_local_mut.rald:6:11
+    |
+ 6 |     append(xs, 1)
+   |           ^
+error[E_TYPE_PURE_CALL]: pure function calls impure builtin 'append'
+  --> tests/proof/bad_local_mut.rald:12:11
+     |
+ 12 |     append(g, 1)
+    |           ^
+error[E_TYPE_PURE_CALL]: pure function calls impure builtin 'append'
+  --> tests/proof/bad_local_mut.rald:19:11
+     |
+ 19 |     append(out, 2)
+    |           ^
+error[E_TYPE_PURE_CALL]: pure function calls impure builtin 'append'
+  --> tests/proof/bad_local_mut.rald:24:11
+     |
+ 24 |     append(p.items, 1)
+    |           ^

@@ -28,6 +28,7 @@
 #include "lexer.h"
 #include "module.h"
 #include "parser.h"
+#include "repl.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -259,14 +260,16 @@ static char *default_output(const char *path) {
 static void usage(void) {
     fputs("usage: emeraldc [--emit-tokens|--emit-ast|--emit-shapes|--check|--emit-c]\n"
           "                [--json] [--proof] [--shape-report] [--keep-c] [-I DIR]...\n"
-          "                [-o OUT] file.rald\n",
+          "                [-o OUT] file.rald\n"
+          "       emeraldc --repl [-I DIR]...\n",
           stderr);
     exit(2);
 }
 
 int main(int argc, char **argv) {
     const char *file = NULL, *out_path = NULL;
-    enum { MODE_BUILD, MODE_TOKENS, MODE_AST, MODE_SHAPES, MODE_CHECK, MODE_C }
+    enum { MODE_BUILD, MODE_TOKENS, MODE_AST, MODE_SHAPES, MODE_CHECK, MODE_C,
+           MODE_REPL }
         mode = MODE_BUILD;
     bool keep_c = false;
     bool json_errors = false;
@@ -281,6 +284,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--emit-ast") == 0) mode = MODE_AST;
         else if (strcmp(argv[i], "--emit-shapes") == 0) mode = MODE_SHAPES;
         else if (strcmp(argv[i], "--check") == 0) mode = MODE_CHECK;
+        else if (strcmp(argv[i], "--repl") == 0) mode = MODE_REPL;
         else if (strcmp(argv[i], "--emit-c") == 0) mode = MODE_C;
         else if (strcmp(argv[i], "--json") == 0) json_errors = true;
         else if (strcmp(argv[i], "--proof") == 0) proof = true;
@@ -298,6 +302,9 @@ int main(int argc, char **argv) {
         else if (file) usage();
         else file = argv[i];
     }
+    /* `emeraldc` with nothing to compile is an invitation to type at it */
+    if (mode == MODE_REPL || (!file && mode == MODE_BUILD && !out_path))
+        return repl_run(argv[0], inc, ninc);
     if (!file) usage();
 
     DiagList diags;

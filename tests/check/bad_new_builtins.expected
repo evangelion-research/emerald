@@ -1,0 +1,10 @@
+error[E_TYPE_ARG]: seed_rand() argument must be int, got "nope"
+  --> tests/check/bad_new_builtins.rald:4:10
+    |
+ 4 | seed_rand("nope")
+   |          ^
+error[E_TYPE_PURE_CALL]: pure function calls impure builtin 'now'
+  --> tests/check/bad_new_builtins.rald:6:43
+    |
+ 6 | def timestamp() -> float pure { return now() }
+   |                                           ^

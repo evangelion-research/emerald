@@ -29,7 +29,7 @@ def hash_str(s: str) -> int pure {
     return h
 }
 
-def _empty_buckets[V](n: int) -> list[list[Entry[V]]] {
+def _empty_buckets[V](n: int) -> list[list[Entry[V]]] pure {
     bs: list[list[Entry[V]]] = []
     i = 0
     while i < n {
@@ -40,13 +40,13 @@ def _empty_buckets[V](n: int) -> list[list[Entry[V]]] {
     return bs
 }
 
-def new_map[V]() -> Map[V] {
+def new_map[V]() -> Map[V] pure {
     return { buckets: _empty_buckets(_INITIAL_BUCKETS), size: 0 }
 }
 
-def _slot[V](m: Map[V], k: str) -> int { return hash_str(k) % len(m.buckets) }
+def _slot[V](m: Map[V], k: str) -> int pure { return hash_str(k) % len(m.buckets) }
 
-def get[V](m: Map[V], k: str) -> Option[V] {
+def get[V](m: Map[V], k: str) -> Option[V] pure {
     bucket = m.buckets[_slot(m, k)]
     for e in bucket {
         if e.key == k { return { some: True, val: e.val } }
@@ -54,7 +54,7 @@ def get[V](m: Map[V], k: str) -> Option[V] {
     return { some: False }
 }
 
-def get_or[V](m: Map[V], k: str, d: V) -> V {
+def get_or[V](m: Map[V], k: str, d: V) -> V pure {
     bucket = m.buckets[_slot(m, k)]
     for e in bucket {
         if e.key == k { return e.val }
@@ -62,7 +62,7 @@ def get_or[V](m: Map[V], k: str, d: V) -> V {
     return d
 }
 
-def has[V](m: Map[V], k: str) -> bool {
+def has[V](m: Map[V], k: str) -> bool pure {
     bucket = m.buckets[_slot(m, k)]
     for e in bucket {
         if e.key == k { return True }
@@ -122,7 +122,7 @@ def clear[V](m: Map[V]) -> None {
     m.size = 0
 }
 
-def keys[V](m: Map[V]) -> list[str] {
+def keys[V](m: Map[V]) -> list[str] pure {
     out: list[str] = []
     for bucket in m.buckets {
         for e in bucket { append(out, e.key) }
@@ -130,7 +130,7 @@ def keys[V](m: Map[V]) -> list[str] {
     return out
 }
 
-def values[V](m: Map[V]) -> list[V] {
+def values[V](m: Map[V]) -> list[V] pure {
     out: list[V] = []
     for bucket in m.buckets {
         for e in bucket { append(out, e.val) }
@@ -138,7 +138,7 @@ def values[V](m: Map[V]) -> list[V] {
     return out
 }
 
-def items[V](m: Map[V]) -> list[Entry[V]] {
+def items[V](m: Map[V]) -> list[Entry[V]] pure {
     out: list[Entry[V]] = []
     for bucket in m.buckets {
         for e in bucket { append(out, e) }

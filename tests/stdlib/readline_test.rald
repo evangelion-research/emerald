@@ -1,0 +1,16 @@
+# read_line: reads one line from stdin without its newline, or None at EOF.
+#
+# The golden harness cannot pipe stdin to this process, so a fresh copy of this
+# program is run with its stdin piped (a line) and closed (/dev/null), and the
+# child reports what it read. The outer (argument-less) run prints nothing.
+
+import sys
+
+self = sys.all_args()[0]
+if len(sys.args()) > 0 and sys.args()[0] == "--reader" {
+    line = read_line()
+    if line == None { print("read: EOF") } else { print("read:", line) }
+} else {
+    run("printf 'hello emerald\\n' | '" + self + "' --reader")
+    run("'" + self + "' --reader < /dev/null")
+}

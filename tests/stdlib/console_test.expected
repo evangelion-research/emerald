@@ -1,0 +1,7 @@
+no newline yetstderr, unterminated too
+
+name? hello, ada
+nick? anon
+out err 
+rest: ['tail one', 'tail two']
+again: True

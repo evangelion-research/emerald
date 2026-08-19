@@ -940,6 +940,50 @@ Value em_read_line(void) {
     return str_take(buf, len);
 }
 
+/* --- console I/O --------------------------------------------------------- */
+
+/* write() / ewrite(): one value, no separator and no newline. print() is the
+ * line-oriented spelling; these are the ones a prompt or a progress dot needs.
+ * stdout is line-buffered on a terminal, so a prompt without a newline only
+ * appears once it is flushed — write() therefore flushes what it wrote. */
+static void write_stream(FILE *f, Value v) {
+    SB sb = {0};
+    write_value(&sb, v, false);
+    if (sb.len) fwrite(sb.buf, 1, sb.len, f);
+    fflush(f);
+    free(sb.buf);
+}
+
+void em_write_out(Value v) { write_stream(stdout, v); }
+void em_write_err(Value v) { write_stream(stderr, v); }
+
+void em_flush(void) {
+    fflush(stdout);
+    fflush(stderr);
+}
+
+/* input(prompt): the prompt, then a line, or None at EOF. */
+Value em_input(Value prompt) {
+    write_stream(stdout, prompt);
+    return em_read_line();
+}
+
+/* read_all(): every remaining byte of stdin as one string (empty at EOF). */
+Value em_read_all(void) {
+    size_t cap = 4096, len = 0;
+    char *buf = xmalloc(cap);
+    size_t n;
+    while ((n = fread(buf + len, 1, cap - len - 1, stdin)) > 0) {
+        len += n;
+        if (len + 1 >= cap) {
+            cap *= 2;
+            buf = xrealloc(buf, cap);
+        }
+    }
+    buf[len] = '\0';
+    return str_take(buf, len);
+}
+
 Value em_gc_collect(void) {
     rt_gc_collect();
     return em_none();

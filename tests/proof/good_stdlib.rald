@@ -16,6 +16,7 @@ import io
 import sys
 import builder
 from result import Result, Option, unwrap_or
+from builder import Builder
 
 def normalized(x: float) -> float pure { return math.clamp(x, 0.0, 1.0) }
 
@@ -34,5 +35,19 @@ def widths(words: list[str]) -> list[int] {
     return sort.sorted_ints(out)
 }
 
+# §1.2 local-mutation purity: proof-mode code can *build* now. Each of these
+# would have been E_TYPE_PURE_CALL before the safe-escape rule landed — they
+# are the regression test that the stdlib's building half is pure.
+def split_words(s: str) -> list[str] pure { return strings.split(s, " ") }
+def doubled(xs: list[int]) -> list[int] pure { return lists.concat(xs, xs) }
+def unique_of(xs: list[int]) -> list[int] pure { return lists.unique(xs) }
+def word_chars(s: str) -> list[str] pure { return strings.to_chars(s) }
+def joined_path(parts: list[str]) -> str pure { return path.join_all(parts) }
+def built(b: Builder) -> str pure { return builder.build(b) }
+
 print(normalized(1.5), leading_digits("42x"), widths(["bbb", "a"]))
 print(unwrap_or(strings.parse_int("7"), 0), path.ext("main.rald"), lists.sum([1, 2]))
+print(split_words("a b c"), doubled([1]), unique_of([1, 2, 1]), word_chars("hi"), joined_path(["a", "b"]))
+b = builder.new()
+builder.push(b, "x")
+print(built(b))

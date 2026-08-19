@@ -1,0 +1,6 @@
+# The new builtins are typed. seed_rand takes an int; now is impure, so a
+# pure function may not call it.
+
+seed_rand("nope")
+
+def timestamp() -> float pure { return now() }

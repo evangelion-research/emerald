@@ -619,6 +619,11 @@ typedef struct {
     bool annotated; /* explicit annotations are enforced; inferred ones widen */
     bool bound;     /* false until the first assignment executes */
     bool is_const;  /* declared `const`: reassignment is an error */
+    bool owned;     /* holds a list this function allocated itself (a fresh
+                     * literal or fresh-list pure builtin) that has not escaped;
+                     * the one target a `pure` function may `append` to — see
+                     * stdlib/SPEC.md §1.2 and expr_owned(). Globals and
+                     * parameters are never owned. */
     const char *file; /* for globals: the declaring module. An assignment from
                        * another module's function body makes a local, not a
                        * clobber — see updatable_global() */
@@ -743,6 +748,7 @@ static Var *env_add(VarEnv *env, const char *name, Type *t, bool annotated) {
     v->annotated = annotated;
     v->bound = false;
     v->is_const = false;
+    v->owned = false;
     v->file = NULL;
     v->gen = 0;
     return v;
@@ -1676,6 +1682,98 @@ static Type *infer_map_like(Ck *ck, const Expr *e, const char *name,
     return r;
 }
 
+/* --- local-mutation purity (stdlib/SPEC.md §1.2) ------------------------- */
+/*
+ * A `pure` function may not have observable effects, and `append` mutates —
+ * so the naive rule (a pure function may call only pure builtins) makes it
+ * impossible for proof-mode code to build a list at all. The safe escape:
+ * `append` is allowed when the target is a list the function allocated
+ * itself and has not let escape (a fresh literal, or the result of a
+ * fresh-list pure builtin). Mutating such a list is unobservable from the
+ * caller, so the function stays pure. Every other target — a parameter, a
+ * global, a record field, a list element, anything that could be reachable
+ * from outside — is rejected.
+ */
+
+/* Does `e` denote a locally-owned list? Fresh list literals and the
+ * fresh-list pure builtins (range, map/filter/reduce, a slice of a list)
+ * are owned; a name is owned iff its last assignment was to such a value
+ * and it has not since escaped. Everything else (a parameter, a global, a
+ * field or element read, a user-function call) is not owned. */
+static bool expr_owned(Ck *ck, const Expr *e) {
+    switch (e->kind) {
+    case E_LIST:
+        return true;
+    case E_NAME: {
+        Var *v = NULL;
+        if (ck->scope) v = env_find(&ck->scope->locals, e->as.sval);
+        if (!v) v = env_find(&ck->globals, e->as.sval);
+        return v ? v->owned : false;
+    }
+    case E_CALL: {
+        if (e->as.call.fn->kind != E_NAME) return false;
+        const char *n = e->as.call.fn->as.sval;
+        if (strcmp(n, "range") == 0) return true;
+        if (strcmp(n, "map") == 0 || strcmp(n, "filter") == 0 ||
+            strcmp(n, "reduce") == 0)
+            return true;
+        /* a slice of a list copies, so the result is fresh regardless of the
+         * source: `append(slice(xs, 0, 1), v)` is safe even when xs is a
+         * parameter (a slice of a string is a string, not a list) */
+        if (strcmp(n, "slice") == 0 && e->as.call.count >= 1) {
+            Type *s = ty_base(ty_resolve(infer(ck, e->as.call.args[0])));
+            return s->k == TY_LIST;
+        }
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
+/* An owned list escapes when it is assigned into a global, a record field,
+ * or a list element: from then on, appending to it would be observable from
+ * outside the function. Walk the assigned value and revoke ownership on any
+ * owned local it carries. */
+static void mark_escaped(Ck *ck, const Expr *e) {
+    switch (e->kind) {
+    case E_NAME: {
+        Var *v = NULL;
+        if (ck->scope) v = env_find(&ck->scope->locals, e->as.sval);
+        if (!v) v = env_find(&ck->globals, e->as.sval);
+        if (v) v->owned = false;
+        break;
+    }
+    case E_LIST:
+        for (size_t i = 0; i < e->as.list.count; i++)
+            mark_escaped(ck, e->as.list.items[i]);
+        break;
+    case E_REC:
+        for (size_t i = 0; i < e->as.rec.count; i++)
+            mark_escaped(ck, e->as.rec.values[i]);
+        break;
+    case E_CALL:
+        for (size_t i = 0; i < e->as.call.count; i++)
+            mark_escaped(ck, e->as.call.args[i]);
+        break;
+    default:
+        break;
+    }
+}
+
+/* Update a variable's ownership after an assignment. A global (or any
+ * top-level binding) is never owned, and an owned list assigned into one
+ * escapes — so the value is walked and its owned locals revoked. */
+static void assign_owned(Ck *ck, Var *v, const char *name, const Expr *value) {
+    bool is_global = !ck->scope || env_find(&ck->globals, name) == v;
+    if (is_global) {
+        mark_escaped(ck, value);
+        v->owned = false;
+    } else {
+        v->owned = expr_owned(ck, value);
+    }
+}
+
 static Type *infer_call(Ck *ck, const Expr *e) {
     const Expr *fn = e->as.call.fn;
     size_t argc = e->as.call.count;
@@ -1691,11 +1789,17 @@ static Type *infer_call(Ck *ck, const Expr *e) {
     if (fn->kind == E_NAME) {
         const char *name = fn->as.sval;
         const char *dname = fn->disp ? fn->disp : name;
-        /* purity: a pure function may only call pure builtins */
+        /* purity: a pure function may only call pure builtins — with the one
+         * §1.2 escape: `append` to a list this function allocated itself is
+         * an unobservable effect, so it is allowed when the target is owned. */
         bool bpure = false;
-        if (ck->cur_pure && builtin_find(name, &bpure) && !bpure)
-            ck_error(ck, "E_TYPE_PURE_CALL", e->line, e->col,
-                     "pure function calls impure builtin '%s'", dname);
+        if (ck->cur_pure && builtin_find(name, &bpure) && !bpure) {
+            bool owned_append = strcmp(name, "append") == 0 && argc >= 1 &&
+                                expr_owned(ck, e->as.call.args[0]);
+            if (!owned_append)
+                ck_error(ck, "E_TYPE_PURE_CALL", e->line, e->col,
+                         "pure function calls impure builtin '%s'", dname);
+        }
         if (strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
             strcmp(name, "reduce") == 0)
             return infer_map_like(ck, e, name, argt, islam);
@@ -1844,6 +1948,25 @@ static Type *infer_call(Ck *ck, const Expr *e) {
         if (strcmp(name, "read_line") == 0) {
             ck_arity(ck, e, dname, 0);
             return ty_join(&t_str, &t_none);
+        }
+        if (strcmp(name, "read_all") == 0) {
+            ck_arity(ck, e, dname, 0);
+            return &t_str;
+        }
+        if (strcmp(name, "input") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "input() prompt must be str, got %s", type_str(argt[0]));
+            return ty_join(&t_str, &t_none);
+        }
+        if (strcmp(name, "write_out") == 0 || strcmp(name, "write_err") == 0) {
+            /* any value, printed the way print() would print it */
+            ck_arity(ck, e, dname, 1);
+            return &t_none;
+        }
+        if (strcmp(name, "flush") == 0) {
+            ck_arity(ck, e, dname, 0);
+            return &t_none;
         }
         if (strcmp(name, "now") == 0) {
             ck_arity(ck, e, dname, 0);
@@ -3099,6 +3222,7 @@ static void check_assign(Ck *ck, const Stmt *s) {
             v->annotated = true;
             v->is_const = s->as.assign.is_const;
             set_flow(v, val);
+            assign_owned(ck, v, name, s->as.assign.value);
             return;
         }
         if (!v) {
@@ -3106,6 +3230,7 @@ static void check_assign(Ck *ck, const Stmt *s) {
             if (!ck->scope) v->file = s->file;
             v->is_const = s->as.assign.is_const;
             set_flow(v, val);
+            assign_owned(ck, v, name, s->as.assign.value);
             return;
         }
         if (!v->bound) { /* first assignment fixes the inferred type */
@@ -3117,23 +3242,33 @@ static void check_assign(Ck *ck, const Stmt *s) {
                            "cannot assign %s to '%s' declared as %s",
                            type_str(val), name, type_str(v->decl));
             set_flow(v, val);
+            assign_owned(ck, v, name, s->as.assign.value);
             return;
         }
         note_shape_crossing(ck, v->decl, val);
-        if (assignable(v->decl, val)) { set_flow(v, val); return; }
+        if (assignable(v->decl, val)) {
+            set_flow(v, val);
+            assign_owned(ck, v, name, s->as.assign.value);
+            return;
+        }
         if (v->annotated) {
             ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, v->decl, val,
                        "cannot assign %s to '%s' declared as %s",
                        type_str(val), name, type_str(v->decl));
             set_flow(v, val);
+            assign_owned(ck, v, name, s->as.assign.value);
         } else {
             v->decl = ty_join(v->decl, widen(val)); /* inferred vars widen */
             set_flow(v, val);
+            assign_owned(ck, v, name, s->as.assign.value);
         }
         return;
     }
 
     if (target->kind == E_INDEX) {
+        /* the value escapes into the indexed container; if that container is
+         * reachable from outside, owned locals in it are no longer owned */
+        mark_escaped(ck, s->as.assign.value);
         Type *seq = ty_base(infer(ck, target->as.index.seq));
         Type *idx = infer(ck, target->as.index.idx);
         if (!assignable(&t_int, idx) || idx->k == TY_FLOAT)
@@ -3157,6 +3292,9 @@ static void check_assign(Ck *ck, const Stmt *s) {
     }
 
     /* E_ATTR */
+    /* a value stored into a field escapes into the record, which may be a
+     * parameter or global — revoke ownership on any owned locals it carries */
+    mark_escaped(ck, s->as.assign.value);
     Type *obj = ty_resolve(infer(ck, target->as.attr.obj));
     if (obj->k == TY_ANY || obj->k == TY_NEVER) return;
     if (obj->k != TY_REC) {
@@ -3291,6 +3429,7 @@ static void check_stmt(Ck *ck, const Stmt *s) {
                        "loop assigns %s to '%s' declared as %s",
                        type_str(elem), s->as.fr.var, type_str(v->decl));
         set_flow(v, elem);
+        v->owned = false; /* a loop variable holds elements, never a fresh list */
         ck->loop_depth++;
         check_block(ck, &s->as.fr.body);
         ck->loop_depth--;

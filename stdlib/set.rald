@@ -13,20 +13,20 @@ from dict import Map
 
 type Set = Map[bool]
 
-def new_set() -> Set { return dict.new_map() }
+def new_set() -> Set pure { return dict.new_map() }
 
 def add(s: Set, v: str) -> None { dict.set(s, v, True) }
 
-def has(s: Set, v: str) -> bool { return dict.has(s, v) }
+def has(s: Set, v: str) -> bool pure { return dict.has(s, v) }
 
 def remove(s: Set, v: str) -> bool { return dict.remove(s, v) }
 
-def size(s: Set) -> int { return dict.size(s) }
+def size(s: Set) -> int pure { return dict.size(s) }
 
-def is_empty(s: Set) -> bool { return dict.size(s) == 0 }
+def is_empty(s: Set) -> bool pure { return dict.size(s) == 0 }
 
 # Bucket order, like the map underneath. `sorted_elements` when order matters.
-def elements(s: Set) -> list[str] { return dict.keys(s) }
+def elements(s: Set) -> list[str] pure { return dict.keys(s) }
 
 def sorted_elements(s: Set) -> list[str] { return sort.sorted_strs(dict.keys(s)) }
 
@@ -59,7 +59,7 @@ def difference(a: Set, b: Set) -> Set {
     return out
 }
 
-def is_subset(a: Set, b: Set) -> bool {
+def is_subset(a: Set, b: Set) -> bool pure {
     for v in elements(a) {
         if has(b, v) == False { return False }
     }

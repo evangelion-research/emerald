@@ -14,7 +14,7 @@ vars:
     sh: echo "$PWD/src"
   STDLIBDIR:
     sh: echo "$PWD/stdlib"
-  COMPILER_SRCS: src/lexer.c src/ast.c src/parser.c src/module.c src/check.c src/codegen.c src/diag.c src/dim.c src/main.c
+  COMPILER_SRCS: src/lexer.c src/ast.c src/parser.c src/module.c src/check.c src/codegen.c src/diag.c src/dim.c src/repl.c src/main.c
 
 tasks:
   default:
@@ -40,7 +40,7 @@ tasks:
       - '{{.CC}} {{.CFLAGS}} -c src/runtime.c -o /dev/null -Iinclude'
 
   test:
-    desc: Run all stage test suites (lexer, parser, check, json, proof, e2e, imports, stdlib)
+    desc: Run all stage test suites (lexer, parser, check, json, proof, e2e, imports, stdlib, repl)
     deps: [build]
     cmds:
       - task: runtime-check
@@ -82,6 +82,12 @@ tasks:
     cmds:
       - ./tests/run_tests.sh imports
 
+  test:repl:
+    desc: Golden tests for the interactive session (--repl)
+    deps: [build]
+    cmds:
+      - ./tests/run_tests.sh repl
+
   test:stdlib:
     desc: Golden tests for the standard library (stdlib/*.rald)
     deps: [build]
@@ -101,12 +107,14 @@ tasks:
       - |
         for f in examples/*.rald; do
           echo "== $f"
-          ./bin/emeraldc "$f" && "${f%.rald}"
+          # stdin is closed: examples that read the console (console.rald) then
+          # take their EOF branch instead of waiting for a terminal.
+          ./bin/emeraldc "$f" && "${f%.rald}" < /dev/null
         done
       - |
         for f in examples/*/main.rald; do
           echo "== $f"
-          ./bin/emeraldc -o "${f%.rald}" "$f" && "${f%.rald}"
+          ./bin/emeraldc -o "${f%.rald}" "$f" && "${f%.rald}" < /dev/null
         done
 
   bless:
@@ -138,6 +146,11 @@ tasks:
           esac
         done
 
+      - |
+        for f in tests/repl/*.in; do
+          ./bin/emeraldc --repl < "$f" 2>&1 |
+            sed 's#/tmp/emerald-repl-[0-9]*#<repl>#g' > "${f%.in}.expected"
+        done
       - |
         for f in tests/stdlib/*.rald; do
           stdin="${f%.rald}.stdin"; [ -f "$stdin" ] || stdin=/dev/null

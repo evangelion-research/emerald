@@ -1,6 +1,8 @@
 # The runtime primitives the standard library is built on. These have no
 # module: they are always in scope, like every other builtin.
 
+import sys
+
 # append: amortized in-place growth, the operation no Emerald code can express
 xs: list[int] = []
 for i in range(5) { append(xs, i * i) }
@@ -35,16 +37,18 @@ def checked(n: int) -> int {
 }
 print(checked(7))
 
-# seed_rand: the same seed replays the same stream, which is the whole point
-seed_rand(42)
-first = rand()
-seed_rand(42)
-print(rand() == first)
+# --- seed_rand / now (stdlib/SPEC.md §1.1, the last three) -----------------
+# (read_line lives in readline_test.rald: it needs its own process so stdin can
+#  be piped to it — this program self-invokes and would otherwise re-run itself.)
 
-# now: monotonic seconds, so only differences are meaningful
-t0 = now()
-t1 = now()
-print(t1 >= t0)
+# seed_rand makes rand() reproducible: the same seed, the same stream
+seed_rand(7)
+a = rand()
+seed_rand(7)
+b = rand()
+print(a == b, a >= 0.0 and a < 1.0)
 
-# read_line: the line without its newline, then None at EOF (see .stdin)
-print(read_line(), read_line(), read_line())
+# now is monotonic float seconds; only differences mean anything
+s0 = now()
+s1 = now()
+print(s0 >= 0.0, s1 >= s0)

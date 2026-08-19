@@ -13,7 +13,7 @@ const SEP: str = "/"
 
 def is_abs(p: str) -> bool pure { return strings.starts_with(p, SEP) }
 
-def join(a: str, b: str) -> str {
+def join(a: str, b: str) -> str pure {
     if len(a) == 0 { return b }
     if len(b) == 0 { return a }
     if is_abs(b) { return b }
@@ -21,7 +21,7 @@ def join(a: str, b: str) -> str {
     return a + SEP + b
 }
 
-def join_all(parts: list[str]) -> str {
+def join_all(parts: list[str]) -> str pure {
     out = ""
     for p in parts { out = join(out, p) }
     return out
@@ -57,7 +57,7 @@ def without_ext(p: str) -> str pure {
 
 def with_ext(p: str, e: str) -> str pure { return without_ext(p) + e }
 
-def split_parts(p: str) -> list[str] {
+def split_parts(p: str) -> list[str] pure {
     out: list[str] = []
     for part in strings.split(p, SEP) {
         if len(part) > 0 { append(out, part) }

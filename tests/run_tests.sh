@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Emerald test runner: golden tests per compiler stage.
 #
-#   tests/run_tests.sh [lexer|parser|check|json|e2e|proof|imports|stdlib]...
+#   tests/run_tests.sh [lexer|parser|check|json|e2e|proof|imports|stdlib|repl]...
 #                                                              (default: all stages)
 #
 # Each stage compares tool output against a .expected file:
@@ -15,6 +15,9 @@
 #            `flags` (extra emeraldc arguments, e.g. -I roots), and `expected`.
 #            A case named bad_* is checked with --check and must fail; every
 #            other case is compiled and run.
+#   repl/    one .in per session, fed to `emeraldc --repl` on stdin; the
+#            session's scratch path is rewritten to <repl> so the golden
+#            output does not depend on the pid.
 #   stdlib/  one .rald per module, compiled and run against .expected. These
 #            import from stdlib/ with no -I flag, so they also test that the
 #            stdlib root resolves by default.
@@ -141,6 +144,15 @@ run_shape() {
     done
 }
 
+run_repl() {
+    echo "== repl"
+    for f in tests/repl/*.in; do
+        out="$("$EMERALDC" --repl <"$f" 2>&1 |
+               sed 's#/tmp/emerald-repl-[0-9]*#<repl>#g')"
+        report "$f" "${f%.in}.expected" "$out"
+    done
+}
+
 run_stdlib() {
     echo "== stdlib"
     for f in tests/stdlib/*.rald; do
@@ -162,7 +174,7 @@ run_stdlib() {
     done
 }
 
-stages="${*:-lexer parser check json proof e2e imports stdlib shape}"
+stages="${*:-lexer parser check json proof e2e imports stdlib repl shape}"
 for s in $stages; do
     case "$s" in
         lexer) run_lexer ;;
@@ -173,6 +185,7 @@ for s in $stages; do
         e2e) run_e2e ;;
         imports) run_imports ;;
         stdlib) run_stdlib ;;
+        repl) run_repl ;;
         shape) run_shape ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac

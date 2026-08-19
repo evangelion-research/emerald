@@ -1,0 +1,22 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARG",
+    "file": "tests/check/bad_new_builtins.rald",
+    "line": 4,
+    "column": 10,
+    "message": "seed_rand() argument must be int, got \"nope\"",
+    "source_line": "seed_rand(\"nope\")"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_PURE_CALL",
+    "file": "tests/check/bad_new_builtins.rald",
+    "line": 6,
+    "column": 43,
+    "message": "pure function calls impure builtin 'now'",
+    "source_line": "def timestamp() -> float pure { return now() }"
+  }
+]

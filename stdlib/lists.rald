@@ -17,7 +17,7 @@ def extend[T](xs: list[T], ys: list[T]) -> None {
     for y in ys { append(xs, y) }
 }
 
-def concat[T](xs: list[T], ys: list[T]) -> list[T] {
+def concat[T](xs: list[T], ys: list[T]) -> list[T] pure {
     out: list[T] = []
     for x in xs { append(out, x) }
     for y in ys { append(out, y) }
@@ -30,7 +30,7 @@ def copy[T](xs: list[T]) -> list[T] pure { return slice(xs, 0, len(xs)) }
 def take[T](xs: list[T], n: int) -> list[T] pure { return slice(xs, 0, n) }
 def drop[T](xs: list[T], n: int) -> list[T] pure { return slice(xs, n, len(xs)) }
 
-def reverse[T](xs: list[T]) -> list[T] {
+def reverse[T](xs: list[T]) -> list[T] pure {
     out: list[T] = []
     i = len(xs) - 1
     while i >= 0 {
@@ -116,7 +116,7 @@ def find[T](xs: list[T], f: (T) -> bool) -> Option[T] {
 
 # --- shaping ---------------------------------------------------------------
 
-def zip[A, B](xs: list[A], ys: list[B]) -> list[{ a: A, b: B }] {
+def zip[A, B](xs: list[A], ys: list[B]) -> list[{ a: A, b: B }] pure {
     out: list[{ a: A, b: B }] = []
     n = len(xs)
     if len(ys) < n { n = len(ys) }
@@ -128,7 +128,7 @@ def zip[A, B](xs: list[A], ys: list[B]) -> list[{ a: A, b: B }] {
     return out
 }
 
-def enumerate[T](xs: list[T]) -> list[{ i: int, v: T }] {
+def enumerate[T](xs: list[T]) -> list[{ i: int, v: T }] pure {
     out: list[{ i: int, v: T }] = []
     i = 0
     while i < len(xs) {
@@ -138,7 +138,7 @@ def enumerate[T](xs: list[T]) -> list[{ i: int, v: T }] {
     return out
 }
 
-def flatten[T](xss: list[list[T]]) -> list[T] {
+def flatten[T](xss: list[list[T]]) -> list[T] pure {
     out: list[T] = []
     for xs in xss {
         for x in xs { append(out, x) }
@@ -146,7 +146,7 @@ def flatten[T](xss: list[list[T]]) -> list[T] {
     return out
 }
 
-def repeat[T](v: T, n: int) -> list[T] {
+def repeat[T](v: T, n: int) -> list[T] pure {
     out: list[T] = []
     i = 0
     while i < n {
@@ -157,7 +157,7 @@ def repeat[T](v: T, n: int) -> list[T] {
 }
 
 # Split into runs of `n` — the shape a batcher wants.
-def chunk[T](xs: list[T], n: int) -> list[list[T]] {
+def chunk[T](xs: list[T], n: int) -> list[list[T]] pure {
     out: list[list[T]] = []
     if n <= 0 { return out }
     i = 0
@@ -168,7 +168,7 @@ def chunk[T](xs: list[T], n: int) -> list[list[T]] {
     return out
 }
 
-def unique[T](xs: list[T]) -> list[T] {
+def unique[T](xs: list[T]) -> list[T] pure {
     out: list[T] = []
     for x in xs {
         if index_of(out, x) < 0 { append(out, x) }

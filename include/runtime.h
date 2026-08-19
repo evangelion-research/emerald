@@ -182,6 +182,11 @@ Value em_float_of(Value v);          /* float(), the counterpart of int() */
 void  em_eprint(size_t n, ...);      /* print(), to stderr */
 Value em_argv(void);                 /* the process's argument vector */
 Value em_read_line(void);            /* a line from stdin, or None at EOF */
+Value em_read_all(void);             /* all remaining stdin as one string */
+Value em_input(Value prompt);        /* prompt, then a line (None at EOF) */
+void  em_write_out(Value v);         /* one value to stdout, no newline */
+void  em_write_err(Value v);         /* one value to stderr, no newline */
+void  em_flush(void);                /* flush stdout and stderr */
 Value em_now(void);                  /* monotonic seconds; only diffs mean anything */
 void  em_seed(Value n);              /* reseed the PRNG for reproducibility */
 void  em_exit(Value code);           /* terminate with an exit status */

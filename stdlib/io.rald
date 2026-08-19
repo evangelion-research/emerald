@@ -45,3 +45,37 @@ def exists(path: str) -> bool { return file_exists(path) }
 # spellings a library can pass around and a caller can redirect in their head.
 def say(line: str) -> None { print(line) }
 def warn(line: str) -> None { eprint(line) }
+
+# Unterminated writes, for prompts and progress. `write_out` flushes, so a prompt
+# is on screen before the read that follows it blocks.
+def out(text: str) -> None { write_out(text) }
+def err(text: str) -> None { write_err(text) }
+
+# --- the console ---------------------------------------------------------
+#
+# Reading is failure-as-a-value here too, but the failure is EOF rather than a
+# missing file: `None` means the stream ended, not that something went wrong.
+
+def read_line_opt() -> str | None { return read_line() }
+
+# ask(prompt): the prompt, then a line without its newline; None at EOF.
+def ask(prompt: str) -> str | None { return input(prompt) }
+
+# ask_or(prompt, fallback): the same, with EOF (and a bare Enter) standing for
+# the default — what a script wants when it is run without a terminal.
+def ask_or(prompt: str, fallback: str) -> str {
+    line = input(prompt)
+    if line == None { return fallback }
+    if line == "" { return fallback }
+    return line
+}
+
+# Everything still on stdin: the whole text, or its lines.
+def read_stdin() -> str { return read_all() }
+
+def stdin_lines() -> list[str] {
+    text = read_all()
+    if text == "" { return [] }
+    return strings.split_lines(text)
+}
+

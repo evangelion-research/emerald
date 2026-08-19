@@ -74,7 +74,7 @@ def is_empty(s: str) -> bool pure { return len(s) == 0 }
 
 # --- splitting and joining -------------------------------------------------
 
-def split(s: str, sep: str) -> list[str] {
+def split(s: str, sep: str) -> list[str] pure {
     out: list[str] = []
     # An empty separator would mean "explode into characters", which is what
     # `for c in s` already does. Splitting on nothing returns the whole thing.
@@ -97,7 +97,7 @@ def split(s: str, sep: str) -> list[str] {
 
 # Splits on \n and tolerates \r\n. A trailing newline does not produce a final
 # empty line, which is what every line-oriented tool actually wants.
-def split_lines(s: str) -> list[str] {
+def split_lines(s: str) -> list[str] pure {
     out: list[str] = []
     raw = split(s, "\n")
     i = 0
@@ -165,7 +165,7 @@ def rpartition(s: str, sep: str) -> { before: str, found: bool, after: str } pur
 # Python's str.rsplit(sep, maxsplit): split at the rightmost `maxsplit`
 # separators, so the result still has maxsplit + 1 pieces. `maxsplit <= 0`
 # means "no limit", which is plain split.
-def rsplit(s: str, sep: str, maxsplit: int) -> list[str] {
+def rsplit(s: str, sep: str, maxsplit: int) -> list[str] pure {
     out: list[str] = []
     if len(sep) == 0 {
         append(out, s)
@@ -522,7 +522,7 @@ def translate(s: str, table: list[int]) -> str {
     return builder.build(b)
 }
 
-def to_chars(s: str) -> list[str] {
+def to_chars(s: str) -> list[str] pure {
     out: list[str] = []
     for c in s { append(out, c) }
     return out

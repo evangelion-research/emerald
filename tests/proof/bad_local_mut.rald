@@ -1,0 +1,25 @@
+# §1.2 local-mutation purity, the other side: `append` is only allowed on a
+# list the pure function allocated itself. A parameter, a global, a record
+# field, and a list that has already escaped into a global are all rejected.
+
+def append_param(xs: list[int]) -> list[int] pure {
+    append(xs, 1)
+    return xs
+}
+
+g: list[int] = []
+def append_global() -> None pure {
+    append(g, 1)
+}
+
+def append_after_escape() -> list[int] pure {
+    out: list[int] = []
+    append(out, 1)
+    g = out
+    append(out, 2)
+    return out
+}
+
+def append_field(p: { items: list[int] }) -> None pure {
+    append(p.items, 1)
+}

@@ -132,13 +132,33 @@ composition with `>>`, exhaustive `match` on tagged records, thunks
 (10M-deep recursion is fine). See [`examples/functional/`](examples/functional/)
 for a seven-part tour of each feature.
 
+## The REPL
+
+```
+$ emeraldc --repl          # or just: emeraldc
+emerald> xs = [1, 2]
+emerald> append(xs, 3)
+emerald> xs
+[1, 2, 3]
+```
+
+There is no interpreter — the session *is* its source text. Each entry is
+appended, the whole program is recompiled and re-run, and a marker line printed
+between the old text and the new entry tells the REPL which output to show. So
+the checker is the same checker, state needs no runtime support, and a typo
+leaves the session untouched; the price is that effects repeat, once per entry.
+`:list`, `:undo`, `:save FILE` and friends bridge back to ordinary files.
+See [`docs/repl.md`](docs/repl.md).
+
 ## Builtins
 
-Fifty-two builtins compile straight into runtime calls and are in scope in
-every module. Twenty-seven are the core set: `print`, `eprint`, `len`, `range`,
-`str`, `int`, `float`, `sqrt`, `tan`, `rand`, `append`, `slice`, `ord`, `chr`,
-`argv`, `exit`, `map`, `filter`, `reduce`, `read_file`, `read_file_opt`,
-`file_exists`, `write_file`, `append_file`, `run`, `gc_stats`, `gc_collect`.
+Sixty builtins compile straight into runtime calls and are in scope in
+every module. Thirty-five are the core set: `print`, `eprint`, `write_out`,
+`write_err`, `flush`, `len`, `range`, `str`, `int`, `float`, `sqrt`, `tan`,
+`rand`, `append`, `slice`, `ord`, `chr`, `argv`, `exit`, `map`, `filter`,
+`reduce`, `input`, `read_line`, `read_all`, `read_file`, `read_file_opt`,
+`file_exists`, `write_file`, `append_file`, `run`, `now`, `seed_rand`,
+`gc_stats`, `gc_collect`.
 The other twenty-five are the Phase 2 tensor primitives: `zeros`, `ones`,
 `full`, `arange`, `tensor`, `randn`, `exp`, `log`, `tanh`, `relu`, `matmul`,
 `reshape`, `transpose`, `permute`, `expand`, `sum`, `mean`, `max`, `argmax`,
