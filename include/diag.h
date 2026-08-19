@@ -60,6 +60,9 @@ typedef struct {
     DiagSource *sources; /* per-file sources, for multi-module programs */
     size_t source_count, source_cap;
     bool json;         /* render as JSON rather than human text */
+    bool werror;       /* --werror: promote warnings to errors */
+    const char **suppress; /* -Wno-<code>: warning codes to silence */
+    size_t suppress_count;
 } DiagList;
 
 void diag_init(DiagList *dl, const char *src);
@@ -72,6 +75,17 @@ void diag_add_source(DiagList *dl, const char *file, const char *src);
 /* Append a diagnostic and return it so callers can attach expected/actual. */
 Diag *diag_add(DiagList *dl, DiagKind kind, const char *code,
                const char *file, int line, int col, const char *fmt, ...);
+
+/* Append a diagnostic with an explicit severity (a warning, not an error). */
+Diag *diag_add_sev(DiagList *dl, DiagKind kind, DiagSeverity sev,
+                   const char *code, const char *file, int line, int col,
+                   const char *fmt, ...);
+
+/* Has `-Wno-code` silenced this warning code? */
+bool diag_suppressed(const DiagList *dl, const char *code);
+
+/* Number of SEV_WARNING diagnostics currently collected. */
+size_t diag_warning_count(const DiagList *dl);
 
 /* Set the structured expected/actual types on a diagnostic (copies the
  * strings, so a rotating buffer source is safe). */

@@ -1,0 +1,11 @@
+# W1/W5: a covariant list upcast (list[Dog] where list[Animal] is expected) is
+# unsound — a later append could write an Animal into a list that is really
+# list[Dog]. Outside proof mode this compiles, with a warning; --werror (and
+# proof mode, where lists are invariant) rejects it.
+type Animal = { name: str }
+type Dog = Animal & { bark: str }
+
+def count(animals: list[Animal]) -> int pure { return len(animals) }
+
+dogs: list[Dog] = [{ name: "rex", bark: "woof" }]
+print(count(dogs))

@@ -1,0 +1,5 @@
+error[E_TYPE_TERMINATION]: mutually recursive functions form a cycle without structural descent: 'pong', 'ping'; declare them 'partial' to opt out of termination checking
+  --> tests/proof/bad_mutual_recursion.rald:7:1
+    |
+ 7 | def pong(n: int) -> int {
+   | ^

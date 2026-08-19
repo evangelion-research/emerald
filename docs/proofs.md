@@ -30,11 +30,12 @@ The correspondence is not exact. Emerald now checks **termination by
 structural descent** (see below), so a *recursive* function cannot inhabit
 `never` by diverging — the checker rejects recursion that does not descend
 through a recursive alias unless the function is explicitly `partial`, and
-`partial` functions are banned in proof mode. Two escapes remain outside
-proof mode: an infinite `while True` loop, and a `partial` function:
+`partial` functions are banned in proof mode. Outside proof mode the escape
+is a `partial` function (an infinite `while True` loop is also still
+accepted, but it is now the honest outlier):
 
 ```
-def loop() -> never { while True { pass } }   # accepted: it never finishes
+def loop() -> never { while True { pass } }   # accepted outside --proof: it never finishes
 ```
 
 Every *other* path must return, though. Because falling off the end of a
@@ -57,10 +58,24 @@ Three things make a proof claim *honest* rather than merely well-typed:
 - **Termination.** Functions are total by default: every recursive call must
 descend structurally — an argument that is a projection chain from a
 parameter of recursive-alias type (`n.succ`, `xs.tail`), staying inside the
-same inductive structure. A function whose recursion cannot be shown to
-descend must declare `partial`, which marks it as *not* a proof. Mutual
-recursion and descent through `list` elements are not recognized yet, so
-those functions must declare `partial` too.
+same inductive structure, or an element of a `seq` field (`t.kids[0]`;
+`list[T]` is *not* accepted because it can be mutated between the call and
+the recursion). A function whose recursion cannot be shown to descend must
+declare `partial`, which marks it as *not* a proof.
+
+  Two more gaps are closed (SPEC_V3 W4):
+
+  - **Mutual recursion.** The checker builds the call-graph SCCs and rejects a
+    cycle of more than one function (`is_even`/`is_odd`) as a cycle without
+    structural descent, naming the cycle — unless every member is `partial`.
+  - **`while` loops.** Under `--proof` a `while` loop is accepted only when its
+    termination is statically evident — a single integer counter moving
+    monotonically toward a bound (`while i < n { ...; i = i + 1 }`,
+    `while n > 0 { ...; n = floor_div(n, 2) }`). Anything else (a `while True`,
+    a compound condition, a mutable-list loop) is `E_TYPE_TERMINATION`;
+    `for i in range(n)` is the supported total loop. This is why the standard
+    library no longer passes proof mode as a whole — the finding
+    `--proof-report` quantifies.
 
 - **Purity.** `def forward(x: T) -> U pure` promises the function calls
 nothing impure: no `print`, no `rand`, no file or process IO, no impure
@@ -245,24 +260,31 @@ These are real limits, not omissions to work around:
 
 - **Induction is limited.** Non-generic types may be recursive (`type N = ...`),
   so inductively defined naturals or lists-as-cons-cells can be written, but
-  the checker has no induction principle — claims about all lists are still
-  limited to what parametricity gives.
+  the checker derives no induction principle for them — claims about all
+  lists are still limited to what parametricity gives. (This is SPEC_V3 W6;
+  it is the one planned workstream not yet landed.)
 - **No dependent types.** A type cannot mention a value, so "this list has
   length `n`", "this index is in bounds", or "this integer is positive" are
-  not expressible. Finite enumerations via literal types are the substitute,
-  and they do not scale past a handful of values.
+  not expressible — *except* at the dimension level, where `Eq[a, b]` +
+  `refl` make a discharged shape equality a first-class value that crosses a
+  function boundary (`e: Eq[a, b]` lets a `Tensor[f32, [a]]` be used as
+  `Tensor[f32, [b]]`). Finite enumerations via literal types are the
+  substitute for value-dependent types, and they do not scale past a handful
+  of values.
 - **Higher-order proofs are limited.** Functions are values and closures
   exist, so a lemma can be passed as an argument; there is still no way to
   state a proposition *about* a function's behavior.
-- **Termination is partial.** Recursive calls must descend structurally
-  through a recursive alias, but the check does not cover `while True`
-  loops, mutual recursion, or descent through list elements — those need
-  `partial`, and outside proof mode a diverging function can still inhabit
-  `never`. The logic is therefore not consistent the way a proof
-  assistant's is.
-- **Unsound covariant lists.** `list[int]` is assignable to
-  `list[int | None]`, and mutating through the alias defeats the element-type
-  claim. Do not build a proof on the element type of a shared list.
+- **Termination is the honest cut.** Recursive calls must descend
+  structurally through a recursive alias (or a `seq` element); mutual
+  recursion and non-monotone `while` loops are rejected (see above), and
+  outside proof mode a diverging function can still inhabit `never` via a
+  `while True` or `partial`. The logic is therefore not consistent the way a
+  proof assistant's is.
+- **Unsound covariant lists.** `list[int]` is assignable to `list[int | None]`
+  (outside proof mode this now warns `W_UNSOUND_COVARIANCE`), and mutating
+  through the alias defeats the element-type claim. Use `seq[T]` — covariant
+  and sound, because it cannot be mutated — for the sequence you build a
+  proof on.
 
 For proofs that need induction or dependent types, Emerald is the wrong tool —
 reach for a real proof assistant. What Emerald does well is the mechanized,

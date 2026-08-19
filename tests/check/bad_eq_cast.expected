@@ -1,0 +1,7 @@
+error[E_TYPE_RETURN]: returning Tensor[f32, [A]] from a function declared to return Tensor[f32, [B]]
+  --> tests/check/bad_eq_cast.rald:5:58
+    |
+ 5 | def cast(t: Tensor[f32, [A]]) -> Tensor[f32, [B]] pure { return t }
+   |                                                          ^
+   = expected: Tensor[f32, [B]]
+   = actual:   Tensor[f32, [A]]

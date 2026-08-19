@@ -1,0 +1,16 @@
+# W3/D2: purity now lives on the function *type*, not just direct call sites.
+# Before this change, a `pure` function could hand an impure function to map()
+# and the checker would not notice. Now the impure callee leaks through the
+# higher-order builtin — and through a lambda whose body is impure.
+
+def shout(x: int) -> int { print(x); return x }
+
+def via_name(xs: list[int]) -> list[int] pure {
+    return map(shout, xs)
+}
+
+def via_lambda(xs: list[int]) -> list[int] pure {
+    return map((x: int) => shout(x), xs)
+}
+
+print(via_name([1]), via_lambda([2]))

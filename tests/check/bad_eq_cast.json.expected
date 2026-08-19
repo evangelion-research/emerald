@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_RETURN",
+    "file": "tests/check/bad_eq_cast.rald",
+    "line": 5,
+    "column": 58,
+    "message": "returning Tensor[f32, [A]] from a function declared to return Tensor[f32, [B]]",
+    "expected": "Tensor[f32, [B]]",
+    "actual": "Tensor[f32, [A]]",
+    "source_line": "def cast(t: Tensor[f32, [A]]) -> Tensor[f32, [B]] pure { return t }"
+  }
+]

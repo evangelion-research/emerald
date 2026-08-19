@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_TERMINATION",
+    "file": "tests/check/bad_mutual_recursion.rald",
+    "line": 7,
+    "column": 1,
+    "message": "mutually recursive functions form a cycle without structural descent: 'is_odd', 'is_even'; declare them 'partial' to opt out of termination checking",
+    "source_line": "def is_odd(n: int) -> bool {"
+  }
+]

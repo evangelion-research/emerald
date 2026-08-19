@@ -1,0 +1,8 @@
+# W4: descent through a `seq[Tree]` element is a structural decrease —
+# element-of is strictly smaller, and a seq is immutable so the step is sound.
+type Tree = None | { v: int, kids: seq[Tree] }
+
+def depth(t: Tree) -> int pure {
+    if t == None { return 0 }
+    return 1 + depth(t.kids[0])
+}

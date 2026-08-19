@@ -61,6 +61,11 @@ static void print_type(FILE *out, const TypeExpr *t) {
         print_type(out, t->elem);
         fputs("]", out);
         break;
+    case TE_SEQ:
+        fputs("seq[", out);
+        print_type(out, t->elem);
+        fputs("]", out);
+        break;
     case TE_REC:
         fputs("{", out);
         for (size_t i = 0; i < t->fields.count; i++) {
@@ -111,6 +116,13 @@ static void print_type(FILE *out, const TypeExpr *t) {
     case TE_FIN:
         fputs("(fin ", out);
         print_dim(out, t->fin_dim);
+        fputs(")", out);
+        break;
+    case TE_EQ:
+        fputs("(eq ", out);
+        print_dim(out, t->eq_lhs);
+        fputs(" ", out);
+        print_dim(out, t->eq_rhs);
         fputs(")", out);
         break;
     }

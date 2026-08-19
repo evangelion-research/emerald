@@ -1,0 +1,10 @@
+error[E_TYPE_PURE_CALL]: pure function passes an impure function to map()
+  --> tests/check/bad_pure_higher_order.rald:9:15
+    |
+ 9 |     return map(shout, xs)
+   |               ^
+error[E_TYPE_PURE_CALL]: pure function passes an impure function to map()
+  --> tests/check/bad_pure_higher_order.rald:13:15
+     |
+ 13 |     return map((x: int) => shout(x), xs)
+    |               ^

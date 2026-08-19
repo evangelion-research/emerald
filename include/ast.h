@@ -16,6 +16,7 @@ typedef struct DimExpr DimExpr;  /* see include/dim.h */
 typedef enum {
     TE_NAME,   /* int, float, str, bool, None, any, never, alias, type var */
     TE_LIST,   /* list[T] */
+    TE_SEQ,    /* seq[T] — an immutable, covariant, sound sequence */
     TE_REC,    /* { x: int, y: int } */
     TE_UNION,  /* A | B */
     TE_INTER,  /* A & B  (structural "inheritance") */
@@ -23,6 +24,7 @@ typedef enum {
     TE_FUNC,   /* (A, B) -> C  (function type) */
     TE_TENSOR, /* Tensor[dtype, [dim, ...]] or Tensor[dtype, ?] */
     TE_FIN,    /* Fin[n] — an index provably below the dim `n` */
+    TE_EQ,     /* Eq[a, b] — propositional equality of two dim expressions */
 } TypeExprKind;
 
 typedef enum { LIT_INT, LIT_STR, LIT_BOOL, LIT_NONE } LitKind;
@@ -59,6 +61,7 @@ struct TypeExpr {
         bool dynamic;       /* Tensor[f32, ?]: a dynamic-shape escape hatch */
     } tensor;
     DimExpr *fin_dim;       /* TE_FIN: the bound expression `n` */
+    DimExpr *eq_lhs, *eq_rhs; /* TE_EQ: the two sides of Eq[a, b] */
 };
 
 /* --- expressions -------------------------------------------------------- */

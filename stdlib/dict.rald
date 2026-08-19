@@ -29,7 +29,21 @@ def hash_str(s: str) -> int pure {
     return h
 }
 
-def _empty_buckets[V](n: int) -> list[list[Entry[V]]] pure {
+def new_map[V]() -> Map[V] pure {
+    bs: list[list[Entry[V]]] = []
+    i = 0
+    while i < _INITIAL_BUCKETS {
+        b: list[Entry[V]] = []
+        append(bs, b)
+        i = i + 1
+    }
+    return { buckets: bs, size: 0 }
+}
+
+# Reset a map's buckets to `n` empty ones. Generic over V, which is inferred
+# from the map argument (unlike the old `_empty_buckets[V](n)`, whose V appeared
+# only in the return type and therefore defaulted to `any` under proof mode).
+def _reset_buckets[V](m: Map[V], n: int) -> None {
     bs: list[list[Entry[V]]] = []
     i = 0
     while i < n {
@@ -37,11 +51,7 @@ def _empty_buckets[V](n: int) -> list[list[Entry[V]]] pure {
         append(bs, b)
         i = i + 1
     }
-    return bs
-}
-
-def new_map[V]() -> Map[V] pure {
-    return { buckets: _empty_buckets(_INITIAL_BUCKETS), size: 0 }
+    m.buckets = bs
 }
 
 def _slot[V](m: Map[V], k: str) -> int pure { return hash_str(k) % len(m.buckets) }
@@ -75,7 +85,7 @@ def is_empty[V](m: Map[V]) -> bool pure { return m.size == 0 }
 
 def _grow[V](m: Map[V]) -> None {
     old = m.buckets
-    m.buckets = _empty_buckets(len(old) * 2)
+    _reset_buckets(m, len(old) * 2)
     for bucket in old {
         for e in bucket { append(m.buckets[hash_str(e.key) % len(m.buckets)], e) }
     }
@@ -118,7 +128,7 @@ def remove[V](m: Map[V], k: str) -> bool {
 }
 
 def clear[V](m: Map[V]) -> None {
-    m.buckets = _empty_buckets(_INITIAL_BUCKETS)
+    _reset_buckets(m, _INITIAL_BUCKETS)
     m.size = 0
 }
 

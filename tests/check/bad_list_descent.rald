@@ -1,0 +1,9 @@
+# W4: descent through a `list[Tree]` element is NOT accepted — the list could
+# be mutated between the call and the recursion, so element-of is not a sound
+# decrease for a mutable sequence.
+type Tree = None | { v: int, kids: list[Tree] }
+
+def depth(t: Tree) -> int pure {
+    if t == None { return 0 }
+    return 1 + depth(t.kids[0])
+}

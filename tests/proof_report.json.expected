@@ -1,0 +1,7 @@
+{
+  "functions": {"total": 2, "partial": 1, "pure": 1},
+  "partial_names": ["fib"],
+  "vacuous_obligations": 0,
+  "covariance_warnings": 1,
+  "taint_sites": 0
+}

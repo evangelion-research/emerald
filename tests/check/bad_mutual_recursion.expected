@@ -1,0 +1,5 @@
+error[E_TYPE_TERMINATION]: mutually recursive functions form a cycle without structural descent: 'is_odd', 'is_even'; declare them 'partial' to opt out of termination checking
+  --> tests/check/bad_mutual_recursion.rald:7:1
+    |
+ 7 | def is_odd(n: int) -> bool {
+   | ^

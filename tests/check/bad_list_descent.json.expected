@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_TERMINATION",
+    "file": "tests/check/bad_list_descent.rald",
+    "line": 8,
+    "column": 21,
+    "message": "recursive call to 'depth' does not decrease a recursive-alias argument; declare the function 'partial' to opt out of termination checking",
+    "source_line": "    return 1 + depth(t.kids[0])"
+  }
+]

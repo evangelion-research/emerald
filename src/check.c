@@ -28,10 +28,21 @@
 
 typedef enum {
     TY_ANY, TY_NEVER, TY_NONE, TY_BOOL, TY_INT, TY_FLOAT, TY_STR,
-    TY_LIT, TY_LIST, TY_REC, TY_UNION, TY_VAR, TY_ALIAS, TY_FUNC,
+    TY_LIT, TY_LIST, TY_SEQ, TY_REC, TY_UNION, TY_VAR, TY_ALIAS, TY_FUNC,
     TY_TENSOR, TY_FIN,
+    TY_EQ,      /* Eq[a, b]: propositional equality of two dim expressions */
     TY_OPAQUE,  /* Chan[T], Task[T]: a runtime handle with one element type */
 } TyKind;
+
+/* Effect labels (SPEC_V3 D1/W3): a closed 5-bit set. A function type carries
+ * the join of its effects; `pure` is the empty mask. */
+typedef unsigned EffMask;
+#define EFF_PURE   0u
+#define EFF_IO     1u
+#define EFF_RAND   2u
+#define EFF_MUT    4u
+#define EFF_ALLOC  8u
+#define EFF_NONDET 16u
 
 /* tensor dtype tags used by the checker (the runtime's DType is independent) */
 typedef enum { CDT_F32, CDT_F64 } CDType;
@@ -54,9 +65,10 @@ struct Type {
     struct { Type **alts; size_t count; } uni;              /* TY_UNION */
     struct { TyKind base; int64_t ival; char *sval; } lit;  /* TY_LIT */
     char *var;                                              /* TY_VAR */
-    struct { Type **params; Type *ret; size_t count; } fun; /* TY_FUNC */
+    struct { Type **params; Type *ret; size_t count; EffMask eff; } fun; /* TY_FUNC */
     struct { CDType dt; Shape *shape; } tensor;             /* TY_TENSOR */
     DimExpr *fin;                                            /* TY_FIN */
+    struct { DimExpr *lhs, *rhs; } eq;                       /* TY_EQ */
     /* TY_OPAQUE: the handle's name ("Chan" / "Task") lives in `var` and the
      * value it carries in `elem`. Handles have no structure a program can
      * inspect, so equality is the name plus the element type. */
@@ -91,6 +103,29 @@ static Type t_any = {.k = TY_ANY}, t_never = {.k = TY_NEVER},
             t_int = {.k = TY_INT}, t_float = {.k = TY_FLOAT},
             t_str = {.k = TY_STR};
 
+/* W5/D3: under --proof, `list[T]` assignability is invariant (sound); outside
+ * it the covariance inherited from TypeScript still applies but is warned on.
+ * assignable() has no Ck argument, so the mode lives in a file-static. */
+static bool ck_proof_mode = false;
+
+/* W8: --proof-report measurement. Static, reset at the start of each
+ * check_program() run, and read back through proof_report_get(). */
+static size_t proof_rep_total_funcs, proof_rep_partial_funcs,
+    proof_rep_pure_funcs;
+static char **proof_rep_partial_names;
+static size_t proof_rep_partial_n, proof_rep_partial_cap;
+static size_t proof_rep_vacuous;      /* W_VACUOUS_PROOF emissions */
+static size_t proof_rep_covariance;   /* W_UNSOUND_COVARIANCE emissions */
+static size_t proof_rep_taint_sites;  /* proof-mode tainted-type rejections */
+
+static void proof_rep_reset(void) {
+    proof_rep_total_funcs = proof_rep_partial_funcs = proof_rep_pure_funcs = 0;
+    proof_rep_partial_n = 0;
+    proof_rep_vacuous = proof_rep_covariance = proof_rep_taint_sites = 0;
+}
+
+static bool type_is_fresh(const Type *t);
+
 
 static Type *ty_new(TyKind k) {
     Type *t = xmalloc(sizeof(Type));
@@ -102,6 +137,21 @@ static Type *ty_new(TyKind k) {
 static Type *ty_list(Type *elem) {
     Type *t = ty_new(TY_LIST);
     t->elem = elem;
+    return t;
+}
+
+/* seq[T]: an immutable, covariant sequence (D3 / W5). Sound, unlike list[T]. */
+static Type *ty_seq(Type *elem) {
+    Type *t = ty_new(TY_SEQ);
+    t->elem = elem;
+    return t;
+}
+
+/* A list literal annotated `seq[T]` is the sequence form of its element type:
+ * list[T] -> seq[T] (a seq stays a seq). Used by seq-literal contextual typing. */
+static Type *to_seq(Type *t) {
+    Type *r = ty_resolve(t);
+    if (r->k == TY_LIST) return ty_seq(r->elem);
     return t;
 }
 
@@ -126,6 +176,7 @@ static Type *ty_func(Type **params, size_t count, Type *ret) {
         t->fun.params[i] = params[i];
     t->fun.count = count;
     t->fun.ret = ret;
+    t->fun.eff = EFF_PURE;
     return t;
 }
 
@@ -179,6 +230,13 @@ static Type *ty_tensor(CDType dt, Shape *shape) {
 static Type *ty_fin(DimExpr *bound) {
     Type *t = ty_new(TY_FIN);
     t->fin = bound;
+    return t;
+}
+
+static Type *ty_eq(DimExpr *lhs, DimExpr *rhs) {
+    Type *t = ty_new(TY_EQ);
+    t->eq.lhs = lhs;
+    t->eq.rhs = rhs;
     return t;
 }
 
@@ -296,6 +354,30 @@ static bool shape_eq(const Shape *a, const Shape *b) {
     return true;
 }
 
+/* W7: dim equalities currently in scope, from `e: Eq[a, b]` bindings (function
+ * parameters and locals). Evidence is erased at runtime and only consulted by
+ * tensor-shape assignability below. */
+static const DimExpr *eq_evidence_l[64], *eq_evidence_r[64];
+static size_t eq_evidence_count;
+
+static bool dim_eq_evid(const DimExpr *a, const DimExpr *b) {
+    if (dim_eq(a, b)) return true;
+    for (size_t i = 0; i < eq_evidence_count; i++)
+        if ((dim_eq(a, eq_evidence_l[i]) && dim_eq(b, eq_evidence_r[i])) ||
+            (dim_eq(a, eq_evidence_r[i]) && dim_eq(b, eq_evidence_l[i])))
+            return true;
+    return false;
+}
+
+/* shape equality modulo the Eq[a, b] evidence in scope */
+static bool shape_eq_evid(const Shape *a, const Shape *b) {
+    if (a->dynamic || b->dynamic) return a->dynamic && b->dynamic;
+    if (a->count != b->count) return false;
+    for (size_t i = 0; i < a->count; i++)
+        if (!dim_eq_evid(a->dims[i], b->dims[i])) return false;
+    return true;
+}
+
 static bool type_eq_rec(const Type *a0, const Type *b0, EqVis *v) {
     const Type *a = ty_resolve(a0), *b = ty_resolve(b0);
     if (a == b) return true;
@@ -304,6 +386,8 @@ static bool type_eq_rec(const Type *a0, const Type *b0, EqVis *v) {
     if (v->count < 256) { v->a[v->count] = a; v->b[v->count] = b; v->count++; }
     switch (a->k) {
     case TY_LIST:
+        return type_eq_rec(a->elem, b->elem, v);
+    case TY_SEQ:
         return type_eq_rec(a->elem, b->elem, v);
     case TY_LIT:
         if (a->lit.base != b->lit.base) return false;
@@ -350,6 +434,8 @@ static bool type_eq_rec(const Type *a0, const Type *b0, EqVis *v) {
                shape_eq(a->tensor.shape, b->tensor.shape);
     case TY_FIN:
         return dim_eq(a->fin, b->fin);
+    case TY_EQ:
+        return dim_eq(a->eq.lhs, b->eq.lhs) && dim_eq(a->eq.rhs, b->eq.rhs);
     case TY_OPAQUE:
         return strcmp(a->var, b->var) == 0 && type_eq_rec(a->elem, b->elem, v);
     default:
@@ -397,11 +483,30 @@ static bool assignable_rec(const Type *dst0, const Type *src0, EqVis *v) {
         return dim_le(src->fin, dst->fin) == 1;
     }
     if (src->k == TY_FIN) return dst->k == TY_INT;
+    /* Eq[a, b] is inhabited only by refl, whose type is Eq[a, a]. A refl
+     * marker (NULL sides) fits Eq[a, b] exactly when a == b. */
+    if (dst->k == TY_EQ) {
+        if (src->k != TY_EQ) return false;
+        if (src->eq.lhs == NULL && src->eq.rhs == NULL)
+            return dim_eq(dst->eq.lhs, dst->eq.rhs);
+        return type_eq(dst, src);
+    }
+    if (src->k == TY_EQ) return false;
     TyKind sk = src->k == TY_LIT ? src->lit.base : src->k;
     switch (dst->k) {
     case TY_INT:   return sk == TY_INT || sk == TY_BOOL;
     case TY_FLOAT: return sk == TY_FLOAT || sk == TY_INT || sk == TY_BOOL;
-    case TY_LIST:  return src->k == TY_LIST && assignable_rec(dst->elem, src->elem, v);
+    case TY_LIST:
+        if (src->k != TY_LIST) return false;
+        /* invariant under proof (D3/W5), except the two harmless cases:
+         * a fresh literal element (widens, no aliasing) and the `any` escape
+         * hatch (handled separately by W2's taint rejection). */
+        if (ck_proof_mode && dst->elem->k != TY_ANY && src->elem->k != TY_ANY &&
+            !type_is_fresh(src->elem))
+            return type_eq(dst->elem, src->elem);
+        return assignable_rec(dst->elem, src->elem, v);
+    case TY_SEQ:   /* covariant and sound: a seq is immutable */
+        return src->k == TY_SEQ && assignable_rec(dst->elem, src->elem, v);
     case TY_REC:   /* structural width subtyping */
         if (src->k != TY_REC) return false;
         for (size_t i = 0; i < dst->rec.count; i++) {
@@ -423,7 +528,7 @@ static bool assignable_rec(const Type *dst0, const Type *src0, EqVis *v) {
         return assignable_rec(dst->fun.ret, src->fun.ret, v);
     case TY_TENSOR: /* same dtype; dynamic shapes are the shape-level `any` */
         if (src->k != TY_TENSOR || dst->tensor.dt != src->tensor.dt) return false;
-        return shape_eq(dst->tensor.shape, src->tensor.shape) ||
+        return shape_eq_evid(dst->tensor.shape, src->tensor.shape) ||
                dst->tensor.shape->dynamic || src->tensor.shape->dynamic;
     case TY_OPAQUE:
         /* invariant in the element type -- a Chan[int] handed to code that
@@ -521,6 +626,10 @@ static Type *widen(Type *t) {
         Type *e = widen(t->elem);
         return e == t->elem ? t : ty_list(e);
     }
+    case TY_SEQ: {
+        Type *e = widen(t->elem);
+        return e == t->elem ? t : ty_seq(e);
+    }
     case TY_REC: {
         bool changed = false;
         for (size_t i = 0; i < t->rec.count; i++)
@@ -596,6 +705,11 @@ static void type_write(char *buf, size_t cap, const Type *t) {
         type_write(buf, cap, t->elem);
         tw_append(buf, cap, "]");
         break;
+    case TY_SEQ:
+        tw_append(buf, cap, "seq[");
+        type_write(buf, cap, t->elem);
+        tw_append(buf, cap, "]");
+        break;
     case TY_REC:
         tw_append(buf, cap, "{");
         for (size_t i = 0; i < t->rec.count; i++) {
@@ -646,6 +760,22 @@ static void type_write(char *buf, size_t cap, const Type *t) {
         tw_append(buf, cap, "]");
         break;
     }
+    case TY_EQ: {
+        if (!t->eq.lhs) {
+            tw_append(buf, cap, "refl"); /* the erased refl marker */
+            break;
+        }
+        tw_append(buf, cap, "Eq[");
+        char *a = dim_str(t->eq.lhs);
+        char *b = dim_str(t->eq.rhs);
+        tw_append(buf, cap, a);
+        tw_append(buf, cap, ", ");
+        tw_append(buf, cap, b);
+        free(a);
+        free(b);
+        tw_append(buf, cap, "]");
+        break;
+    }
     }
 }
 
@@ -691,6 +821,7 @@ typedef struct {
     Type *ret;
     bool pure;           /* declared `pure`: may only call pure functions/builtins */
     bool partial;        /* declared `partial`: exempt from termination checking */
+    EffMask eff;         /* the function's effect mask (0 when `pure`) */
     const Stmt *node;
 } FuncSig;
 
@@ -779,6 +910,128 @@ static void ck_error_t(Ck *ck, const char *code, int line, int col,
     ck->errors++;
 }
 
+/* A warning (W_ code) is a diagnostic that does not fail the build: the
+ * program still checks and runs. `--werror` (or proof mode) promotes it.
+ * `-Wno-<code>` silences it before it is ever collected. */
+static void ck_warn(Ck *ck, const char *code, int line, int col,
+                    const char *fmt, ...) {
+    if (diag_suppressed(ck->diags, code)) return;
+    if (strcmp(code, "W_VACUOUS_PROOF") == 0) proof_rep_vacuous++;
+    else if (strcmp(code, "W_UNSOUND_COVARIANCE") == 0) proof_rep_covariance++;
+    char msg[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof msg, fmt, ap);
+    va_end(ap);
+    diag_add_sev(ck->diags, DIA_TYPE, SEV_WARNING, code, ck->filename, line,
+                 col, "%s", msg);
+}
+
+/* A warning with structured expected/actual types attached. */
+static void ck_warn_t(Ck *ck, const char *code, int line, int col,
+                      const Type *expected, const Type *actual,
+                      const char *fmt, ...) {
+    if (diag_suppressed(ck->diags, code)) return;
+    if (strcmp(code, "W_UNSOUND_COVARIANCE") == 0) proof_rep_covariance++;
+    char msg[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof msg, fmt, ap);
+    va_end(ap);
+    Diag *d = diag_add_sev(ck->diags, DIA_TYPE, SEV_WARNING, code,
+                           ck->filename, line, col, "%s", msg);
+    diag_set_types(d, expected ? type_str(expected) : NULL,
+                   actual ? type_str(actual) : NULL);
+}
+
+/* Is `t` a freshly-inferred literal (or a union of them)? Fresh literals are
+ * born from literal expressions and widen harmlessly on binding — they carry
+ * no aliasing hazard, unlike a *named* `list[Circle]` upcast to `list[Shape]`. */
+static bool type_is_fresh(const Type *t) {
+    const Type *r = ty_resolve(t);
+    switch (r->k) {
+    case TY_LIT: return r->fresh;
+    case TY_LIST: case TY_SEQ: return type_is_fresh(r->elem);
+    case TY_REC:
+        for (size_t i = 0; i < r->rec.count; i++)
+            if (type_is_fresh(r->rec.types[i])) return true;
+        return false;
+    case TY_UNION:
+        for (size_t i = 0; i < r->uni.count; i++)
+            if (type_is_fresh(r->uni.alts[i])) return true;
+        return false;
+    default: return false;
+    }
+}
+
+/* D5/W2: a type is tainted when `any` (or a dynamic tensor shape) is reachable
+ * through any constructor. Tainted types prove nothing, so proof mode rejects
+ * them and obligations discharged by them are vacuous (W_VACUOUS_PROOF). */
+typedef struct { const Type *items[256]; size_t count; } TaintVis;
+
+static bool type_tainted_rec(const Type *t, TaintVis *v) {
+    const Type *r = ty_resolve(t);
+    for (size_t i = 0; i < v->count; i++)
+        if (v->items[i] == r) return false; /* coinductive: seen on this path */
+    if (v->count < 256) v->items[v->count++] = r;
+    switch (r->k) {
+    case TY_ANY: return true;
+    case TY_LIST: case TY_SEQ: return type_tainted_rec(r->elem, v);
+    case TY_REC:
+        for (size_t i = 0; i < r->rec.count; i++)
+            if (type_tainted_rec(r->rec.types[i], v)) return true;
+        return false;
+    case TY_UNION:
+        for (size_t i = 0; i < r->uni.count; i++)
+            if (type_tainted_rec(r->uni.alts[i], v)) return true;
+        return false;
+    case TY_FUNC:
+        for (size_t i = 0; i < r->fun.count; i++)
+            if (type_tainted_rec(r->fun.params[i], v)) return true;
+        return type_tainted_rec(r->fun.ret, v);
+    case TY_TENSOR: return r->tensor.shape->dynamic;
+    case TY_OPAQUE: return type_tainted_rec(r->elem, v);
+    default: return false;
+    }
+}
+
+static bool type_tainted(const Type *t) {
+    TaintVis v = {0};
+    return type_tainted_rec(t, &v);
+}
+
+/* D3 / W5: outside proof mode, a `list[T]` accepted as a `list[U]` by
+ * covariance alone (U a strict supertype of T) is unsound — a later `append`
+ * of a U could write through the T reference. Warn so the escalation data
+ * exists; under --proof the same assignment is a hard error (invariance). */
+static void ck_covariance(Ck *ck, const Type *dst, const Type *src,
+                          int line, int col) {
+    if (ck->proof) return;
+    const Type *d = ty_resolve(dst), *s = ty_resolve(src);
+    if (d->k != TY_LIST || s->k != TY_LIST) return;
+    if (type_eq(d->elem, s->elem)) return;
+    if (type_is_fresh(s->elem)) return; /* literal widening, not aliasing */
+    if (!assignable(d->elem, s->elem)) return;
+    ck_warn_t(ck, "W_UNSOUND_COVARIANCE", line, col, d, s,
+            "%s used where %s is expected relies on unsound list covariance "
+            "(%s widens to %s); use seq[%s] or freeze() for a sound sequence",
+            type_str(src), type_str(dst), type_str(s->elem), type_str(d->elem),
+            type_str(d->elem));
+}
+
+/* W2: proof mode rejects a *tainted* type — one that contains `any` below its
+ * top level (list[any], { f: any }, Tensor[f32, ?]). Top-level `any` is caught
+ * by the existing checks with their own wording; this closes the hole where
+ * `any` hides inside a constructor. */
+static void ck_proof_taint(Ck *ck, Type *t, int line, int col,
+                           const char *noun) {
+    if (!ck->proof || t->k == TY_ANY || !type_tainted(t)) return;
+    proof_rep_taint_sites++;
+    ck_error(ck, "E_PROOF_ANY", line, col,
+             "%s has type %s, which contains 'any' (banned in proof mode)",
+             noun, type_str(t));
+}
+
 static Var *env_find(VarEnv *env, const char *name) {
     for (size_t i = 0; i < env->count; i++)
         if (strcmp(env->items[i].name, name) == 0) return &env->items[i];
@@ -843,6 +1096,62 @@ static FuncSig *find_func(Ck *ck, const char *name) {
     for (size_t i = 0; i < ck->func_count; i++)
         if (strcmp(ck->funcs[i].name, name) == 0) return &ck->funcs[i];
     return NULL;
+}
+
+/* The effect of an expression: the join of the effects of everything it calls.
+ * A lambda's effect is the effect of its body (creating a closure is pure).
+ * Function *values* carry this mask so a `pure` function cannot smuggle an
+ * impure callee through `map`/`filter`/`reduce` or an indirect call (D2/W3). */
+static EffMask expr_eff(Ck *ck, const Expr *e) {
+    if (!e) return EFF_PURE;
+    EffMask m = EFF_PURE;
+    switch (e->kind) {
+    case E_CALL: {
+        const Expr *fn = e->as.call.fn;
+        if (fn->kind == E_NAME) {
+            bool bpure = false;
+            if (builtin_find(fn->as.sval, &bpure) && !bpure) m |= EFF_IO;
+            FuncSig *f = find_func(ck, fn->as.sval);
+            if (f) m |= f->eff;
+        }
+        for (size_t i = 0; i < e->as.call.count; i++)
+            m |= expr_eff(ck, e->as.call.args[i]);
+        break;
+    }
+    case E_LIST:
+        for (size_t i = 0; i < e->as.list.count; i++)
+            m |= expr_eff(ck, e->as.list.items[i]);
+        break;
+    case E_REC:
+        for (size_t i = 0; i < e->as.rec.count; i++)
+            m |= expr_eff(ck, e->as.rec.values[i]);
+        break;
+    case E_BINOP:
+        m |= expr_eff(ck, e->as.bin.lhs);
+        m |= expr_eff(ck, e->as.bin.rhs);
+        break;
+    case E_UNOP:
+        m |= expr_eff(ck, e->as.un.operand);
+        break;
+    case E_INDEX:
+        m |= expr_eff(ck, e->as.index.seq);
+        m |= expr_eff(ck, e->as.index.idx);
+        break;
+    case E_ATTR:
+        m |= expr_eff(ck, e->as.attr.obj);
+        break;
+    case E_TRY:
+        m |= expr_eff(ck, e->as.try_expr);
+        break;
+    case E_CATCH:
+        m |= expr_eff(ck, e->as.ctch.subject);
+        for (size_t i = 0; i < e->as.ctch.count; i++)
+            m |= expr_eff(ck, e->as.ctch.arms[i].body);
+        break;
+    default:
+        break;
+    }
+    return m;
 }
 
 /* --- resolving surface type expressions ---------------------------------- */
@@ -1041,6 +1350,8 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
         return &t_any;
     case TE_LIST:
         return ty_list(resolve_type(ck, te->elem, env));
+    case TE_SEQ:
+        return ty_seq(resolve_type(ck, te->elem, env));
     case TE_REC: {
         Type *t = ty_new(TY_REC);
         t->rec.names = te->fields.names;
@@ -1078,6 +1389,9 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
     }
     case TE_FIN:
         return ty_fin(resolve_dim(ck, te->fin_dim, te->line, te->col));
+    case TE_EQ:
+        return ty_eq(resolve_dim(ck, te->eq_lhs, te->line, te->col),
+                     resolve_dim(ck, te->eq_rhs, te->line, te->col));
     case TE_INTER: {
         Type *a = resolve_type(ck, te->lhs, env);
         Type *b = resolve_type(ck, te->rhs, env);
@@ -1132,13 +1446,21 @@ static Type *infer_lambda_with(Ck *ck, const Expr *e, Type **ptypes) {
     }
     Scope *saved = ck->scope;
     bool saved_lam = ck->in_lambda;
+    bool saved_pure = ck->cur_pure;
     ck->scope = &sc;
     ck->in_lambda = true;
+    /* a lambda has its *own* effect (captured in its type), not its enclosing
+     * function's: an impure body is fine here, and the caller is what must
+     * reject an impure lambda if the caller is `pure` */
+    ck->cur_pure = false;
     Type *ret = infer(ck, e->as.lam.body);
+    ck->cur_pure = saved_pure;
     ck->in_lambda = saved_lam;
     ck->scope = saved;
     free(sc.locals.items);
-    return ty_func(ptypes, e->as.lam.param_count, ret);
+    Type *ft = ty_func(ptypes, e->as.lam.param_count, ret);
+    ft->fun.eff = expr_eff(ck, e->as.lam.body);
+    return ft;
 }
 
 /* infer a lambda against an expected function type: unannotated parameters
@@ -1174,6 +1496,7 @@ static bool contains_var(const Type *t) {
     switch (t->k) {
     case TY_VAR:  return true;
     case TY_LIST: return contains_var(t->elem);
+    case TY_SEQ:  return contains_var(t->elem);
     case TY_REC:
         for (size_t i = 0; i < t->rec.count; i++)
             if (contains_var(t->rec.types[i])) return true;
@@ -1201,6 +1524,10 @@ static Type *ty_subst(Type *t, Subst *sub) {
     case TY_LIST: {
         Type *e = ty_subst(t->elem, sub);
         return e == t->elem ? t : ty_list(e);
+    }
+    case TY_SEQ: {
+        Type *e = ty_subst(t->elem, sub);
+        return e == t->elem ? t : ty_seq(e);
     }
     case TY_REC: {
         if (!contains_var(t)) return t;
@@ -1250,6 +1577,9 @@ static void unify(Type *param, Type *arg, Subst *sub) {
     }
     case TY_LIST:
         if (arg->k == TY_LIST) unify(param->elem, arg->elem, sub);
+        return;
+    case TY_SEQ:
+        if (arg->k == TY_SEQ) unify(param->elem, arg->elem, sub);
         return;
     case TY_REC:
         if (arg->k != TY_REC) return;
@@ -1682,17 +2012,25 @@ static bool ck_arity(Ck *ck, const Expr *e, const char *name, size_t want) {
 static Type *infer_map_like(Ck *ck, const Expr *e, const char *name,
                             Type **argt, const bool *islam) {
     size_t argc = e->as.call.count;
+    /* map/filter/reduce are overloaded over list and seq: the result keeps the
+     * container kind of the sequence argument (reduce has no container). */
+    int seq_arg = strcmp(name, "reduce") == 0 ? 2 : 1;
+    bool is_seq = false;
+    if (seq_arg < (int)argc && !islam[seq_arg]) {
+        Type *sarg = ty_resolve(argt[seq_arg]);
+        if (sarg->k == TY_SEQ) is_seq = true;
+    }
     Type *t = ty_var("T");
     Type *u = ty_var("U");
     Type *f1[] = { t };
-    Type *xs = ty_list(t);
+    Type *xs = is_seq ? ty_seq(t) : ty_list(t);
     Type *params[3];
     Type *ret;
     size_t want;
     if (strcmp(name, "map") == 0) {
         params[0] = ty_func(f1, 1, u);
         params[1] = xs;
-        ret = ty_list(u);
+        ret = is_seq ? ty_seq(u) : ty_list(u);
         want = 2;
     } else if (strcmp(name, "filter") == 0) {
         params[0] = ty_func(f1, 1, &t_bool);
@@ -1736,6 +2074,14 @@ static Type *infer_map_like(Ck *ck, const Expr *e, const char *name,
             ck_error_t(ck, "E_TYPE_ARG", e->line, e->col, pi, argt[i],
                        "argument %zu of %s(): expected %s, got %s",
                        i + 1, name, type_str(pi), type_str(argt[i]));
+    }
+    /* W3/D2: a pure function may not smuggle an impure callee through a
+     * higher-order builtin */
+    if (ck->cur_pure) {
+        Type *ft = ty_resolve(argt[0]);
+        if (ft->k == TY_FUNC && ft->fun.eff != EFF_PURE)
+            ck_error(ck, "E_TYPE_PURE_CALL", e->line, e->col,
+                     "pure function passes an impure function to %s()", name);
     }
     Type *r = ty_subst(ret, &sub);
     free(sub.types);
@@ -1834,7 +2180,7 @@ static void assign_owned(Ck *ck, Var *v, const char *name, const Expr *value) {
     }
 }
 
-static Type *infer_call(Ck *ck, const Expr *e) {
+static Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
     const Expr *fn = e->as.call.fn;
     size_t argc = e->as.call.count;
     Type **argt = xmalloc(sizeof(Type *) * argc);
@@ -1843,7 +2189,10 @@ static Type *infer_call(Ck *ck, const Expr *e) {
         /* lambdas are inferred lazily so unannotated parameters can take the
          * expected type from the callee's signature (contextual typing) */
         islam[i] = e->as.call.args[i]->kind == E_LAMBDA;
-        if (!islam[i]) argt[i] = infer(ck, e->as.call.args[i]);
+        if (!islam[i]) {
+            argt[i] = infer(ck, e->as.call.args[i]);
+            ck_proof_taint(ck, argt[i], e->line, e->col, "argument");
+        }
     }
 
     if (fn->kind == E_NAME) {
@@ -1884,7 +2233,8 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             if (ck_arity(ck, e, dname, 1)) {
                 Type *a = ty_base(argt[0]);
                 if (a->k != TY_ANY && a->k != TY_STR && a->k != TY_LIST &&
-                    a->k != TY_REC && a->k != TY_UNION && a->k != TY_NEVER)
+                    a->k != TY_SEQ && a->k != TY_REC && a->k != TY_UNION &&
+                    a->k != TY_NEVER)
                     ck_error(ck, "E_TYPE_NO_LEN", e->line, e->col,
                              "%s has no len()", type_str(argt[0]));
             }
@@ -1948,7 +2298,10 @@ static Type *infer_call(Ck *ck, const Expr *e) {
         if (strcmp(name, "append") == 0) {
             if (!ck_arity(ck, e, dname, 2)) return &t_none;
             Type *l = ty_base(ty_resolve(argt[0]));
-            if (l->k == TY_LIST) {
+            if (l->k == TY_SEQ) {
+                ck_error(ck, "E_TYPE_IMMUTABLE", e->line, e->col,
+                         "append() cannot mutate a seq: thaw() it first");
+            } else if (l->k == TY_LIST) {
                 if (!assignable(l->elem, argt[1]))
                     ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
                                l->elem, argt[1],
@@ -1960,6 +2313,24 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                          "append() expects a list, got %s", type_str(argt[0]));
             }
             return &t_none;
+        }
+        if (strcmp(name, "freeze") == 0) {
+            if (!ck_arity(ck, e, dname, 1)) return ty_seq(&t_any);
+            Type *s = ty_base(ty_resolve(argt[0]));
+            if (s->k == TY_LIST) return ty_seq(s->elem);
+            if (s->k == TY_ANY || s->k == TY_NEVER) return ty_seq(&t_any);
+            ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                     "freeze() expects a list, got %s", type_str(argt[0]));
+            return ty_seq(&t_any);
+        }
+        if (strcmp(name, "thaw") == 0) {
+            if (!ck_arity(ck, e, dname, 1)) return ty_list(&t_any);
+            Type *s = ty_base(ty_resolve(argt[0]));
+            if (s->k == TY_SEQ) return ty_list(s->elem);
+            if (s->k == TY_ANY || s->k == TY_NEVER) return ty_list(&t_any);
+            ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                     "thaw() expects a seq, got %s", type_str(argt[0]));
+            return ty_list(&t_any);
         }
         if (strcmp(name, "slice") == 0) {
             if (!ck_arity(ck, e, dname, 3)) return &t_any;
@@ -1973,6 +2344,7 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             Type *s = ty_base(ty_resolve(argt[0]));
             if (s->k == TY_STR) return &t_str;
             if (s->k == TY_LIST) return argt[0];
+            if (s->k == TY_SEQ) return argt[0];
             if (s->k == TY_ANY || s->k == TY_NEVER) return &t_any;
             ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                      "cannot slice %s", type_str(argt[0]));
@@ -2239,6 +2611,7 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                                                f->params[i]);
                 for (size_t i = 0; i < argc; i++) {
                     note_shape_crossing(ck, f->params[i], argt[i]);
+                    ck_covariance(ck, f->params[i], argt[i], e->line, e->col);
                     if (!assignable(f->params[i], argt[i]))
                         ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
                                    f->params[i], argt[i],
@@ -2256,6 +2629,22 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             memset(sub.types, 0, sizeof(Type *) * f->tparam_count);
             for (size_t i = 0; i < argc; i++)
                 if (!islam[i]) unify(f->params[i], argt[i], &sub);
+            /* contextual return-type propagation: a type parameter that appears
+             * only in the return type (`m: Map[V] = new_map()`) is bound from
+             * the expected result. Only still-unbound parameters are filled, so
+             * an argument-inferred T (`head([1,2,3])`) is never overwritten. */
+            if (expected) {
+                Subst esub;
+                esub.names = f->tparams;
+                esub.count = f->tparam_count;
+                esub.types = xmalloc(sizeof(Type *) * f->tparam_count);
+                memset(esub.types, 0, sizeof(Type *) * f->tparam_count);
+                unify(f->ret, expected, &esub);
+                for (size_t j = 0; j < f->tparam_count; j++)
+                    if (!sub.types[j] && esub.types[j])
+                        sub.types[j] = esub.types[j];
+                free(esub.types);
+            }
             for (size_t j = 0; j < f->tparam_count; j++)
                 if (!sub.types[j]) sub.types[j] = &t_any;
             /* deferred lambdas get the partially-instantiated param types */
@@ -2271,6 +2660,7 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             for (size_t i = 0; i < argc; i++) {
                 Type *pi = ty_subst(f->params[i], &sub);
                 note_shape_crossing(ck, pi, argt[i]);
+                ck_covariance(ck, pi, argt[i], e->line, e->col);
                 if (!assignable(pi, argt[i]))
                     ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
                                pi, argt[i],
@@ -2296,6 +2686,10 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                  "value of type %s is not callable", type_str(ft));
         return &t_any;
     }
+    /* W3/D2: an impure function value is not callable from pure code */
+    if (ck->cur_pure && ft->fun.eff != EFF_PURE)
+        ck_error(ck, "E_TYPE_PURE_CALL", e->line, e->col,
+                 "pure function calls impure function value");
     if (argc != ft->fun.count) {
         ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
                  "function takes %zu argument%s, got %zu",
@@ -2307,6 +2701,7 @@ static Type *infer_call(Ck *ck, const Expr *e) {
             argt[i] = infer_lambda(ck, e->as.call.args[i], ft->fun.params[i]);
     for (size_t i = 0; i < argc; i++) {
         note_shape_crossing(ck, ft->fun.params[i], argt[i]);
+        ck_covariance(ck, ft->fun.params[i], argt[i], e->line, e->col);
         if (!assignable(ft->fun.params[i], argt[i]))
             ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
                        ft->fun.params[i], argt[i],
@@ -2532,6 +2927,10 @@ static Type *infer(Ck *ck, const Expr *e) {
     }
     case E_NONE:  return &t_none;
     case E_NAME: {
+        /* refl : Eq[a, a]. The marker (NULL sides) is resolved by assignable()
+         * against the expected Eq[a, b] via dim_eq(a, b). */
+        if (strcmp(e->as.sval, "refl") == 0)
+            return ty_eq(NULL, NULL);
         Var *v = lookup_var(ck, e->as.sval);
         if (v) {
             /* a variable captured from an enclosing function reads its stable
@@ -2547,7 +2946,9 @@ static Type *infer(Ck *ck, const Expr *e) {
             if (f->tparam_count) return &t_any; /* generics aren't first-class */
             Type **params = xmalloc(sizeof(Type *) * f->param_count);
             for (size_t i = 0; i < f->param_count; i++) params[i] = f->params[i];
-            return ty_func(params, f->param_count, f->ret);
+            Type *ft = ty_func(params, f->param_count, f->ret);
+            ft->fun.eff = f->eff;
+            return ft;
         }
         if (is_builtin(e->as.sval)) {
             ck_error(ck, "E_TYPE_BUILTIN_VALUE", e->line, e->col,
@@ -2599,7 +3000,7 @@ static Type *infer(Ck *ck, const Expr *e) {
         return &t_any;
     }
     case E_CALL:
-        return infer_call(ck, e);
+        return infer_call(ck, e, NULL);
     case E_LAMBDA: {
         Type **ptypes = xmalloc(sizeof(Type *) *
                                 e->as.lam.param_count);
@@ -2617,6 +3018,7 @@ static Type *infer(Ck *ck, const Expr *e) {
                      "index must be int, got %s", type_str(idx));
         if (seq->k == TY_NEVER) return &t_never;
         if (seq->k == TY_LIST) return seq->elem;
+        if (seq->k == TY_SEQ) return seq->elem;
         if (seq->k == TY_STR) return &t_str;
         if (seq->k == TY_TENSOR) {
             /* `a[i]` drops the indexed (first) axis, matching the runtime's
@@ -3002,8 +3404,8 @@ static bool block_returns(const Block *b) {
  * with every step landing back on that same alias — the standard "one
  * constructor step smaller" rule, applied to non-generic recursive aliases.
  * A function that cannot be shown to terminate this way must be declared
- * `partial` to opt out. Mutual recursion and descent through `list` elements
- * (`t.kids[0]`) are not recognized yet, so those also need `partial`.
+ * `partial` to opt out. Mutual recursion needs `partial`; descent through a
+ * `seq[T]` element (`t.kids[0]`) is recognized, `list[T]` is not (mutable).
  */
 
 typedef struct { const Type *items[256]; size_t count; } Vis;
@@ -3028,6 +3430,7 @@ static bool type_is_recursive(const Type *t0, Vis *v) {
     vis_add(v, t);
     switch (t->k) {
     case TY_LIST:
+    case TY_SEQ:
         return type_is_recursive(t->elem, v);
     case TY_REC:
         for (size_t i = 0; i < t->rec.count; i++)
@@ -3066,29 +3469,60 @@ static const Type *field_type(const Type *t, const char *f) {
 }
 
 /* is `arg` a strict structural subterm of parameter `pname`, whose declared
- * type resolves to `root` (a recursive alias)? Every projection step must
- * land back on `root` (pointer equality), so the chain stays one level deep
- * in the same inductive structure. */
-static bool arg_descends(const Type *root, const char *pname, const Expr *arg) {
-    const char *fields[32];
-    size_t nf = 0;
-    const Expr *e = arg;
-    while (e->kind == E_ATTR && nf < 32) {
-        fields[nf++] = e->as.attr.name;
-        e = e->as.attr.obj;
+ * type resolves to `root` (a recursive alias)? Two descent steps are
+ * recognized, both sound:
+ *
+ *   - a `.field` projection whose field lands back on `root` (pointer
+ *     equality): `n.succ`, `n.succ.succ`;
+ *   - an element access `t.kids[i]` where `kids: seq[root]` — element-of is
+ *     strictly smaller. (Only `seq[T]` is accepted here, not `list[T]`, which
+ *     could be mutated between the call and the recursion.) */
+static bool arg_descends(const Type *root, const char *pname, const Expr *arg);
+static bool arg_descends_rec(const Type *r, const char *pname, const Expr *e);
+
+/* `e` denotes the parameter itself (type `r`) or a strict subterm of it. */
+static bool is_param_or_subterm(const Type *r, const char *pname,
+                                const Expr *e) {
+    if (e->kind == E_NAME)
+        return strcmp(e->as.sval, pname) == 0;
+    return arg_descends_rec(r, pname, e);
+}
+
+/* `e` denotes a `seq[r]` value reachable from the parameter: either a field
+ * `p.kids` of type `seq[r]`, or a seq subterm reached by deeper descent. */
+static bool is_seq_subterm(const Type *r, const char *pname, const Expr *e) {
+    if (e->kind == E_ATTR) {
+        const Type *ft = field_type(r, e->as.attr.name);
+        if (!ft) return false;
+        const Type *rft = ty_resolve(ft);
+        if (rft->k != TY_SEQ || ty_resolve(rft->elem) != r) return false;
+        return is_param_or_subterm(r, pname, e->as.attr.obj);
     }
-    if (nf == 0 || e->kind != E_NAME || strcmp(e->as.sval, pname) != 0)
+    return false;
+}
+
+static bool arg_descends_rec(const Type *r, const char *pname, const Expr *e) {
+    switch (e->kind) {
+    case E_NAME:
+        return false; /* the parameter itself is not a strict subterm */
+    case E_ATTR: {
+        /* e = obj.field: one constructor step down iff the field lands on r */
+        const Type *ft = field_type(r, e->as.attr.name);
+        if (!ft || ty_resolve(ft) != r) return false;
+        return is_param_or_subterm(r, pname, e->as.attr.obj);
+    }
+    case E_INDEX:
+        /* e = seq[i]: a descent iff seq is a seq[r] reachable from the param */
+        return is_seq_subterm(r, pname, e->as.index.seq);
+    default:
         return false;
+    }
+}
+
+static bool arg_descends(const Type *root, const char *pname, const Expr *arg) {
     Vis vis = {0};
     if (!type_is_recursive(root, &vis)) return false;
-    const Type *cur = ty_resolve(root);
-    for (size_t i = 0; i < nf; i++) {
-        const Type *ft = field_type(cur, fields[i]);
-        if (!ft) return false;
-        cur = ty_resolve(ft);
-        if (cur != ty_resolve(root)) return false;
-    }
-    return true;
+    return arg_descends_rec(ty_resolve(root), pname, arg);
 }
 
 static void collect_calls_expr(const Expr *e, const char *fname,
@@ -3221,6 +3655,200 @@ static void check_termination(Ck *ck, const Stmt *s, Type **ptypes) {
     free(calls);
 }
 
+/* --- W4: mutual recursion ------------------------------------------------ */
+
+/* A set of callee names, gathered from one function body. Names are already
+ * module-mangled by the linker, so they match the registered `FuncSig` names. */
+typedef struct { const char *items[256]; size_t count; } CalleeSet;
+
+static bool callees_has(const CalleeSet *s, const char *n) {
+    for (size_t i = 0; i < s->count; i++)
+        if (strcmp(s->items[i], n) == 0) return true;
+    return false;
+}
+
+static void callees_add(CalleeSet *s, const char *n) {
+    if (n && !callees_has(s, n) && s->count < 256)
+        s->items[s->count++] = n;
+}
+
+static void callees_expr(const Expr *e, CalleeSet *out) {
+    if (!e) return;
+    switch (e->kind) {
+    case E_CALL:
+        if (e->as.call.fn->kind == E_NAME)
+            callees_add(out, e->as.call.fn->as.sval);
+        for (size_t i = 0; i < e->as.call.count; i++)
+            callees_expr(e->as.call.args[i], out);
+        break;
+    case E_LIST:
+        for (size_t i = 0; i < e->as.list.count; i++)
+            callees_expr(e->as.list.items[i], out);
+        break;
+    case E_REC:
+        for (size_t i = 0; i < e->as.rec.count; i++)
+            callees_expr(e->as.rec.values[i], out);
+        break;
+    case E_BINOP:
+        callees_expr(e->as.bin.lhs, out);
+        callees_expr(e->as.bin.rhs, out);
+        break;
+    case E_UNOP:
+        callees_expr(e->as.un.operand, out);
+        break;
+    case E_INDEX:
+        callees_expr(e->as.index.seq, out);
+        callees_expr(e->as.index.idx, out);
+        break;
+    case E_ATTR:
+        callees_expr(e->as.attr.obj, out);
+        break;
+    case E_LAMBDA:
+        callees_expr(e->as.lam.body, out);
+        break;
+    case E_TRY:
+        callees_expr(e->as.try_expr, out);
+        break;
+    case E_CATCH:
+        callees_expr(e->as.ctch.subject, out);
+        for (size_t i = 0; i < e->as.ctch.count; i++)
+            callees_expr(e->as.ctch.arms[i].body, out);
+        break;
+    default:
+        break;
+    }
+}
+
+static void callees_stmt(const Stmt *s, CalleeSet *out) {
+    switch (s->kind) {
+    case S_EXPR:
+        callees_expr(s->as.expr, out);
+        break;
+    case S_ASSIGN:
+        callees_expr(s->as.assign.value, out);
+        break;
+    case S_IF:
+        for (size_t i = 0; i < s->as.ifs.count; i++) {
+            callees_expr(s->as.ifs.conds[i], out);
+            for (size_t j = 0; j < s->as.ifs.blocks[i].count; j++)
+                callees_stmt(s->as.ifs.blocks[i].items[j], out);
+        }
+        if (s->as.ifs.has_else)
+            for (size_t j = 0; j < s->as.ifs.else_block.count; j++)
+                callees_stmt(s->as.ifs.else_block.items[j], out);
+        break;
+    case S_WHILE:
+        callees_expr(s->as.wh.cond, out);
+        for (size_t j = 0; j < s->as.wh.body.count; j++)
+            callees_stmt(s->as.wh.body.items[j], out);
+        break;
+    case S_FOR:
+        callees_expr(s->as.fr.seq, out);
+        for (size_t j = 0; j < s->as.fr.body.count; j++)
+            callees_stmt(s->as.fr.body.items[j], out);
+        break;
+    case S_RETURN:
+        callees_expr(s->as.ret, out);
+        break;
+    case S_BLOCK:
+        for (size_t j = 0; j < s->as.block.count; j++)
+            callees_stmt(s->as.block.items[j], out);
+        break;
+    case S_FUNC:
+        /* a nested def's calls count against the enclosing function */
+        for (size_t j = 0; j < s->as.func.body.count; j++)
+            callees_stmt(s->as.func.body.items[j], out);
+        break;
+    case S_MATCH:
+        callees_expr(s->as.mtch.subject, out);
+        for (size_t j = 0; j < s->as.mtch.count; j++)
+            for (size_t k = 0; k < s->as.mtch.blocks[j].count; k++)
+                callees_stmt(s->as.mtch.blocks[j].items[k], out);
+        break;
+    default:
+        break;
+    }
+}
+
+/* Tarjan's SCC over the top-level call graph. A strongly-connected component
+ * of more than one function is mutual recursion: with no single structural
+ * parameter to descend on, its termination is not the kind the checker
+ * proves. `partial` (the ordinary opt-out) is the escape in normal mode; in
+ * proof mode `partial` is already banned, so the cycle is simply rejected. */
+static void scc_visit(Ck *ck, size_t v, const bool *adj, size_t n,
+                      int *index, int *low, bool *onstack, int *stack,
+                      size_t *sp, int *idx) {
+    index[v] = low[v] = (*idx)++;
+    stack[(*sp)++] = (int)v;
+    onstack[v] = true;
+    for (size_t w = 0; w < n; w++) {
+        if (!adj[v * n + w]) continue;
+        if (index[w] < 0) {
+            scc_visit(ck, w, adj, n, index, low, onstack, stack, sp, idx);
+            if (low[w] < low[v]) low[v] = low[w];
+        } else if (onstack[w] && index[w] < low[v]) {
+            low[v] = index[w];
+        }
+    }
+    if (low[v] != index[v]) return;
+    size_t members[256];
+    size_t nm = 0;
+    for (;;) {
+        int w = stack[--(*sp)];
+        onstack[w] = false;
+        members[nm++] = (size_t)w;
+        if ((size_t)w == v) break;
+    }
+    if (nm <= 1) return;
+    bool any_total = false;
+    for (size_t k = 0; k < nm; k++)
+        if (!ck->funcs[members[k]].partial) any_total = true;
+    if (!any_total) return;
+    char buf[512];
+    size_t off = 0;
+    for (size_t k = 0; k < nm && off < sizeof(buf); k++) {
+        const char *d = ck->funcs[members[k]].disp;
+        int w = snprintf(buf + off, sizeof(buf) - off, "%s'%s'",
+                         k ? ", " : "", d);
+        if (w < 0) break;
+        off += (size_t)w;
+    }
+    const Stmt *s = ck->funcs[members[0]].node;
+    ck_error(ck, "E_TYPE_TERMINATION", s->line, s->col,
+             "mutually recursive functions form a cycle without structural "
+             "descent: %s; declare them 'partial' to opt out of termination "
+             "checking", buf);
+}
+
+static void check_mutual_recursion(Ck *ck) {
+    size_t n = ck->func_count;
+    if (n < 2) return;
+    bool *adj = xcalloc(n * n, sizeof(bool));
+    for (size_t i = 0; i < n; i++) {
+        CalleeSet cs = {0};
+        const Stmt *s = ck->funcs[i].node;
+        for (size_t k = 0; k < s->as.func.body.count; k++)
+            callees_stmt(s->as.func.body.items[k], &cs);
+        for (size_t j = 0; j < n; j++)
+            if (callees_has(&cs, ck->funcs[j].name)) adj[i * n + j] = true;
+    }
+    int *index = xmalloc(sizeof(int) * n);
+    int *low = xmalloc(sizeof(int) * n);
+    bool *onstack = xcalloc(n, sizeof(bool));
+    int *stack = xmalloc(sizeof(int) * n);
+    for (size_t i = 0; i < n; i++) index[i] = -1;
+    size_t sp = 0;
+    int idx = 0;
+    for (size_t v = 0; v < n; v++)
+        if (index[v] < 0)
+            scc_visit(ck, v, adj, n, index, low, onstack, stack, &sp, &idx);
+    free(adj);
+    free(index);
+    free(low);
+    free(onstack);
+    free(stack);
+}
+
 /* --- pattern matching ---------------------------------------------------- */
 
 static Type *lit_pat_type(const Pat *p) {
@@ -3307,6 +3935,7 @@ static void defresh(Type *t) {
     switch (t->k) {
     case TY_LIT:  t->fresh = false; break;
     case TY_LIST: defresh(t->elem); break;
+    case TY_SEQ:  defresh(t->elem); break;
     case TY_REC:
         for (size_t i = 0; i < t->rec.count; i++) defresh(t->rec.types[i]);
         break;
@@ -3334,12 +3963,46 @@ static void set_flow(Var *v, Type *val) {
     else v->type = v->decl;
 }
 
+/* Infer an expression whose value is bound to a known type: a generic call
+ * (`m: Map[V] = new_map()`) threads the expected type into its type-argument
+ * inference, and an empty list literal takes the expected list/seq element
+ * type; anything else infers as usual. */
+static Type *infer_expected(Ck *ck, const Expr *e, Type *expected) {
+    if (!e) return &t_any;
+    if (e->kind == E_CALL) return infer_call(ck, e, expected);
+    if (e->kind == E_LIST && e->as.list.count == 0 && expected) {
+        Type *er = ty_resolve(expected);
+        if (er->k == TY_LIST || er->k == TY_SEQ) return expected;
+    }
+    return infer(ck, e);
+}
+
 static void check_assign(Ck *ck, const Stmt *s) {
-    Type *val = infer(ck, s->as.assign.value);
+    Expr *target = s->as.assign.target;
+    /* resolve the annotation once, up front, so a generic call's return-type
+     * parameters can be bound from it (`m: Map[V] = new_map()`) and the taint
+     * check sees the value *after* contextual typing */
+    Type *ann0 = NULL;
+    if (target->kind == E_NAME && s->as.assign.ann)
+        ann0 = resolve_type(ck, s->as.assign.ann, ck->tyenv);
+    Type *val = ann0 ? infer_expected(ck, s->as.assign.value, ann0)
+                     : infer(ck, s->as.assign.value);
+    /* contextual typing for list/seq literals happens *before* the proof checks,
+     * so `xs: list[int] = []` is not flagged as a tainted `list[any]` (W2) */
+    if (ann0 && s->as.assign.value->kind == E_LIST) {
+        Type *ar = ty_resolve(ann0);
+        if (ar->k == TY_LIST && s->as.assign.value->as.list.count == 0)
+            val = ann0;
+        else if (ar->k == TY_SEQ)
+            val = s->as.assign.value->as.list.count == 0 ? ann0 : to_seq(val);
+    }
     if (ck->proof && val->k == TY_ANY)
         ck_error(ck, "E_PROOF_ANY", s->line, s->col,
                  "value has type 'any', which is banned in proof mode");
-    Expr *target = s->as.assign.target;
+    /* field/element assignments contextually type their own empty lists, so a
+     * taint check there happens after that; for a plain name it is here */
+    if (ck->proof && target->kind == E_NAME)
+        ck_proof_taint(ck, val, s->line, s->col, "value");
 
     if (target->kind == E_NAME) {
         const char *name = target->as.sval;
@@ -3359,19 +4022,10 @@ static void check_assign(Ck *ck, const Stmt *s) {
             return;
         }
         if (s->as.assign.ann) {
-            Type *ann = resolve_type(ck, s->as.assign.ann, ck->tyenv);
-            /* contextual typing for `xs: list[T] = []`. An empty literal has
-             * element type `any` on its own, and without this the annotation
-             * is discarded the moment the variable is read back: `m: list[str]
-             * = []` then `cur = m` would make `cur` a `list[any]`, which is
-             * both imprecise and (in proof mode) an error. */
-            if (s->as.assign.value->kind == E_LIST &&
-                s->as.assign.value->as.list.count == 0 &&
-                ty_resolve(ann)->k == TY_LIST)
-                val = ann;
-            /* the same contextual typing for `c: Chan[int] = chan(0)`: the
-             * constructor cannot know the element type, so the annotation is
-             * what pins it down for both ends of the channel */
+            Type *ann = ann0;
+            /* contextual typing for `c: Chan[int] = chan(0)`: the constructor
+             * cannot know the element type, so the annotation is what pins it
+             * down for both ends of the channel */
             if (ty_resolve(ann)->k == TY_OPAQUE && ty_resolve(val)->k == TY_OPAQUE &&
                 ty_resolve(val)->elem->k == TY_ANY)
                 val = ann;
@@ -3380,6 +4034,14 @@ static void check_assign(Ck *ck, const Stmt *s) {
                          "'any' is banned in proof mode: annotate '%s' with a "
                          "concrete type", name);
             note_shape_crossing(ck, ann, val);
+            ck_covariance(ck, ann, val, s->line, s->col);
+            /* W2: an obligation (`x: never = e`) discharged by a tainted value
+             * proves nothing — warn, outside proof mode (where it is an error) */
+            if (!ck->proof && ty_resolve(ann)->k == TY_NEVER &&
+                val->k != TY_NEVER && type_tainted(val))
+                ck_warn(ck, "W_VACUOUS_PROOF", s->line, s->col,
+                        "this 'never' obligation is vacuous: the value has "
+                        "tainted type %s", type_str(val));
             if (!assignable(ann, val))
                 ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, ann, val,
                            "cannot assign %s to '%s' declared as %s",
@@ -3449,6 +4111,18 @@ static void check_assign(Ck *ck, const Stmt *s) {
                      "strings are immutable");
             return;
         }
+        if (seq->k == TY_SEQ) {
+            ck_error(ck, "E_TYPE_IMMUTABLE", s->line, s->col,
+                     "a seq is immutable: thaw() it to get a mutable list");
+            return;
+        }
+        /* `xs[i] = []`: the empty list takes the element's type (W2) */
+        if (s->as.assign.value->kind == E_LIST &&
+            s->as.assign.value->as.list.count == 0 && seq->k == TY_LIST) {
+            Type *er = ty_resolve(seq->elem);
+            if (er->k == TY_LIST || er->k == TY_SEQ) val = seq->elem;
+        }
+        ck_proof_taint(ck, val, s->line, s->col, "value");
         if (seq->k == TY_LIST && !assignable(seq->elem, val))
             ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col, seq->elem, val,
                        "cannot store %s in %s",
@@ -3475,6 +4149,14 @@ static void check_assign(Ck *ck, const Stmt *s) {
     }
     for (size_t i = 0; i < obj->rec.count; i++)
         if (strcmp(obj->rec.names[i], target->as.attr.name) == 0) {
+            /* `b.parts = []`: the empty list takes the field's type (W2) */
+            if (s->as.assign.value->kind == E_LIST &&
+                s->as.assign.value->as.list.count == 0) {
+                Type *fr = ty_resolve(obj->rec.types[i]);
+                if (fr->k == TY_LIST || fr->k == TY_SEQ)
+                    val = obj->rec.types[i];
+            }
+            ck_proof_taint(ck, val, s->line, s->col, "value");
             if (!assignable(obj->rec.types[i], val))
                 ck_error_t(ck, "E_TYPE_ASSIGN", s->line, s->col,
                            obj->rec.types[i], val,
@@ -3488,6 +4170,114 @@ static void check_assign(Ck *ck, const Stmt *s) {
              type_str(obj), target->as.attr.name);
 }
 
+/* --- W4: `while` termination -------------------------------------------- */
+
+/* In proof mode a `while` loop is only accepted when its termination is
+ * statically evident: a single integer counter that moves monotonically
+ * toward a bound each iteration. This is the for-loop-as-while pattern
+ * (`while i < n { ...; i = i + 1 }`, `while n > 0 { ...; n = floor_div(n,2) }`),
+ * not a general ranking-function synthesis — anything else must use
+ * `for i in range(n)` or `partial`. */
+
+static bool int_lit_gt(const Expr *e, int64_t min) {
+    return e->kind == E_INT && e->as.ival > min;
+}
+
+/* names may be module-mangled (`math__floor_div`): match the bare suffix */
+static bool name_is(const Expr *e, const char *suffix) {
+    if (e->kind != E_NAME) return false;
+    size_t n = strlen(e->as.sval), m = strlen(suffix);
+    return n >= m && strcmp(e->as.sval + n - m, suffix) == 0;
+}
+
+/* is `e` a progress step on counter `var`? `*up` reports the direction. */
+static bool progress_step(const Expr *e, const char *var, bool *up) {
+    if (e->kind == E_BINOP) {
+        const Expr *l = e->as.bin.lhs, *r = e->as.bin.rhs;
+        switch (e->as.bin.op) {
+        case B_ADD:
+            if (l->kind == E_NAME && strcmp(l->as.sval, var) == 0 &&
+                int_lit_gt(r, 0)) { *up = true; return true; }
+            if (r->kind == E_NAME && strcmp(r->as.sval, var) == 0 &&
+                int_lit_gt(l, 0)) { *up = true; return true; }
+            return false;
+        case B_SUB:
+            if (l->kind == E_NAME && strcmp(l->as.sval, var) == 0 &&
+                int_lit_gt(r, 0)) { *up = false; return true; }
+            return false;
+        case B_DIV:
+            if (l->kind == E_NAME && strcmp(l->as.sval, var) == 0 &&
+                int_lit_gt(r, 1)) { *up = false; return true; }
+            return false;
+        default:
+            return false;
+        }
+    }
+    if (e->kind == E_CALL) {
+        const Expr *fn = e->as.call.fn;
+        if (name_is(fn, "floor_div") &&
+            e->as.call.count >= 2 &&
+            e->as.call.args[0]->kind == E_NAME &&
+            strcmp(e->as.call.args[0]->as.sval, var) == 0 &&
+            int_lit_gt(e->as.call.args[1], 1)) {
+            *up = false;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool block_progresses(const Block *b, const char *var, bool want_up);
+
+static bool stmt_progresses(const Stmt *s, const char *var, bool want_up) {
+    switch (s->kind) {
+    case S_ASSIGN: {
+        const Expr *t = s->as.assign.target;
+        bool up;
+        if (t->kind == E_NAME && strcmp(t->as.sval, var) == 0 &&
+            progress_step(s->as.assign.value, var, &up))
+            return up == want_up;
+        return false;
+    }
+    case S_BLOCK:
+        return block_progresses(&s->as.block, var, want_up);
+    case S_IF:
+        for (size_t i = 0; i < s->as.ifs.count; i++)
+            if (block_progresses(&s->as.ifs.blocks[i], var, want_up))
+                return true;
+        return s->as.ifs.has_else &&
+               block_progresses(&s->as.ifs.else_block, var, want_up);
+    case S_MATCH:
+        for (size_t i = 0; i < s->as.mtch.count; i++)
+            if (block_progresses(&s->as.mtch.blocks[i], var, want_up))
+                return true;
+        return false;
+    default: /* nested loops handle their own termination */
+        return false;
+    }
+}
+
+static bool block_progresses(const Block *b, const char *var, bool want_up) {
+    for (size_t i = 0; i < b->count; i++)
+        if (stmt_progresses(b->items[i], var, want_up)) return true;
+    return false;
+}
+
+/* does this `while` loop have an evident monotone integer counter? */
+static bool while_terminates(const Stmt *s) {
+    const Expr *c = s->as.wh.cond;
+    if (c->kind != E_BINOP) return false;
+    bool want_up;
+    switch (c->as.bin.op) {
+    case B_LT: case B_LE: want_up = true; break;
+    case B_GT: case B_GE: want_up = false; break;
+    default: return false;
+    }
+    const Expr *v = c->as.bin.lhs;
+    if (v->kind != E_NAME) return false;
+    return block_progresses(&s->as.wh.body, v->as.sval, want_up);
+}
+
 static void check_stmt(Ck *ck, const Stmt *s) {
     switch (s->kind) {
     case S_EXPR: {
@@ -3495,6 +4285,7 @@ static void check_stmt(Ck *ck, const Stmt *s) {
         if (ck->proof && t->k == TY_ANY)
             ck_error(ck, "E_PROOF_ANY", s->line, s->col,
                      "expression has type 'any', which is banned in proof mode");
+        ck_proof_taint(ck, t, s->line, s->col, "expression");
         break;
     }
     case S_ASSIGN:
@@ -3532,6 +4323,7 @@ static void check_stmt(Ck *ck, const Stmt *s) {
                 ck_error(ck, "E_PROOF_ANY", s->line, s->col,
                          "condition has type 'any', which is banned in proof "
                          "mode");
+            ck_proof_taint(ck, ct, s->line, s->col, "condition");
             size_t mark = ns.count;
             narrow_cond(ck, s->as.ifs.conds[i], true, &ns);
             check_block(ck, &s->as.ifs.blocks[i]);
@@ -3562,10 +4354,18 @@ static void check_stmt(Ck *ck, const Stmt *s) {
         break;
     }
     case S_WHILE: {
+        /* W4: in proof mode a `while` loop must have an evident monotone
+         * integer counter (the for-loop-as-while pattern); anything else
+         * cannot be shown to terminate. */
+        if (ck->proof && !while_terminates(s))
+            ck_error(ck, "E_TYPE_TERMINATION", s->line, s->col,
+                     "'while' cannot be shown to terminate in proof mode: use "
+                     "a monotone counter or `for i in range(n)` instead");
         Type *ct = infer(ck, s->as.wh.cond);
         if (ck->proof && ct->k == TY_ANY)
             ck_error(ck, "E_PROOF_ANY", s->line, s->col,
                      "condition has type 'any', which is banned in proof mode");
+        ck_proof_taint(ck, ct, s->line, s->col, "condition");
         NSet ns = {.count = 0};
         narrow_cond(ck, s->as.wh.cond, true, &ns);
         ck->loop_depth++;
@@ -3580,8 +4380,10 @@ static void check_stmt(Ck *ck, const Stmt *s) {
             ck_error(ck, "E_PROOF_ANY", s->line, s->col,
                      "iterated value has type 'any', which is banned in proof "
                      "mode");
+        ck_proof_taint(ck, seq, s->line, s->col, "iterated value");
         Type *elem = &t_any;
         if (seq->k == TY_LIST) elem = widen(seq->elem);
+        else if (seq->k == TY_SEQ) elem = widen(seq->elem);
         else if (seq->k == TY_STR) elem = &t_str;
         else if (seq->k != TY_ANY && seq->k != TY_UNION && seq->k != TY_NEVER)
             ck_error(ck, "E_TYPE_ITER", s->line, s->col,
@@ -3611,12 +4413,15 @@ static void check_stmt(Ck *ck, const Stmt *s) {
                      "'return' outside of a function");
             break;
         }
-        Type *t = s->as.ret ? infer(ck, s->as.ret) : &t_none;
+        Type *t = s->as.ret ? infer_expected(ck, s->as.ret, ck->cur_ret)
+                            : &t_none;
         if (ck->proof && t->k == TY_ANY)
             ck_error(ck, "E_PROOF_ANY", s->line, s->col,
                      "returning a value of type 'any', which is banned in "
                      "proof mode");
+        ck_proof_taint(ck, t, s->line, s->col, "returned value");
         note_shape_crossing(ck, ck->cur_ret, t);
+        ck_covariance(ck, ck->cur_ret, t, s->line, s->col);
         if (!assignable(ck->cur_ret, t))
             ck_error_t(ck, "E_TYPE_RETURN", s->line, s->col, ck->cur_ret, t,
                        "returning %s from a function declared to return %s",
@@ -3652,6 +4457,10 @@ static void check_stmt(Ck *ck, const Stmt *s) {
         if (!assignable(covered, st))
             ck_error(ck, "E_TYPE_MATCH", s->line, s->col,
                      "match is not exhaustive: add a catch-all arm ('_')");
+        else if (!ck->proof && type_tainted(st))
+            ck_warn(ck, "W_VACUOUS_PROOF", s->line, s->col,
+                    "match exhaustiveness over %s is vacuous: the subject is "
+                    "tainted by 'any'", type_str(st));
         break;
     }
     case S_FUNC:
@@ -3781,6 +4590,9 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
     f->param_count = s->as.func.param_count;
     f->pure = s->as.func.pure;
     f->partial = s->as.func.partial;
+    /* a non-`pure` function is conservatively IO (effect inference would split
+     * it into the 5 labels; purity checking only needs the pure/impure divide) */
+    f->eff = s->as.func.pure ? EFF_PURE : EFF_IO;
     f->params = xmalloc(sizeof(Type *) * f->param_count);
     bool saved_in_sig = ck->in_sig;
     ck->in_sig = true;
@@ -3797,11 +4609,13 @@ static void register_func(Ck *ck, Scope *scope, const Stmt *s) {
                      "parameter '%s' has no type annotation ('any' is banned in "
                      "proof mode)", s->as.func.params[j]);
         f->params[j] = resolve_type(ck, s->as.func.param_types[j], te);
+        ck_proof_taint(ck, f->params[j], s->line, s->col, "parameter");
     }
     if (ck->proof && s->as.func.ret_type == NULL)
         ck_error(ck, "E_PROOF_ANY", s->line, s->col,
                  "missing return type annotation ('any' is banned in proof mode)");
     f->ret = resolve_type(ck, s->as.func.ret_type, te);
+    ck_proof_taint(ck, f->ret, s->line, s->col, "return type");
     ck->dim_params = saved_dp;
     ck->dim_param_count = saved_dpc;
     free(dims);
@@ -3864,11 +4678,20 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     sc.pure = s->as.func.pure;
     Type **ptypes = xmalloc(sizeof(Type *) *
                             s->as.func.param_count);
+    size_t saved_evid = eq_evidence_count;
     for (size_t i = 0; i < s->as.func.param_count; i++) {
         ptypes[i] = resolve_type(ck, s->as.func.param_types[i], te);
         Var *v = env_add(&sc.locals, s->as.func.params[i], ptypes[i],
                          s->as.func.param_types[i] != NULL);
         v->bound = true;
+        /* W7: a parameter `e: Eq[a, b]` puts `a == b` in scope for the body */
+        const Type *rt = ty_resolve(ptypes[i]);
+        if (rt->k == TY_EQ && rt->eq.lhs && rt->eq.rhs &&
+            eq_evidence_count < 64) {
+            eq_evidence_l[eq_evidence_count] = rt->eq.lhs;
+            eq_evidence_r[eq_evidence_count] = rt->eq.rhs;
+            eq_evidence_count++;
+        }
     }
     /* pre-declare every assigned-in-body name that isn't a global */
     DeclCtx dc = { ck, &sc.locals, "function" };
@@ -3893,6 +4716,7 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
     check_block(ck, &s->as.func.body);
     if (!s->as.func.partial)
         check_termination(ck, s, ptypes);
+    eq_evidence_count = saved_evid; /* pop the Eq[a, b] parameters */
     ck->scope = saved_scope;
     ck->cur_ret = saved_ret;
     ck->cur_pure = saved_pure;
@@ -3911,15 +4735,31 @@ static void check_func(Ck *ck, Scope *parent, const Stmt *s) {
 
 size_t check_shape_crossings(void) { return shape_dyn_crossings; }
 
+/* W8: the --proof-report measurement, valid after the last check_program(). */
+const ProofReport *proof_report_get(void) {
+    static ProofReport rep;
+    rep.total_funcs = proof_rep_total_funcs;
+    rep.partial_funcs = proof_rep_partial_funcs;
+    rep.pure_funcs = proof_rep_pure_funcs;
+    rep.vacuous_obligations = proof_rep_vacuous;
+    rep.covariance_warnings = proof_rep_covariance;
+    rep.taint_sites = proof_rep_taint_sites;
+    rep.partial_names = (const char *const *)proof_rep_partial_names;
+    rep.partial_name_count = proof_rep_partial_n;
+    return &rep;
+}
+
 int check_program(const Program *prog, const char *filename, DiagList *diags,
                   bool proof) {
     Ck ck;
     memset(&ck, 0, sizeof(ck));
     shape_dyn_crossings = 0;
     dim_reset_unresolved();
+    proof_rep_reset();
     ck.filename = filename;
     ck.diags = diags;
     ck.proof = proof;
+    ck_proof_mode = proof;
 
     /* pass 0: `dim` declarations (nominal dimension names), in file order. They
      * must be in scope for the alias bodies and signatures resolved below. */
@@ -3985,6 +4825,25 @@ int check_program(const Program *prog, const char *filename, DiagList *diags,
     /* pass 2b: function bodies, with all globals known */
     for (size_t i = 0; i < ck.func_count; i++)
         check_func(&ck, NULL, ck.funcs[i].node);
+
+    /* pass 3: mutual recursion (W4) — cycles across the top-level call graph */
+    check_mutual_recursion(&ck);
+
+    /* W8: fold the top-level function inventory into the proof report */
+    proof_rep_total_funcs = ck.func_count;
+    for (size_t i = 0; i < ck.func_count; i++) {
+        const FuncSig *f = &ck.funcs[i];
+        if (f->pure) proof_rep_pure_funcs++;
+        if (f->partial) {
+            proof_rep_partial_funcs++;
+            if (proof_rep_partial_n == proof_rep_partial_cap) {
+                proof_rep_partial_cap = proof_rep_partial_cap ? proof_rep_partial_cap * 2 : 8;
+                proof_rep_partial_names = xrealloc(proof_rep_partial_names,
+                    sizeof(char *) * proof_rep_partial_cap);
+            }
+            proof_rep_partial_names[proof_rep_partial_n++] = (char *)f->disp;
+        }
+    }
 
     return ck.errors;
 }

@@ -1,0 +1,10 @@
+# W7: propositional equality. `refl` inhabits Eq[a, a], and a parameter
+# `e: Eq[a, b]` puts `a == b` in scope, so a Tensor[f32, [a]] is usable as
+# Tensor[f32, [b]] across the function boundary.
+dim A, B
+
+def refl_self() -> Eq[A, A] pure { return refl }
+
+def cast(e: Eq[A, B], t: Tensor[f32, [A]]) -> Tensor[f32, [B]] pure {
+    return t
+}

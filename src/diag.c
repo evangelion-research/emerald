@@ -40,7 +40,8 @@ static const char *diag_src_for(const DiagList *dl, const Diag *d) {
     return dl->source_count ? NULL : dl->src;
 }
 
-static Diag *diag_addv(DiagList *dl, DiagKind kind, const char *code,
+static Diag *diag_addv(DiagList *dl, DiagKind kind, DiagSeverity sev,
+                       const char *code,
                        const char *file, int line, int col,
                        const char *fmt, va_list ap) {
     if (dl->count == dl->cap) {
@@ -50,7 +51,7 @@ static Diag *diag_addv(DiagList *dl, DiagKind kind, const char *code,
     Diag *d = &dl->items[dl->count++];
     memset(d, 0, sizeof(*d));
     d->kind = kind;
-    d->severity = SEV_ERROR;
+    d->severity = sev;
     d->code = code;
     d->file = file;
     d->line = line;
@@ -69,9 +70,32 @@ Diag *diag_add(DiagList *dl, DiagKind kind, const char *code,
                const char *file, int line, int col, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    Diag *d = diag_addv(dl, kind, code, file, line, col, fmt, ap);
+    Diag *d = diag_addv(dl, kind, SEV_ERROR, code, file, line, col, fmt, ap);
     va_end(ap);
     return d;
+}
+
+Diag *diag_add_sev(DiagList *dl, DiagKind kind, DiagSeverity sev,
+                   const char *code, const char *file, int line, int col,
+                   const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    Diag *d = diag_addv(dl, kind, sev, code, file, line, col, fmt, ap);
+    va_end(ap);
+    return d;
+}
+
+bool diag_suppressed(const DiagList *dl, const char *code) {
+    for (size_t i = 0; i < dl->suppress_count; i++)
+        if (strcmp(dl->suppress[i], code) == 0) return true;
+    return false;
+}
+
+size_t diag_warning_count(const DiagList *dl) {
+    size_t n = 0;
+    for (size_t i = 0; i < dl->count; i++)
+        if (dl->items[i].severity == SEV_WARNING) n++;
+    return n;
 }
 
 void diag_set_types(Diag *d, const char *expected, const char *actual) {

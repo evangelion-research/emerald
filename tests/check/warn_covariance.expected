@@ -1,0 +1,8 @@
+warning[W_UNSOUND_COVARIANCE]: {name: str} used where list[{name: str}] is expected relies on unsound list covariance ({name: str, bark: str} widens to {name: str}); use seq[{name: str}] or freeze() for a sound sequence
+  --> tests/check/warn_covariance.rald:11:12
+     |
+ 11 | print(count(dogs))
+    |            ^
+   = expected: list[{name: str}]
+   = actual:   list[{name: str, bark: str}]
+ok

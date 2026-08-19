@@ -92,19 +92,30 @@ has a switch:
 
 - **Functions are total by default.** Every recursive call must descend
   structurally — the argument is a projection chain out of a parameter of
-  recursive-alias type (`n.succ`, `xs.tail`). A function whose recursion can't
-  be shown to descend must say `partial`, which marks it as *not* a proof.
+  recursive-alias type (`n.succ`, `xs.tail`), or an element of a `seq` field
+  (`t.kids[0]`). Mutual recursion is rejected as a cycle without structural
+  descent, and under `--proof` a `while` loop must have an evident monotone
+  integer counter (`for i in range(n)` is the supported total loop). A function
+  whose recursion can't be shown to descend must say `partial`, which marks it
+  as *not* a proof.
 - **`pure`** — `def forward(x: T) -> U pure` promises no `print`, no `rand`,
   no file or process IO, and no impure callee (a nested `def` inside a pure
-  function must itself be pure). Thirty-nine of the seventy-four builtins are
-  pure and may be called from pure code, as is roughly half the standard
-  library — everything that reads rather than builds.
-- **`--proof`** — `emeraldc --check --proof f.rald` bans `any` and `partial`.
-  Since `any` is assignable in both directions, a proof that mentions it proves
-  nothing, so proof mode rejects every `any` that surfaces: unannotated
-  parameters and returns, explicit annotations, inferred `any`. It is a strict
-  first cut, not a complete soundness guarantee — the element type of an empty
-  `[]` is still `any` underneath.
+  function must itself be pure). Purity lives on function *types*, so a pure
+  function cannot smuggle an impure callee through `map`/`filter`/`reduce` or
+  an indirect call (`docs/effects.md`).
+- **`seq[T]`** — the immutable, covariant, sound sequence. `list[T]` stays
+  covariant (and mutable) in ordinary code — the unsound upcast now warns
+  `W_UNSOUND_COVARIANCE` — while `seq[T]` is sound because the checker refuses
+  to mutate it. `freeze(xs)`/`thaw(s)` convert, and under `--proof` `list[T]`
+  is invariant while `seq[T]` is not.
+- **`Eq[a, b]`** — propositional equality of dimension expressions. `refl`
+  inhabits `Eq[a, a]`; a value `e: Eq[a, b]` in scope lets a `Tensor[f32, [a]]`
+  be used as `Tensor[f32, [b]]` across a function boundary.
+- **`--proof`** — `emeraldc --check --proof f.rald` bans `any` (including `any`
+  hidden inside a type constructor — the empty `[]` hole is closed), `partial`,
+  and non-termination. `--proof-report` (text or `--json`) prints what was
+  checked: function totals, vacuous obligations, taint sites, and covariance
+  warnings.
 
 ## Functions are values, closures included
 

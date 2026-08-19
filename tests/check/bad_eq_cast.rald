@@ -1,0 +1,5 @@
+# W7: without `e: Eq[A, B]` in scope, Tensor[f32, [A]] is not usable as
+# Tensor[f32, [B]] — the equality must be discharged explicitly.
+dim A, B
+
+def cast(t: Tensor[f32, [A]]) -> Tensor[f32, [B]] pure { return t }

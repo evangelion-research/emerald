@@ -1,0 +1,22 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_PURE_CALL",
+    "file": "tests/check/bad_pure_higher_order.rald",
+    "line": 9,
+    "column": 15,
+    "message": "pure function passes an impure function to map()",
+    "source_line": "    return map(shout, xs)"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_PURE_CALL",
+    "file": "tests/check/bad_pure_higher_order.rald",
+    "line": 13,
+    "column": 15,
+    "message": "pure function passes an impure function to map()",
+    "source_line": "    return map((x: int) => shout(x), xs)"
+  }
+]

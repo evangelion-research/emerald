@@ -189,6 +189,8 @@ Value em_file_exists(Value path);   /* is the path openable for reading? */
 /* stdlib foundation: the operations no Emerald code can express */
 void  em_append(Value xs, Value v);  /* amortized in-place list growth */
 Value em_slice(Value seq, Value lo, Value hi); /* str or list; clamped */
+Value em_freeze(Value xs);           /* list -> seq: a no-op at runtime */
+Value em_thaw(Value xs);             /* seq -> list: a copy, so mutation is isolated */
 Value em_ord(Value c);               /* first byte of a string, 0..255 */
 Value em_chr(Value n);               /* 0..255 as a one-byte string */
 Value em_float_of(Value v);          /* float(), the counterpart of int() */

@@ -465,6 +465,12 @@ static int gen_expr(Cg *cg, const Expr *e) {
         return t;
     }
     case E_NAME: {
+        /* refl is proof evidence (Eq[a, a]): it is erased at runtime */
+        if (strcmp(e->as.sval, "refl") == 0) {
+            int t = new_temp(cg);
+            emit(cg, "%s = em_none();", slotref(t, tb));
+            return t;
+        }
         Access kind;
         int slot;
         if (var_slot(cg, e->as.sval, &kind, &slot))

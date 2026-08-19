@@ -18,4 +18,20 @@ int check_program(const Program *prog, const char *filename, DiagList *diags,
  * check_program() run (SPEC_V2.md D4); reported by `--shape-report`. */
 size_t check_shape_crossings(void);
 
+/* W8 (SPEC_V3): the --proof-report measurement, collected by the last
+ * check_program() run. `partial_names` is owned by the checker and valid
+ * until the next run. */
+typedef struct {
+    size_t total_funcs;
+    size_t partial_funcs;
+    size_t pure_funcs;
+    size_t vacuous_obligations; /* W_VACUOUS_PROOF emissions */
+    size_t covariance_warnings; /* W_UNSOUND_COVARIANCE emissions */
+    size_t taint_sites;         /* proof-mode tainted-type rejections */
+    const char *const *partial_names;
+    size_t partial_name_count;
+} ProofReport;
+
+const ProofReport *proof_report_get(void);
+
 #endif

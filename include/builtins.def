@@ -52,6 +52,8 @@ EM_BUILTIN_VOID("exit",          "em_exit",           1, false)
 /* --- the stdlib foundation (stdlib/SPEC.md §1.1) ------------------------- */
 EM_BUILTIN_VOID("append",        "em_append",         2, false)
 EM_BUILTIN(     "slice",         "em_slice",          3, true)
+EM_BUILTIN(     "freeze",        "em_freeze",         1, true)
+EM_BUILTIN(     "thaw",          "em_thaw",           1, true)
 EM_BUILTIN(     "ord",           "em_ord",            1, true)
 EM_BUILTIN(     "chr",           "em_chr",            1, true)
 EM_BUILTIN(     "map",           "em_map",            2, true)

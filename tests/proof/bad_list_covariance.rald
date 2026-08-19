@@ -1,0 +1,11 @@
+# W5/D3: under --proof, list[T] is invariant — a list[Dog] handed where a
+# list[Animal] is expected is rejected, because the callee could append an
+# Animal and write through the Dog reference. Use seq[T] (covariant and sound)
+# or freeze() instead.
+type Animal = { name: str }
+type Dog = Animal & { bark: str }
+
+def count(animals: list[Animal]) -> int pure { return len(animals) }
+
+dogs: list[Dog] = [{ name: "rex", bark: "woof" }]
+print(count(dogs))

@@ -1,0 +1,7 @@
+error[E_TYPE_ARG]: argument 1 of count(): expected list[{name: str}], got list[{name: str, bark: str}]
+  --> tests/proof/bad_list_covariance.rald:11:12
+     |
+ 11 | print(count(dogs))
+    |            ^
+   = expected: list[{name: str}]
+   = actual:   list[{name: str, bark: str}]

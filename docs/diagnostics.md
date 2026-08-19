@@ -47,7 +47,7 @@ diagnostics as a JSON array on stdout. Each element has:
 | field          | type   | meaning                                          |
 |----------------|--------|--------------------------------------------------|
 | `kind`         | string | `syntax`, `type`, or `internal`                  |
-| `severity`     | string | `error` (warnings/notes reserved)                |
+| `severity`     | string | `error` or `warning`                             |
 | `code`         | string | stable error code, e.g. `E_TYPE_ASSIGN`          |
 | `file`         | string | source path                                      |
 | `line`         | int    | 1-based line                                     |
@@ -115,7 +115,7 @@ etc.
 | `E_TYPE_BREAK` / `E_TYPE_CONTINUE` | control flow outside a loop          |
 | `E_TYPE_PURE_CALL`            | a `pure` function calls an impure builtin or function |
 | `E_TYPE_PURE_NESTED`          | an impure nested `def` inside a `pure` function |
-| `E_TYPE_TERMINATION`          | recursive call does not descend structurally; declare `partial` to opt out |
+| `E_TYPE_TERMINATION`          | recursive call does not descend structurally (incl. mutual recursion and proof-mode `while`); declare `partial` to opt out |
 | `E_TYPE_CONST`                | assigning to a `const` binding          |
 | `E_TYPE_MATCH`                | `match` not exhaustive (no arm covers every remaining value) |
 | `E_TYPE_BIND`                 | pattern binding already defined in scope / duplicate binding |
@@ -171,6 +171,21 @@ structured pipeline, so `--json` reports them identically to type errors:
 | `E_IMPORT_AMBIGUOUS`          | one search root offers both `a/b.rald` and `a.b.rald`; notes list both candidates |
 | `E_IMPORT_REDEFINE`           | an import binding collides with a top-level name of the importing module, or with an earlier import |
 | `E_IMPORT_MODULE_VALUE`       | a module object used where a value is expected, or assigned to (use `module.name`; imports are read-only) |
+
+## Warnings (`W_*`)
+
+Warnings are diagnostics that do not fail the build: the program still checks
+and runs. They are promoted to errors by `--werror` (or by `--proof`, which
+implies `--werror`), and silenced individually with `-Wno-<code>`.
+
+| code                      | meaning                                                                 |
+|---------------------------|-------------------------------------------------------------------------|
+| `W_UNSOUND_COVARIANCE`    | a `list[T]` accepted as `list[U]` by covariance alone; sound with `seq`/`freeze` |
+| `W_VACUOUS_PROOF`         | an obligation discharged by a type tainted with `any` (the proof is vacuous) |
+
+`--proof-report` (with optional `--json`) prints the measurement the phase
+collects: function totals (total/partial/pure), vacuous obligations, taint
+sites, and covariance warnings. See `proofs.md`.
 
 ## Runtime errors
 

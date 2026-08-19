@@ -134,9 +134,11 @@ type      := inter ("|" inter)*              (* union *)
 inter     := type_atom ("&" type_atom)*      (* intersection / "extends" *)
 type_atom := "int" | "float" | "str" | "bool" | "None" | "any" | "never"
            | "list" "[" type "]"
+           | "seq" "[" type "]"              (* immutable, covariant sequence *)
            | "Tensor" "[" type "," ("?" | "[" dim ("," dim)* "]") "]"
                                              (* tensor with static or dynamic shape *)
            | "Fin" "[" dim "]"               (* index provably below `dim` *)
+           | "Eq" "[" dim "," dim "]"        (* propositional equality of dims *)
            | "{" [IDENT ":" type ("," IDENT ":" type)* [","]] "}"
            | "(" [type ("," type)*] ")" "->" type   (* function type *)
            | IDENT ["[" type ("," type)* "]"]  (* alias, maybe generic *)
@@ -158,7 +160,14 @@ dim_factor  := IDENT | int_lit
 - Literal types make a single value a type: `type Dice = 1|2|3|4|5|6`.
   Float literals are not valid types.
 - A name followed by `[...]` applies a generic alias (`Pair[int, str]`) —
-  except `list[T]`, which is built in.
+  except `list[T]`, `seq[T]`, `Fin[n]`, and `Eq[a, b]`, which are built in.
+- `seq[T]` is the immutable, covariant sequence: the checker refuses to mutate
+  one, so `seq[Circle]` is soundly a `seq[Shape]`. `freeze(xs)`/`thaw(s)`
+  convert, and `[1, 2]` in a `seq` context is a seq literal. Under `--proof`,
+  `list[T]` becomes invariant while `seq[T]` stays covariant.
+- `Eq[a, b]` is the type of evidence that the dim expressions `a` and `b` are
+  equal; `refl` inhabits `Eq[a, a]`. A value `e: Eq[a, b]` in scope makes
+  `Tensor[f32, [a]]` usable as `Tensor[f32, [b]]`. See `proofs.md`.
 - Function types `(T1, T2) -> U` describe first-class functions and lambdas;
   they are structural, so `def f(x: int) -> int` has type `(int) -> int` and
   can be passed anywhere a value of that type is expected.
@@ -183,6 +192,7 @@ postfix        := primary ( "(" [expr ("," expr)*] ")"    (* IDENT callee only *
                           | "." IDENT )*
 primary        := int_lit | float_lit | string_lit
                | "True" | "False" | "None"
+               | "refl"                            (* Eq[a, a] evidence; erased *)
                | catch_expr
                | IDENT "{" [IDENT ":" expr ("," IDENT ":" expr)*] "}" (* error literal *)
                | IDENT | "(" expr ")"

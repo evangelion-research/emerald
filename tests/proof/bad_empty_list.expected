@@ -1,0 +1,10 @@
+error[E_PROOF_ANY]: value has type list[any], which contains 'any' (banned in proof mode)
+  --> tests/proof/bad_empty_list.rald:5:5
+    |
+ 5 |     xs = []
+   |     ^
+error[E_PROOF_ANY]: argument has type list[any], which contains 'any' (banned in proof mode)
+  --> tests/proof/bad_empty_list.rald:6:15
+    |
+ 6 |     return len(xs)
+   |               ^

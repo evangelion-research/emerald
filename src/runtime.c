@@ -1290,6 +1290,23 @@ Value em_slice(Value seq, Value lo, Value hi) {
     return em_none();
 }
 
+/* freeze/thaw: a `seq` is an O_LIST the checker refuses to mutate, so
+ * freeze is a no-op at runtime and thaw copies — mutating the thawed list
+ * must never be visible through the frozen sequence it was copied from. */
+Value em_freeze(Value xs) {
+    if (!is_list(xs)) rt_fatal("freeze() expects a list, got %s", type_name(xs));
+    return xs;
+}
+
+Value em_thaw(Value xs) {
+    if (!is_list(xs)) rt_fatal("thaw() expects a seq, got %s", type_name(xs));
+    Obj *src = xs.as.o;
+    Obj *o = list_new(src->as.list.len);
+    memcpy(o->as.list.items, src->as.list.items, sizeof(Value) * src->as.list.len);
+    o->as.list.len = src->as.list.len;
+    return obj_val(o);
+}
+
 Value em_ord(Value c) {
     if (!is_str(c)) rt_fatal("ord() expects a str, got %s", type_name(c));
     if (str_len(&c) == 0) rt_fatal("ord() of an empty string");

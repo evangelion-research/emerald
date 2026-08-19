@@ -14,7 +14,10 @@
 
 type Builder = { parts: list[str], count: int }
 
-def new() -> Builder pure { return { parts: [], count: 0 } }
+def new() -> Builder pure {
+    parts: list[str] = []
+    return { parts: parts, count: 0 }
+}
 
 def push(b: Builder, s: str) -> None {
     if len(s) == 0 { return }

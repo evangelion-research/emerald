@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "type",
+    "severity": "warning",
+    "code": "W_UNSOUND_COVARIANCE",
+    "file": "tests/check/warn_covariance.rald",
+    "line": 11,
+    "column": 12,
+    "message": "{name: str} used where list[{name: str}] is expected relies on unsound list covariance ({name: str, bark: str} widens to {name: str}); use seq[{name: str}] or freeze() for a sound sequence",
+    "expected": "list[{name: str}]",
+    "actual": "list[{name: str, bark: str}]",
+    "source_line": "print(count(dogs))"
+  }
+]

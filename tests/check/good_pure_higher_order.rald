@@ -1,0 +1,14 @@
+# W3/D2 regression: a pure function may still use map/filter/reduce with a
+# *pure* function value or lambda — purity on function types must not forbid
+# the honest higher-order cases, only the impure ones.
+def inc(x: int) -> int pure { return x + 1 }
+
+def inc_all(xs: list[int]) -> list[int] pure {
+    return map(inc, xs)
+}
+
+def doubled(xs: list[int]) -> list[int] pure {
+    return map((x: int) => x * 2, xs)
+}
+
+print(inc_all([1, 2, 3]), doubled([1, 2, 3]))

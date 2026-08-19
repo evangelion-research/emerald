@@ -418,7 +418,12 @@ static void rw_type(RW *rw, TypeExpr *t, const RScope *sc) {
     case TE_FIN:
         rw_dim(rw, t->fin_dim, sc);
         break;
+    case TE_EQ:
+        rw_dim(rw, t->eq_lhs, sc);
+        rw_dim(rw, t->eq_rhs, sc);
+        break;
     case TE_LIST: rw_type(rw, t->elem, sc); break;
+    case TE_SEQ:  rw_type(rw, t->elem, sc); break;
     case TE_REC:
         for (size_t i = 0; i < t->fields.count; i++)
             rw_type(rw, t->fields.types[i], sc);

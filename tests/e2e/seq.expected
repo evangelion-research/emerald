@@ -1,0 +1,8 @@
+sum 6
+len 3
+idx 2
+map 2 4 6
+filter 2
+reduce 6
+literal 15
+thaw 4 15 4

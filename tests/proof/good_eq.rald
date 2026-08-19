@@ -1,0 +1,11 @@
+# W7 in proof mode: Eq[a, b] and refl are the compositional piece that lets a
+# shape equality cross a function boundary, and it all stays proof-clean.
+dim Batch, Seq
+
+def refl_batch() -> Eq[Batch, Batch] pure { return refl }
+
+def rebatch(e: Eq[Batch, Seq], t: Tensor[f32, [Batch]]) -> Tensor[f32, [Seq]] pure {
+    return t
+}
+
+print("ok")

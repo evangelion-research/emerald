@@ -1,0 +1,10 @@
+# W4 exit criterion: mutual recursion is rejected under `--proof`. `partial`
+# would be the opt-out, but it is itself banned in proof mode.
+def ping(n: int) -> int {
+    if n == 0 { return 0 }
+    return pong(n - 1)
+}
+def pong(n: int) -> int {
+    if n == 0 { return 0 }
+    return ping(n - 1)
+}

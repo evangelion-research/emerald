@@ -1,0 +1,11 @@
+# W4: `partial` opts mutual recursion out of termination checking in ordinary
+# mode (it is what `partial` exists for).
+def is_even(n: int) -> bool partial {
+    if n == 0 { return True }
+    return is_odd(n - 1)
+}
+def is_odd(n: int) -> bool partial {
+    if n == 0 { return False }
+    return is_even(n - 1)
+}
+print(is_even(10), is_odd(10))

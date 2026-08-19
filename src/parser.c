@@ -316,12 +316,29 @@ static TypeExpr *parse_type_atom(Parser *p) {
         expect(p, TK_RBRACK, "']' closing list type");
         return t;
     }
+    if (n.len == 3 && memcmp(n.start, "seq", 3) == 0 && check(p, TK_LBRACK)) {
+        advance(p);
+        TypeExpr *t = new_type(TE_SEQ, line, col);
+        t->elem = parse_type(p);
+        expect(p, TK_RBRACK, "']' closing seq type");
+        return t;
+    }
     if (n.len == 3 && memcmp(n.start, "Fin", 3) == 0 && check(p, TK_LBRACK)) {
         /* Fin[n]: an index provably below the dimension `n` */
         advance(p);
         TypeExpr *t = new_type(TE_FIN, line, col);
         t->fin_dim = parse_dim_expr(p);
         expect(p, TK_RBRACK, "']' closing Fin[n]");
+        return t;
+    }
+    if (n.len == 2 && memcmp(n.start, "Eq", 2) == 0 && check(p, TK_LBRACK)) {
+        /* Eq[a, b]: propositional equality of two dim expressions */
+        advance(p);
+        TypeExpr *t = new_type(TE_EQ, line, col);
+        t->eq_lhs = parse_dim_expr(p);
+        expect(p, TK_COMMA, "',' between the two sides of Eq[a, b]");
+        t->eq_rhs = parse_dim_expr(p);
+        expect(p, TK_RBRACK, "']' closing Eq[a, b]");
         return t;
     }
     TypeExpr *t = new_type(TE_NAME, line, col);

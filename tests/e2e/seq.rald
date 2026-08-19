@@ -1,0 +1,30 @@
+# seq[T]: an immutable, covariant, sound sequence (SPEC_V3 W5). A seq is a
+# list the checker refuses to mutate; freeze()/thaw() convert, at no runtime cost.
+
+def total(xs: seq[int]) -> int pure {
+    acc = 0
+    for x in xs { acc = acc + x }
+    return acc
+}
+
+def doubled(xs: seq[int]) -> seq[int] pure { return map((x: int) => x * 2, xs) }
+
+xs: list[int] = [1, 2, 3]
+frozen = freeze(xs)
+print("sum", total(frozen))
+print("len", len(frozen))
+print("idx", frozen[1])
+
+d = doubled(frozen)
+print("map", d[0], d[1], d[2])
+print("filter", len(filter((x: int) => x > 1, frozen)))
+print("reduce", reduce((a: int, b: int) => a + b, 0, frozen))
+
+# a seq literal via contextual typing
+s: seq[int] = [4, 5, 6]
+print("literal", total(s))
+
+# thaw copies: mutating the copy never reaches the frozen sequence
+t = thaw(s)
+append(t, 99)
+print("thaw", len(t), total(s), s[0])

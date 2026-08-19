@@ -153,6 +153,35 @@ run_repl() {
     done
 }
 
+run_report() {
+    echo "== proof report"
+    report "tests/proof_report.rald (text)" "tests/proof_report.text.expected" \
+        "$("$EMERALDC" --check --proof-report tests/proof_report.rald 2>&1)"
+    report "tests/proof_report.rald (json)" "tests/proof_report.json.expected" \
+        "$("$EMERALDC" --check --proof-report --json tests/proof_report.rald 2>&1)"
+}
+
+run_warn() {
+    echo "== warnings"
+    # W1: a warning still compiles (exit 0), --werror promotes it (nonzero),
+    # and -Wno-<code> silences it (so --werror then passes again).
+    if ./bin/emeraldc --check tests/check/warn_covariance.rald >/dev/null 2>&1; then
+        PASS=$((PASS + 1)); echo "  PASS warn-compiles"
+    else
+        FAIL=$((FAIL + 1)); echo "  FAIL warn-compiles (warning should not fail the build)"
+    fi
+    if ! ./bin/emeraldc --check --werror tests/check/warn_covariance.rald >/dev/null 2>&1; then
+        PASS=$((PASS + 1)); echo "  PASS warn-werror"
+    else
+        FAIL=$((FAIL + 1)); echo "  FAIL warn-werror (--werror should promote the warning)"
+    fi
+    if ./bin/emeraldc --check --werror -Wno-W_UNSOUND_COVARIANCE tests/check/warn_covariance.rald >/dev/null 2>&1; then
+        PASS=$((PASS + 1)); echo "  PASS warn-suppress"
+    else
+        FAIL=$((FAIL + 1)); echo "  FAIL warn-suppress (-Wno-W_UNSOUND_COVARIANCE should silence it)"
+    fi
+}
+
 run_stdlib() {
     echo "== stdlib"
     for f in tests/stdlib/*.rald; do
@@ -174,7 +203,7 @@ run_stdlib() {
     done
 }
 
-stages="${*:-lexer parser check json proof e2e imports stdlib repl shape}"
+stages="${*:-lexer parser check json proof e2e imports stdlib repl shape warn report}"
 for s in $stages; do
     case "$s" in
         lexer) run_lexer ;;
@@ -187,6 +216,8 @@ for s in $stages; do
         stdlib) run_stdlib ;;
         repl) run_repl ;;
         shape) run_shape ;;
+        warn) run_warn ;;
+        report) run_report ;;
         *) echo "unknown stage: $s" >&2; exit 2 ;;
     esac
 done

@@ -1,0 +1,4 @@
+# W7: `refl` proves reflexivity only. It cannot inhabit Eq[A, B] when A != B.
+dim A, B
+
+def bad() -> Eq[A, B] pure { return refl }

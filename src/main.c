@@ -103,11 +103,22 @@ static void emit_type_shapes(FILE *out, const TypeExpr *t) {
         free(s);
         break;
     }
+    case TE_EQ: {
+        char *a = dim_str(t->eq_lhs);
+        char *b = dim_str(t->eq_rhs);
+        fprintf(out, "Eq[%s, %s]\n", a, b);
+        free(a);
+        free(b);
+        break;
+    }
     case TE_NAME:
         for (size_t i = 0; i < t->arg_count; i++)
             emit_type_shapes(out, t->args[i]);
         break;
     case TE_LIST:
+        emit_type_shapes(out, t->elem);
+        break;
+    case TE_SEQ:
         emit_type_shapes(out, t->elem);
         break;
     case TE_REC:
@@ -259,11 +270,39 @@ static char *default_output(const char *path) {
 
 static void usage(void) {
     fputs("usage: emeraldc [--emit-tokens|--emit-ast|--emit-shapes|--check|--emit-c]\n"
-          "                [--json] [--proof] [--shape-report] [--keep-c] [-I DIR]...\n"
-          "                [-o OUT] file.rald\n"
+          "                [--json] [--proof] [--shape-report] [--proof-report] [--keep-c]\n"
+          "                [--werror] [-Wno-CODE]... [-I DIR]... [-o OUT] file.rald\n"
           "       emeraldc --repl [-I DIR]...\n",
           stderr);
     exit(2);
+}
+
+static void emit_proof_report(const ProofReport *r, bool json) {
+    if (json) {
+        printf("{\n");
+        printf("  \"functions\": {\"total\": %zu, \"partial\": %zu, \"pure\": %zu},\n",
+               r->total_funcs, r->partial_funcs, r->pure_funcs);
+        printf("  \"partial_names\": [");
+        for (size_t i = 0; i < r->partial_name_count; i++)
+            printf("%s\"%s\"", i ? ", " : "", r->partial_names[i]);
+        printf("],\n");
+        printf("  \"vacuous_obligations\": %zu,\n", r->vacuous_obligations);
+        printf("  \"covariance_warnings\": %zu,\n", r->covariance_warnings);
+        printf("  \"taint_sites\": %zu\n", r->taint_sites);
+        printf("}\n");
+        return;
+    }
+    printf("functions: %zu total, %zu partial, %zu pure\n",
+           r->total_funcs, r->partial_funcs, r->pure_funcs);
+    if (r->partial_name_count) {
+        printf("partial functions:");
+        for (size_t i = 0; i < r->partial_name_count; i++)
+            printf(" %s", r->partial_names[i]);
+        printf("\n");
+    }
+    printf("obligations: %zu vacuous (tainted)\n", r->vacuous_obligations);
+    printf("taint sites: %zu\n", r->taint_sites);
+    printf("covariance warnings: %zu\n", r->covariance_warnings);
 }
 
 int main(int argc, char **argv) {
@@ -275,9 +314,13 @@ int main(int argc, char **argv) {
     bool json_errors = false;
     bool proof = false;
     bool shape_report = false;
+    bool proof_report = false;
+    bool werror = false;
     const char **inc = malloc(sizeof(char *) * (size_t)argc);
     size_t ninc = 0;
-    if (!inc) return 1;
+    const char **suppress = malloc(sizeof(char *) * (size_t)argc);
+    size_t nsuppress = 0;
+    if (!inc || !suppress) return 1;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--emit-tokens") == 0) mode = MODE_TOKENS;
@@ -289,7 +332,11 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--json") == 0) json_errors = true;
         else if (strcmp(argv[i], "--proof") == 0) proof = true;
         else if (strcmp(argv[i], "--shape-report") == 0) shape_report = true;
+        else if (strcmp(argv[i], "--proof-report") == 0) proof_report = true;
         else if (strcmp(argv[i], "--keep-c") == 0) keep_c = true;
+        else if (strcmp(argv[i], "--werror") == 0) werror = true;
+        else if (strncmp(argv[i], "-Wno-", 5) == 0)
+            suppress[nsuppress++] = argv[i] + 5;
         else if (strcmp(argv[i], "-o") == 0) {
             if (++i == argc) usage();
             out_path = argv[i];
@@ -310,6 +357,11 @@ int main(int argc, char **argv) {
     DiagList diags;
     diag_init(&diags, NULL);
     diags.json = json_errors;
+    /* proof mode promotes warnings to errors (a proof must be honest), and
+     * -Wno-<code> silences specific warning codes */
+    diags.werror = werror || proof;
+    diags.suppress = suppress;
+    diags.suppress_count = nsuppress;
 
     /* the first two stages are per-file views: they never follow an import */
     if (mode == MODE_TOKENS || mode == MODE_AST) {
@@ -343,16 +395,34 @@ int main(int argc, char **argv) {
         fprintf(stderr, "dim-unresolved: %zu\n", dim_unresolved_count());
         dim_log_dump(stderr);
     }
+    /* a warning still compiles; only --werror (or proof mode) promotes it */
+    if (diags.werror && diag_warning_count(&diags)) errors++;
     if (mode == MODE_CHECK) {
-        if (diags.json) diag_render(&diags, stdout);
-        else if (errors == 0) printf("ok\n");
-        else diag_render(&diags, stderr);
+        if (proof_report) {
+            /* the report is the primary output; diagnostics stay on stderr so
+             * a --json report is a single clean JSON document */
+            emit_proof_report(proof_report_get(), json_errors);
+            if (!json_errors) {
+                diag_render(&diags, stderr);
+                if (errors == 0) printf("ok\n");
+            }
+        } else if (diags.json) {
+            diag_render(&diags, stdout);
+        } else {
+            diag_render(&diags, stderr);
+            if (errors == 0) printf("ok\n");
+        }
         return errors ? 1 : 0;
     }
+    if (proof_report) emit_proof_report(proof_report_get(), json_errors);
     if (errors) {
         diag_render(&diags, diags.json ? stdout : stderr);
         return 1;
     }
+    /* warnings are shown but do not stop the build (unless --werror bumped
+     * `errors` above) */
+    if (diag_warning_count(&diags) && !diags.json)
+        diag_render(&diags, stderr);
 
     if (mode == MODE_C) {
         codegen_program(stdout, prog, file);

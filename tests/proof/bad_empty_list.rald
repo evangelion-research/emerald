@@ -1,0 +1,9 @@
+# W2: `[]` with no contextual type is list[any] — a tainted type that proof
+# mode rejects, because a proof over an unknown element type proves nothing.
+# (Annotated, `xs: list[int] = []`, is fine: the annotation gives it a type.)
+def f() -> int {
+    xs = []
+    return len(xs)
+}
+
+print(f())
