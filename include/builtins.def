@@ -23,6 +23,9 @@
 /* --- core ---------------------------------------------------------------- */
 EM_BUILTIN(     "print",         NULL,               -1, false)
 EM_BUILTIN(     "eprint",        NULL,               -1, false)
+EM_BUILTIN_VOID("pprint",        "em_pprint",        1, false)
+EM_BUILTIN_VOID("pprint_err",    "em_pprint_err",    1, false)
+EM_BUILTIN(     "pp_format",     "em_pp_format",     1, true)
 EM_BUILTIN(     "range",         NULL,               -1, true)
 EM_BUILTIN(     "len",           "em_len",            1, true)
 EM_BUILTIN(     "str",           "em_str",            1, true)
@@ -62,6 +65,19 @@ EM_BUILTIN_VOID("write_err",     "em_write_err",      1, false)
 EM_BUILTIN_VOID("flush",         "em_flush",          0, false)
 EM_BUILTIN(     "now",           "em_now",            0, false)
 EM_BUILTIN_VOID("seed_rand",     "em_seed",           1, false)
+
+/* --- green threads and channels (docs/concurrency.md) -------------------- */
+EM_BUILTIN(     "spawn",         "em_spawn",          1, false)
+EM_BUILTIN(     "join",          "em_join",           1, false)
+EM_BUILTIN(     "task_done",     "em_task_done",      1, false)
+EM_BUILTIN(     "task_stats",    "em_task_stats",     0, false)
+EM_BUILTIN_VOID("task_yield",    "em_yield",          0, false)
+EM_BUILTIN_VOID("sleep",         "em_sleep",          1, false)
+EM_BUILTIN(     "chan",          "em_chan",           1, false)
+EM_BUILTIN_VOID("send",          "em_send",           2, false)
+EM_BUILTIN(     "recv",          "em_recv",           1, false)
+EM_BUILTIN_VOID("chan_close",    "em_close",          1, false)
+EM_BUILTIN(     "chan_len",      "em_chan_len",       1, false)
 
 /* --- tensor primitives (tensors.md) -------------------------------------- */
 EM_BUILTIN(     "zeros",         "em_tensor_zeros",   1, true)

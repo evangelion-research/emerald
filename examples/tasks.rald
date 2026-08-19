@@ -1,0 +1,81 @@
+# Green threads: a worker pool that fans work out and fans results back in.
+#
+# `spawn` starts a task, `chan` connects tasks, `join` waits for one. Tasks are
+# cooperative: exactly one runs at a time, and control changes hands only at a
+# channel operation, a sleep(), a join(), or an explicit task_yield(). Nothing
+# here needs a lock, because nothing here can be interrupted mid-statement.
+
+# --- the work ---------------------------------------------------------------
+
+def is_prime(n: int) -> bool {
+    if n < 2 { return False }
+    d = 2
+    while d * d <= n {
+        if n % d == 0 { return False }
+        d = d + 1
+    }
+    return True
+}
+
+# --- the pool ---------------------------------------------------------------
+#
+# Jobs go down one channel and results come back up another. The workers do not
+# know how many of them there are, and main does not know which worker answered
+# — the channels are the whole interface between them.
+
+jobs: Chan[int] = chan(8)
+out: Chan[str] = chan(8)
+
+def worker(name: str) -> int {
+    handled = 0
+    while True {
+        n = recv(jobs)               # None once main closes the channel
+        if n == None { break }
+        if is_prime(n) { send(out, name + " found " + str(n)) }
+        handled = handled + 1
+    }
+    return handled
+}
+
+# `spawn` takes a function of no arguments, so anything a task needs is
+# captured by the lambda that wraps it. Bind per-task values in a helper: the
+# loop variable is one cell shared by every iteration, so closing over it
+# directly would give every task the *last* value.
+def start(name: str) -> Task[int] {
+    return spawn(() => worker(name))
+}
+
+workers = []
+for i in range(0, 3) {
+    append(workers, start("worker" + str(i)))
+}
+
+# --- feeding the pool -------------------------------------------------------
+
+def feed() -> None {
+    for n in range(2, 40) { send(jobs, n) }
+    chan_close(jobs)                 # closing is how workers learn to stop
+}
+feeder = spawn(feed)
+
+# Drain results until every worker has finished. A worker that is still
+# running may yet produce a result, so the reader has to outlive them all:
+# main collects the counts first, then closes `out` and drains what is left.
+def collect() -> None {
+    while True {
+        line = recv(out)
+        if line == None { break }
+        print(line)
+    }
+}
+reader = spawn(collect)
+
+join(feeder)
+total = 0
+for w in workers { total = total + join(w) }
+chan_close(out)
+join(reader)
+
+print("checked", total, "numbers across", len(workers), "workers")
+stats = task_stats()
+print("tasks spawned:", stats.spawned, "context switches:", stats.switches)

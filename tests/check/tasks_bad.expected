@@ -1,0 +1,51 @@
+error[E_TYPE_ARG]: send() on Chan[int] cannot carry "not an int"
+  --> tests/check/tasks_bad.rald:4:5
+    |
+ 4 | send(ints, "not an int")        # E_TYPE_ARG: wrong element type
+   |     ^
+error[E_TYPE_ASSIGN]: cannot assign Chan[str] to 'ints' declared as Chan[int]
+  --> tests/check/tasks_bad.rald:7:1
+    |
+ 7 | ints = strs                     # E_TYPE_ASSIGN: Chan is invariant
+   | ^
+   = expected: Chan[int]
+   = actual:   Chan[str]
+error[E_TYPE_ARG]: spawn() takes a function of no arguments, got (int, int) -> int
+  --> tests/check/tasks_bad.rald:10:10
+     |
+ 10 | t = spawn(two)                  # E_TYPE_ARG: spawn takes a zero-arg function
+    |          ^
+error[E_TYPE_ASSIGN]: cannot assign int to 'bad' declared as str
+  --> tests/check/tasks_bad.rald:15:1
+     |
+ 15 | bad: str = join(u)              # E_TYPE_ASSIGN: join gives int
+    | ^
+   = expected: str
+   = actual:   int
+error[E_TYPE_ARG]: send() expects a channel, got Task[int]
+  --> tests/check/tasks_bad.rald:17:5
+     |
+ 17 | send(u, 1)                      # E_TYPE_ARG: a task is not a channel
+    |     ^
+error[E_TYPE_ARG]: join() expects a task, got Chan[int]
+  --> tests/check/tasks_bad.rald:18:5
+     |
+ 18 | join(ints)                      # E_TYPE_ARG: a channel is not a task
+    |     ^
+error[E_TYPE_ARG]: chan_close() expects a channel, got Task[int]
+  --> tests/check/tasks_bad.rald:19:11
+     |
+ 19 | chan_close(u)                   # E_TYPE_ARG: a task is not a channel
+    |           ^
+error[E_TYPE_ASSIGN]: cannot assign int | None to 'v' declared as int
+  --> tests/check/tasks_bad.rald:22:1
+     |
+ 22 | v: int = recv(ints)             # E_TYPE_ASSIGN: int | None, not int
+    | ^
+   = expected: int
+   = actual:   int | None
+error[E_TYPE_ARG]: sleep() expects a number of seconds, got "a while"
+  --> tests/check/tasks_bad.rald:23:6
+     |
+ 23 | sleep("a while")                # E_TYPE_ARG: seconds are a number
+    |      ^

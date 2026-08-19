@@ -14,13 +14,14 @@ native binary. Everything here is implemented and covered by `task test`.
 | [`type-system.md`](type-system.md) | Records, structural subtyping, `&`/`\|`, literal types, flow narrowing, `never`, generics, and where the checker is deliberately gradual. |
 | [`errors.md`](errors.md) | Expected errors: `error` declarations, `Result[T, E]`, `try` propagation, exhaustive `catch`, the Effect-style combinators, and what it all compiles to. |
 | [`core-calculus.md`](core-calculus.md) | The formal fragment: syntax, subtyping, narrowing, generics, and the shape/`Fin` rules as judgments — the paper-style spec the research track calls for. |
-| [`builtins.md`](builtins.md) | The fifty-two builtins, exactly — and the rule for what earns a place among them rather than a place in the library. |
+| [`builtins.md`](builtins.md) | The seventy-four builtins, exactly — and the rule for what earns a place among them rather than a place in the library. |
 | [`tensors.md`](tensors.md) | Phase 2 numerics: the tensor runtime model, dtypes, zero-copy views, and byte-aware GC. |
 | [`shapes.md`](shapes.md) | Phase 2 shapes: nominal `dim`s, the canonical-form solver, the per-op typing rules, `Fin[n]`, and the gradual boundary. |
 | [`../stdlib/SPEC.md`](../stdlib/SPEC.md) | The standard library: twelve modules written in Emerald, why it has Python's shape but not Python's signatures, and the compiler bugs writing it exposed. |
 | [`modules.md`](modules.md) | `import` / `from ... import`, path resolution order, privacy by leading underscore, name mangling, and the `emeraldc` CLI contract a package manager would drive. |
 | [`diagnostics.md`](diagnostics.md) | Error-code reference and the `--json` schema, designed to be fed back to a tool (or an LLM) that fixes the program and re-runs. |
 | [`architecture.md`](architecture.md) | How the compiler is built: stage-by-stage responsibilities, the `Value` model, the driver flags, the test layout. |
+| [`concurrency.md`](concurrency.md) | Green threads: `spawn`, channels, `join`, the cooperative one-token scheduler, deadlock reporting, and what the GC had to learn to have one shadow stack per task. |
 | [`gc.md`](gc.md) | The two-generation mark-and-sweep collector: object model, shadow-stack rooting, promotion, and measured numbers. |
 
 ## 2. The language as an instrument

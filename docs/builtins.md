@@ -1,9 +1,10 @@
 # Builtins
 
-Emerald has **sixty builtins**, compiled directly into calls on the runtime
-(`src/runtime.c`) rather than resolved through a module. They are always in
-scope in every module: thirty-five core builtins plus the twenty-five tensor
-primitives of Phase 2 (see the [Tensors](#tensors) section).
+Emerald has **seventy-four builtins**, compiled directly into calls on the
+runtime (`src/runtime.c`) rather than resolved through a module. They are
+always in scope in every module: thirty-eight core builtins, the eleven
+[green-thread](#green-threads) builtins, and the twenty-five tensor primitives
+of Phase 2 (see the [Tensors](#tensors) section).
 
 They are not the standard library — that lives in [`stdlib/`](../stdlib/) and is
 ordinary Emerald. A builtin exists only when it *cannot* be written in Emerald:
@@ -201,8 +202,10 @@ is checked against the list's, so `append([1], "s")` is a compile error.
 list-building function in the library was quadratic; `xs[len(xs)] = v` is a
 runtime index error, because `em_setindex` writes into existing storage.
 
-`append` mutates, so it is **not pure**, and neither is anything built with it.
-That is the library's single largest design constraint — see
+`append` mutates, so it is **not pure** — but with §1.2's local-mutation
+purity, a `pure` function may `append` to a list it allocated itself and has
+not let escape, so a function that builds its own `out: list[T] = []` is pure
+while one that mutates a parameter is not. See
 [`stdlib/SPEC.md`](../stdlib/SPEC.md) §1.2.
 
 ### `slice(seq, lo: int, hi: int)`
@@ -382,6 +385,43 @@ discharged statically.
 All of them except `randn` are **pure** and may be called from a `pure`
 function.
 
+## Green threads
+
+Eleven builtins for concurrency, described in full in
+[`concurrency.md`](concurrency.md). Tasks are cooperative: many tasks, one
+running at a time, switching only at the points below.
+
+| Builtin | Type | Meaning |
+|---|---|---|
+| `spawn(f)` | `(() -> T) -> Task[T]` | start `f` as a task; the spawner keeps running |
+| `join(t)` | `Task[T] -> T` | wait for a task and take its result |
+| `task_done(t)` | `Task[T] -> bool` | has it finished? never blocks |
+| `task_yield()` | `() -> None` | let another runnable task have a turn |
+| `sleep(secs)` | `float -> None` | suspend this task; others keep running |
+| `chan(cap)` | `int -> Chan[any]` | a channel; `cap` 0 is unbuffered |
+| `send(c, v)` | `(Chan[T], T) -> None` | block until a receiver or buffer space |
+| `recv(c)` | `Chan[T] -> T \| None` | block for a value; `None` once drained and closed |
+| `chan_close(c)` | `Chan[T] -> None` | no more sends; receivers drain, then get `None` |
+| `chan_len(c)` | `Chan[T] -> int` | buffered items waiting |
+| `task_stats()` | `() -> {spawned, alive, switches}` | counters, like `gc_stats()` |
+
+`Chan[T]` and `Task[T]` are types you can write in annotations. `chan()` cannot
+know its own element type, so it produces `Chan[any]` and the annotation is
+what pins it down:
+
+```rald
+jobs: Chan[int] = chan(8)
+send(jobs, "nope")     # error: send() on Chan[int] cannot carry "nope"
+```
+
+Because `recv` returns `T | None`, every receive loop has to consider the
+closed channel — the same shape as `read_line()`, and the reason a worker loop
+needs no separate "are we done" flag.
+
+None of these are pure: a task is an effect.
+
+---
+
 ## What is deliberately still missing
 
 No dict type, no string methods, no `sorted`, no `min`/`max`, no `abs`, no math
@@ -398,5 +438,6 @@ Still genuinely absent, with no library answer:
 
 | Missing | Why it matters |
 |---|---|
+| `select` over channels | a task can only wait on one channel at a time, so fan-in needs a dedicated collector task rather than one loop over several channels |
 | bitwise operators | `\|` and `&` are type-level only, so there is no xor. `dict.hash_str` is djb2 rather than the FNV-1a the spec called for |
 | integer division | `/` is float division, so `math.floor_div` rounds through a double and is exact only under 2^53 |

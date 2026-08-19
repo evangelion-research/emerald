@@ -96,7 +96,7 @@ has a switch:
   be shown to descend must say `partial`, which marks it as *not* a proof.
 - **`pure`** — `def forward(x: T) -> U pure` promises no `print`, no `rand`,
   no file or process IO, and no impure callee (a nested `def` inside a pure
-  function must itself be pure). Thirty-eight of the fifty-two builtins are
+  function must itself be pure). Thirty-nine of the seventy-four builtins are
   pure and may be called from pure code, as is roughly half the standard
   library — everything that reads rather than builds.
 - **`--proof`** — `emeraldc --check --proof f.rald` bans `any` and `partial`.
@@ -173,6 +173,27 @@ obligation (`matmul`, `reshape`). `append` is the load-bearing core one —
 without amortized in-place growth, every list built in a loop is quadratic.
 See [`docs/builtins.md`](docs/builtins.md), [`docs/tensors.md`](docs/tensors.md),
 and [`docs/shapes.md`](docs/shapes.md).
+
+## Green threads
+
+`spawn` starts a cooperative task, `chan` connects tasks, `join` waits for one.
+One task runs at a time and control changes hands only at a channel operation,
+a `sleep`, a `join`, or an explicit `task_yield()` — so nothing is interrupted
+mid-statement and the language needs no locks.
+
+```rald
+jobs: Chan[int] = chan(8)
+w = spawn(() => worker("w0"))
+for n in range(2, 40) { send(jobs, n) }
+chan_close(jobs)              # receivers drain, then recv() gives None
+print("handled", join(w))
+```
+
+`Chan[T]` and `Task[T]` are checked at both ends: `send` must carry a `T`,
+`recv` yields `T | None` (the closed channel is in the type), and `join` hands
+back what the task returned. Blocking forever is reported as a deadlock rather
+than hanging. See [`docs/concurrency.md`](docs/concurrency.md) and
+[`examples/tasks.rald`](examples/tasks.rald).
 
 ## Standard library
 

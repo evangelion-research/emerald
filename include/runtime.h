@@ -22,7 +22,8 @@
 #include <stdint.h>
 
 typedef enum { V_NONE, V_BOOL, V_INT, V_FLOAT, V_OBJ, V_STR } VTag;
-typedef enum { O_STR, O_LIST, O_REC, O_FUNC, O_CELL, O_TENSOR } OTag;
+typedef enum { O_STR, O_LIST, O_REC, O_FUNC, O_CELL, O_TENSOR,
+               O_CHAN, O_TASK } OTag;
 
 /* Tensor dtypes. Only f32 and f64 are implemented in Phase 2; the other tags
  * are reserved so the tag width is settled before Phase 4 (quantized models)
@@ -34,6 +35,8 @@ typedef enum {
 } DType;
 
 typedef struct Obj Obj;
+typedef struct Chan Chan;   /* see the scheduler section of runtime.c */
+typedef struct Task Task;
 
 typedef struct Value {
     VTag tag;
@@ -88,6 +91,12 @@ struct Obj {
             void *data;         /* numel * dtype_size bytes; NULL for a view */
             Obj *base;          /* owning tensor when this is a view */
         } tensor;
+        /* O_CHAN / O_TASK: green-thread handles. The mutable state lives in a
+         * side struct so the Obj header stays small; the GC traces the Values
+         * they hold (buffered items, a task's function and result) and frees
+         * the side struct when the handle dies. */
+        Chan *chan;
+        Task *task;
     } as;
 };
 
@@ -99,7 +108,9 @@ typedef struct RootFrame {
     struct RootFrame *prev;
 } RootFrame;
 
-extern RootFrame *rt_roots;
+/* One shadow stack per green thread: each task pushes and pops its own
+ * frames, and the GC walks every live task's stack (see rt_sched_mark). */
+extern _Thread_local RootFrame *rt_roots;
 
 static inline void rt_push_frame(RootFrame *f, Value *slots, size_t count) {
     f->slots = slots;
@@ -123,9 +134,11 @@ void rt_gc_collect(void);
 void rt_fatal(const char *fmt, ...);
 Value em_gc_collect(void);  /* force a major collection; returns None */
 
-/* source location of the statement currently executing, for runtime errors */
-extern const char *rt_cur_file;
-extern int rt_cur_line;
+/* Source location of the statement currently executing, for runtime errors.
+ * Per task: with green threads several tasks are mid-statement at once, and a
+ * runtime error must name the line of the task that hit it. */
+extern _Thread_local const char *rt_cur_file;
+extern _Thread_local int rt_cur_line;
 
 Value em_str_new(const char *cstr);          /* copy of a C string */
 Value em_list_litn(size_t n, ...);           /* n Values, already rooted by caller */
@@ -187,6 +200,9 @@ Value em_input(Value prompt);        /* prompt, then a line (None at EOF) */
 void  em_write_out(Value v);         /* one value to stdout, no newline */
 void  em_write_err(Value v);         /* one value to stderr, no newline */
 void  em_flush(void);                /* flush stdout and stderr */
+void  em_pprint(Value v);            /* pretty print to stdout, newline */
+void  em_pprint_err(Value v);        /* pretty print to stderr, newline */
+Value em_pp_format(Value v);         /* the pretty rendering, as a string */
 Value em_now(void);                  /* monotonic seconds; only diffs mean anything */
 void  em_seed(Value n);              /* reseed the PRNG for reproducibility */
 void  em_exit(Value code);           /* terminate with an exit status */
@@ -207,6 +223,22 @@ Value em_reduce(Value fn, Value acc, Value xs);
 
 /* `f >> g`: a closure h(x) = g(f(x)) */
 Value em_compose(Value f, Value g);
+
+/* --- green threads and channels (concurrency.md) -------------------------
+ * Tasks are cooperatively scheduled: exactly one runs at a time and switches
+ * happen only at the blocking points below, so the precise GC and the
+ * generated code need no locking. `spawn` takes a zero-argument closure. */
+Value em_spawn(Value fn);          /* start a task; returns a Task handle */
+Value em_join(Value task);         /* wait for a task, yielding its result */
+void  em_yield(void);              /* give other runnable tasks a turn */
+void  em_sleep(Value secs);        /* suspend this task for `secs` seconds */
+Value em_task_done(Value task);    /* has the task finished? (never blocks) */
+Value em_task_stats(void);         /* {spawned, alive, switches}, like gc_stats */
+Value em_chan(Value cap);          /* a channel; cap 0 == unbuffered */
+void  em_send(Value ch, Value v);  /* block until a receiver or buffer space */
+Value em_recv(Value ch);           /* block for a value; None once drained */
+void  em_close(Value ch);          /* close: further sends are a fatal error */
+Value em_chan_len(Value ch);       /* buffered items waiting to be received */
 
 /* --- tensors (Phase 2 numerics) -----------------------------------------
  * Whole-array runtime calls over an unboxed float buffer (see tensors.md).

@@ -1,0 +1,75 @@
+# Green threads: spawn, channels, join. Everything here is deterministic —
+# the scheduler runs one task at a time and switches only at the points the
+# program names, so the output order is a property of the program, not of the
+# machine it runs on.
+
+# --- a worker pipeline over an unbuffered channel -------------------------
+
+def worker(id: int, out: Chan[int]) -> None {
+    for i in range(0, 3) {
+        send(out, id * 10 + i)
+    }
+}
+
+# Each spawn gets its own `id`: the loop variable is one cell shared by every
+# iteration, so a task that closed over it directly would see the last value.
+def start(id: int, out: Chan[int]) -> Task[None] {
+    return spawn(() => worker(id, out))
+}
+
+results: Chan[int] = chan(0)
+ts = []
+for id in range(1, 4) {
+    append(ts, start(id, results))
+}
+for _i in range(0, 9) {
+    write_out(str(recv(results)) + " ")
+}
+print("")
+for t in ts { join(t) }
+
+# --- a buffered channel, closed when the producer is done -----------------
+
+items: Chan[str] = chan(2)
+
+def produce() -> int {
+    for i in range(0, 5) { send(items, "item" + str(i)) }
+    chan_close(items)
+    return 5
+}
+
+p = spawn(produce)
+seen = 0
+while True {
+    v = recv(items)          # None once the channel is drained and closed
+    if v == None { break }
+    seen = seen + 1
+}
+print("received", seen, "produced", join(p))
+print("recv after close:", recv(items))
+
+# --- join hands back the task's return value ------------------------------
+
+def square(n: int) -> int {
+    task_yield()             # prove the value survives a switch
+    return n * n
+}
+
+sq = []
+for n in range(1, 5) { append(sq, spawn(() => square(n))) }
+total = 0
+for t in sq { total = total + join(t) }
+print("squares of the last n:", total, "done:", task_done(sq[0]))
+
+# --- sleep orders tasks by time -------------------------------------------
+
+def nap(name: str, secs: float) -> str {
+    sleep(secs)
+    return name
+}
+slow = spawn(() => nap("slow", 0.02))
+fast = spawn(() => nap("fast", 0.001))
+print(join(fast), join(slow))
+
+stats = task_stats()
+print("spawned", stats.spawned, "alive", stats.alive)

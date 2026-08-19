@@ -1,0 +1,98 @@
+[
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARG",
+    "file": "tests/check/tasks_bad.rald",
+    "line": 4,
+    "column": 5,
+    "message": "send() on Chan[int] cannot carry \"not an int\"",
+    "source_line": "send(ints, \"not an int\")        # E_TYPE_ARG: wrong element type"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ASSIGN",
+    "file": "tests/check/tasks_bad.rald",
+    "line": 7,
+    "column": 1,
+    "message": "cannot assign Chan[str] to 'ints' declared as Chan[int]",
+    "expected": "Chan[int]",
+    "actual": "Chan[str]",
+    "source_line": "ints = strs                     # E_TYPE_ASSIGN: Chan is invariant"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARG",
+    "file": "tests/check/tasks_bad.rald",
+    "line": 10,
+    "column": 10,
+    "message": "spawn() takes a function of no arguments, got (int, int) -> int",
+    "source_line": "t = spawn(two)                  # E_TYPE_ARG: spawn takes a zero-arg function"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ASSIGN",
+    "file": "tests/check/tasks_bad.rald",
+    "line": 15,
+    "column": 1,
+    "message": "cannot assign int to 'bad' declared as str",
+    "expected": "str",
+    "actual": "int",
+    "source_line": "bad: str = join(u)              # E_TYPE_ASSIGN: join gives int"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARG",
+    "file": "tests/check/tasks_bad.rald",
+    "line": 17,
+    "column": 5,
+    "message": "send() expects a channel, got Task[int]",
+    "source_line": "send(u, 1)                      # E_TYPE_ARG: a task is not a channel"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARG",
+    "file": "tests/check/tasks_bad.rald",
+    "line": 18,
+    "column": 5,
+    "message": "join() expects a task, got Chan[int]",
+    "source_line": "join(ints)                      # E_TYPE_ARG: a channel is not a task"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARG",
+    "file": "tests/check/tasks_bad.rald",
+    "line": 19,
+    "column": 11,
+    "message": "chan_close() expects a channel, got Task[int]",
+    "source_line": "chan_close(u)                   # E_TYPE_ARG: a task is not a channel"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ASSIGN",
+    "file": "tests/check/tasks_bad.rald",
+    "line": 22,
+    "column": 1,
+    "message": "cannot assign int | None to 'v' declared as int",
+    "expected": "int",
+    "actual": "int | None",
+    "source_line": "v: int = recv(ints)             # E_TYPE_ASSIGN: int | None, not int"
+  },
+  {
+    "kind": "type",
+    "severity": "error",
+    "code": "E_TYPE_ARG",
+    "file": "tests/check/tasks_bad.rald",
+    "line": 23,
+    "column": 6,
+    "message": "sleep() expects a number of seconds, got \"a while\"",
+    "source_line": "sleep(\"a while\")                # E_TYPE_ARG: seconds are a number"
+  }
+]

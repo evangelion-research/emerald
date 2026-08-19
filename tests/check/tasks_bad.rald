@@ -1,0 +1,23 @@
+# Channel and task handles are typed: Chan[T] carries T, Task[T] finishes with T.
+
+ints: Chan[int] = chan(0)
+send(ints, "not an int")        # E_TYPE_ARG: wrong element type
+
+strs: Chan[str] = chan(1)
+ints = strs                     # E_TYPE_ASSIGN: Chan is invariant
+
+def two(a: int, b: int) -> int { return a + b }
+t = spawn(two)                  # E_TYPE_ARG: spawn takes a zero-arg function
+
+def one() -> int { return 1 }
+u = spawn(one)
+n: int = join(u)                # fine: Task[int]
+bad: str = join(u)              # E_TYPE_ASSIGN: join gives int
+
+send(u, 1)                      # E_TYPE_ARG: a task is not a channel
+join(ints)                      # E_TYPE_ARG: a channel is not a task
+chan_close(u)                   # E_TYPE_ARG: a task is not a channel
+
+# recv() has to admit the drained-and-closed case, like read_line()
+v: int = recv(ints)             # E_TYPE_ASSIGN: int | None, not int
+sleep("a while")                # E_TYPE_ARG: seconds are a number

@@ -2,6 +2,7 @@
 #include "runtime.h"
 
 #include <inttypes.h>
+#include <pthread.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -12,7 +13,45 @@
 /* Strings of SSO_MAX bytes or fewer live inline in the Value (see runtime.h). */
 #define SSO_MAX 7
 
-RootFrame *rt_roots = NULL;
+_Thread_local RootFrame *rt_roots = NULL;
+
+/* Every green thread has its own shadow stack; the scheduler owns the list of
+ * live tasks, so root marking goes through it (see the scheduler section). */
+static void sch_mark(bool minor);
+static void sch_init(void);
+
+/* A channel is a ring buffer of `cap` slots plus the two wait queues. An
+ * unbuffered channel (cap 0) has no slots at all, so a send and a receive
+ * have to meet: whichever arrives first parks, and the second one hands the
+ * value over directly and wakes it. */
+struct Chan {
+    Value *buf;
+    size_t cap, len, head;
+    bool closed;
+    Task *sendq, *sendq_tail;
+    Task *recvq, *recvq_tail;
+};
+
+typedef enum { T_RUNNABLE, T_BLOCKED, T_SLEEPING, T_DONE } TState;
+
+struct Task {
+    Obj *handle;            /* the O_TASK object this Task backs */
+    pthread_t thread;
+    TState state;
+    /* GC-visible values. `xfer` is the value in flight across a channel
+     * rendezvous: the sender parks it here until a receiver takes it. */
+    Value fn, result, xfer;
+    bool xfer_ok;           /* recv woke with a value (false: channel closed) */
+    bool send_failed;       /* the channel closed while this send was parked */
+    RootFrame **roots;      /* &rt_roots of this task's thread */
+    const char *src_file;   /* the spawner's source file: the child inherits it
+                             * so a runtime error still names a file even
+                             * before the task crosses a file boundary */
+    Task *qnext;            /* run queue, or one wait queue (never both) */
+    Task *joinq;            /* tasks blocked in join() on this one */
+    Task *next;             /* every task that has not finished */
+};
+
 
 /* xorshift64* PRNG; seeded from the clock at startup */
 static uint64_t rng_state = 88172645463325252ULL;
@@ -43,10 +82,11 @@ static size_t gc_young_bytes_threshold = 4u << 20;   /* 4 MiB: collect large buf
 static size_t gc_old_bytes_threshold = 4u << 20;
 static size_t gc_collections = 0;  /* total cycles (minor + major) */
 
-const char *rt_cur_file = NULL; /* set by generated code; for runtime errors */
-int rt_cur_line = 0;
+_Thread_local const char *rt_cur_file = NULL; /* set by generated code */
+_Thread_local int rt_cur_line = 0;
 
 void rt_init(void) {
+    sch_init();
     uint64_t t = (uint64_t)time(NULL) ^ ((uint64_t)clock() << 32);
     rng_state = t ? t : 88172645463325252ULL;
 }
@@ -104,6 +144,18 @@ static void gc_mark_obj(Obj *o, bool minor) {
         /* a view keeps its owner alive; the owner owns the data buffer */
         if (o->as.tensor.base) gc_mark_obj(o->as.tensor.base, minor);
         break;
+    case O_CHAN:
+        /* buffered items; values parked in a blocked sender are reached
+         * through that sender's task instead */
+        for (size_t i = 0; i < o->as.chan->len; i++)
+            gc_mark_value(o->as.chan->buf[(o->as.chan->head + i) % o->as.chan->cap],
+                          minor);
+        break;
+    case O_TASK:
+        gc_mark_value(o->as.task->fn, minor);
+        gc_mark_value(o->as.task->result, minor);
+        gc_mark_value(o->as.task->xfer, minor);
+        break;
     }
 }
 
@@ -112,9 +164,7 @@ static void gc_mark_value(Value v, bool minor) {
 }
 
 static void gc_mark_roots(bool minor) {
-    for (RootFrame *f = rt_roots; f; f = f->prev)
-        for (size_t i = 0; i < f->count; i++)
-            gc_mark_value(f->slots[i], minor);
+    sch_mark(minor);
 }
 
 static void gc_free_obj(Obj *o) {
@@ -128,6 +178,14 @@ static void gc_free_obj(Obj *o) {
         free(o->as.tensor.dims);
         free(o->as.tensor.strides);
         if (!o->as.tensor.base) free(o->as.tensor.data); /* views don't own */
+        break;
+    case O_CHAN:
+        free(o->as.chan->buf);
+        free(o->as.chan);
+        break;
+    case O_TASK:
+        /* only reachable once the task has finished and left the live list */
+        free(o->as.task);
         break;
     }
     /* release the object's bytes from its generation's counter */
@@ -355,6 +413,8 @@ static const char *type_name(Value v) {
         case O_FUNC: return "function";
         case O_CELL: return "cell";
         case O_TENSOR: return "tensor";
+        case O_CHAN: return "channel";
+        case O_TASK: return "task";
         }
     }
     return "?";
@@ -480,9 +540,101 @@ static void write_value(SB *sb, Value v, bool repr) {
             sb_puts(sb, "]]");
             break;
         }
+        case O_CHAN: sb_puts(sb, "<channel>"); break;
+        case O_TASK: sb_puts(sb, "<task>"); break;
         }
         break;
     }
+}
+
+/* ---------------------------------------------------------------------- */
+/* pretty printing (pprint / pp_format)                                    */
+/* ---------------------------------------------------------------------- */
+/*
+ * `pprint` renders a value the way a human wants to read it: like `str`, but
+ * a list or record that would not fit on the line breaks across lines, one
+ * element/field per line, PP_INDENT spaces deeper per nesting level. Strings
+ * are always quoted, exactly like Python's pprint. Everything that is not a
+ * list or record is atomic and never wraps.
+ */
+#define PP_INDENT 2
+#define PP_WIDTH  80
+
+static void write_pretty(SB *sb, Value v, int depth, int col);
+
+static void write_pretty(SB *sb, Value v, int depth, int col) {
+    if (!is_list(v) && !is_rec(v)) { /* atomic: never breaks */
+        write_value(sb, v, true);
+        return;
+    }
+    /* does the whole thing fit on the current line? */
+    SB tmp = {0};
+    write_value(&tmp, v, true);
+    bool fits = tmp.len + (size_t)col <= PP_WIDTH;
+    free(tmp.buf);
+    if (fits) {
+        write_value(sb, v, true);
+        return;
+    }
+    if (is_list(v)) {
+        Obj *o = v.as.o;
+        sb_puts(sb, "[");
+        for (size_t i = 0; i < o->as.list.len; i++) {
+            if (i) sb_puts(sb, ",");
+            sb_puts(sb, "\n");
+            int cc = (depth + 1) * PP_INDENT;
+            for (int d = 0; d < cc; d++) sb_puts(sb, " ");
+            write_pretty(sb, o->as.list.items[i], depth + 1, cc);
+        }
+        if (o->as.list.len) {
+            sb_puts(sb, "\n");
+            for (int d = 0; d < depth * PP_INDENT; d++) sb_puts(sb, " ");
+        }
+        sb_puts(sb, "]");
+        return;
+    }
+    /* record */
+    Obj *o = v.as.o;
+    sb_puts(sb, "{");
+    for (size_t i = 0; i < o->as.rec.len; i++) {
+        if (i) sb_puts(sb, ",");
+        sb_puts(sb, "\n");
+        int cc = (depth + 1) * PP_INDENT;
+        for (int d = 0; d < cc; d++) sb_puts(sb, " ");
+        sb_puts(sb, o->as.rec.keys[i]);
+        sb_puts(sb, ": ");
+        write_pretty(sb, o->as.rec.vals[i], depth + 1,
+                     cc + (int)strlen(o->as.rec.keys[i]) + 2);
+    }
+    if (o->as.rec.len) {
+        sb_puts(sb, "\n");
+        for (int d = 0; d < depth * PP_INDENT; d++) sb_puts(sb, " ");
+    }
+    sb_puts(sb, "}");
+}
+
+void em_pprint(Value v) {
+    SB sb = {0};
+    write_pretty(&sb, v, 0, 0);
+    sb_puts(&sb, "\n");
+    fwrite(sb.buf ? sb.buf : "\n", 1, sb.len, stdout);
+    free(sb.buf);
+}
+
+void em_pprint_err(Value v) {
+    SB sb = {0};
+    write_pretty(&sb, v, 0, 0);
+    sb_puts(&sb, "\n");
+    fwrite(sb.buf ? sb.buf : "\n", 1, sb.len, stderr);
+    free(sb.buf);
+}
+
+Value em_pp_format(Value v) {
+    SB sb = {0};
+    write_pretty(&sb, v, 0, 0);
+    Value s = str_copy(sb.buf ? sb.buf : "", sb.len);
+    free(sb.buf);
+    return s;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -617,6 +769,7 @@ static bool value_eq(Value a, Value b) {
     case O_STR:  break; /* unreachable: both-strings handled above */
     case O_FUNC: return x == y; /* functions compare by identity */
     case O_TENSOR: return x == y; /* tensors compare by identity */
+    case O_CHAN: case O_TASK: return x == y; /* handles compare by identity */
     case O_CELL: return value_eq(x->as.cell.val, y->as.cell.val);
     case O_LIST:
         if (x->as.list.len != y->as.list.len) return false;
@@ -688,6 +841,7 @@ bool em_truthy(Value v) {
         case O_FUNC: return true; /* functions are always truthy */
         case O_CELL: return em_truthy(v.as.o->as.cell.val);
         case O_TENSOR: return true; /* tensors are always truthy */
+        case O_CHAN: case O_TASK: return true; /* handles are always truthy */
         }
     }
     return true;
@@ -1278,6 +1432,454 @@ static Value call_closure_n(Value fn, Value *args, size_t n) {
     if (c->as.func.arity != n)
         rt_fatal("function expects %zu argument(s), got %zu", c->as.func.arity, n);
     return c->as.func.fn(c->as.func.env, args);
+}
+
+/* ---------------------------------------------------------------------- */
+/* green threads: the cooperative scheduler                                */
+/* ---------------------------------------------------------------------- */
+
+/* Emerald tasks are green threads: many tasks, one at a time. Each task gets
+ * a real OS thread for its C stack (the generated code is ordinary C, so a
+ * task needs a stack it can block on), but a single scheduling token decides
+ * which one runs. A task holds the token from the moment it is resumed until
+ * it reaches a switch point -- spawn's child start, yield(), sleep(), join(),
+ * or a channel operation that cannot complete immediately -- so there is
+ * never more than one thread inside the runtime.
+ *
+ * That is what keeps the rest of the runtime unchanged: no locks around the
+ * allocator, no atomics in the write barrier, and a GC that still stops
+ * exactly one mutator. The only thing the collector has to learn is that
+ * there are now several shadow stacks instead of one, so `rt_roots` is
+ * thread-local and every live task registers the address of its own head
+ * pointer (see gc_mark_roots).
+ *
+ * The token is handed over through one mutex and one broadcast condition
+ * variable. A task may take it when it is at the head of the run queue and
+ * nobody holds it; every state change broadcasts, and each waiter re-tests
+ * its own predicate. That is O(waiters) wakeups per switch, which is the
+ * right trade here: switches happen at channel granularity, not per
+ * instruction, and the alternative (a condvar per task) buys throughput at
+ * the cost of a much subtler handoff. */
+
+static pthread_mutex_t sch_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t sch_cv = PTHREAD_COND_INITIALIZER;
+static Task *sch_all = NULL;            /* every task that is not T_DONE */
+static Task *sch_runq = NULL, *sch_runq_tail = NULL;
+static Task *sch_cur = NULL;            /* the token holder, or NULL */
+static size_t sch_alive = 0, sch_sleepers = 0;
+static size_t sch_spawned = 0, sch_switches = 0;   /* for gc_stats() */
+static Task sch_main;                   /* the task the program starts on */
+
+static _Thread_local Task *sch_self = NULL;
+
+static double mono_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
+
+static void runq_push(Task *t) {
+    t->qnext = NULL;
+    if (sch_runq_tail) sch_runq_tail->qnext = t;
+    else sch_runq = t;
+    sch_runq_tail = t;
+}
+
+static Task *runq_pop(void) {
+    Task *t = sch_runq;
+    if (!t) return NULL;
+    sch_runq = t->qnext;
+    if (!sch_runq) sch_runq_tail = NULL;
+    t->qnext = NULL;
+    return t;
+}
+
+/* Nobody holds the token, nothing is runnable, and nothing will ever become
+ * runnable on its own: every remaining task is parked on a channel or a join
+ * that no other task can complete. Report it the way Go does rather than
+ * hanging forever. */
+static void sch_check_deadlock(void) {
+    if (sch_cur == NULL && sch_runq == NULL && sch_sleepers == 0 && sch_alive > 0)
+        rt_fatal("all %zu task(s) are blocked forever - deadlock", sch_alive);
+}
+
+/* Give up the token. The caller has already parked itself wherever it needs
+ * to be found again (a run queue, a channel's wait queue, a join queue). */
+static void sch_release(void) {
+    sch_cur = NULL;
+    sch_switches++;
+    pthread_cond_broadcast(&sch_cv);
+    sch_check_deadlock();
+}
+
+/* Wait for the token. `self` must be RUNNABLE and sitting in the run queue. */
+static void sch_acquire(Task *self) {
+    for (;;) {
+        if (sch_cur == NULL && sch_runq == self) {
+            runq_pop();
+            sch_cur = self;
+            return;
+        }
+        pthread_cond_wait(&sch_cv, &sch_mu);
+    }
+}
+
+/* Make a parked task runnable again. Called by whoever satisfies its wait. */
+static void sch_wake(Task *t) {
+    t->state = T_RUNNABLE;
+    runq_push(t);
+    pthread_cond_broadcast(&sch_cv);
+}
+
+/* Park the running task. The caller has linked `self` into the wait queue
+ * that some other task will wake it from, and holds sch_mu. */
+static void sch_block(Task *self) {
+    self->state = T_BLOCKED;
+    sch_release();
+    while (self->state != T_RUNNABLE) pthread_cond_wait(&sch_cv, &sch_mu);
+    sch_acquire(self);
+}
+
+static void sch_yield_locked(Task *self) {
+    runq_push(self);
+    sch_release();
+    sch_acquire(self);
+}
+
+/* GC: walk every task's shadow stack and the values the scheduler itself
+ * holds on their behalf. Those values (`fn`, `result`, `xfer`) are marked
+ * here as roots on every collection, minor ones included, so storing into
+ * them needs no write barrier -- unlike a channel's buffer, which is reached
+ * through the channel object and therefore does. Only the token holder ever collects, and every other
+ * task is parked at a switch point, so all of these are quiescent. */
+static void sch_mark(bool minor) {
+    for (Task *t = sch_all; t; t = t->next) {
+        for (RootFrame *f = *t->roots; f; f = f->prev)
+            for (size_t i = 0; i < f->count; i++)
+                gc_mark_value(f->slots[i], minor);
+        gc_mark_value(t->fn, minor);
+        gc_mark_value(t->result, minor);
+        gc_mark_value(t->xfer, minor);
+        if (t->handle) gc_mark_obj(t->handle, minor);
+    }
+}
+
+static void sch_init(void) {
+    memset(&sch_main, 0, sizeof sch_main);
+    sch_main.state = T_RUNNABLE;
+    sch_main.fn = sch_main.result = sch_main.xfer = em_none();
+    sch_main.roots = &rt_roots;
+    sch_main.thread = pthread_self();
+    sch_self = &sch_main;
+    sch_all = &sch_main;
+    sch_alive = 1;
+    sch_cur = &sch_main;
+}
+
+/* --- channels ------------------------------------------------------------ */
+
+/* The wait queues are plain FIFOs, so a channel is fair: the longest-waiting
+ * sender or receiver is the one a rendezvous picks. */
+static void chanq_push(Task **head, Task **tail, Task *t) {
+    t->qnext = NULL;
+    if (*tail) (*tail)->qnext = t;
+    else *head = t;
+    *tail = t;
+}
+
+static Task *chanq_pop(Task **head, Task **tail) {
+    Task *t = *head;
+    if (!t) return NULL;
+    *head = t->qnext;
+    if (!*head) *tail = NULL;
+    t->qnext = NULL;
+    return t;
+}
+
+static Obj *as_chan(Value v, const char *who) {
+    if (!(v.tag == V_OBJ && v.as.o->tag == O_CHAN))
+        rt_fatal("%s() expects a channel, got %s", who, type_name(v));
+    return v.as.o;
+}
+
+static Obj *as_task(Value v, const char *who) {
+    if (!(v.tag == V_OBJ && v.as.o->tag == O_TASK))
+        rt_fatal("%s() expects a task, got %s", who, type_name(v));
+    return v.as.o;
+}
+
+Value em_chan(Value cap) {
+    if (cap.tag != V_INT || cap.as.i < 0)
+        rt_fatal("chan() capacity must be a non-negative int");
+    size_t n = (size_t)cap.as.i;
+    Value *buf = n ? xmalloc(sizeof(Value) * n) : NULL;
+    Chan *c = xmalloc(sizeof(Chan));
+    memset(c, 0, sizeof *c);
+    c->buf = buf;
+    c->cap = n;
+    Obj *o = rt_obj_new(O_CHAN);   /* may collect: nothing live is unrooted */
+    o->as.chan = c;
+    obj_charge(o, sizeof(Chan) + sizeof(Value) * n);
+    return obj_val(o);
+}
+
+void em_send(Value chv, Value v) {
+    Obj *o = as_chan(chv, "send");
+    Chan *c = o->as.chan;
+    Task *self = sch_self;
+    pthread_mutex_lock(&sch_mu);
+    if (c->closed) {
+        pthread_mutex_unlock(&sch_mu);
+        rt_fatal("send on a closed channel");
+    }
+    Task *r = chanq_pop(&c->recvq, &c->recvq_tail);
+    if (r) {                       /* a receiver is parked: hand it over */
+        r->xfer = v;
+        r->xfer_ok = true;
+        sch_wake(r);
+        pthread_mutex_unlock(&sch_mu);
+        return;
+    }
+    if (c->len < c->cap) {         /* room in the buffer */
+        c->buf[(c->head + c->len) % c->cap] = v;
+        c->len++;
+        gc_write_barrier(o, v);
+        pthread_mutex_unlock(&sch_mu);
+        return;
+    }
+    self->xfer = v;                /* park until a receiver takes it */
+    self->send_failed = false;
+    chanq_push(&c->sendq, &c->sendq_tail, self);
+    sch_block(self);
+    bool failed = self->send_failed;
+    self->xfer = em_none();
+    pthread_mutex_unlock(&sch_mu);
+    if (failed) rt_fatal("send on a closed channel");
+}
+
+Value em_recv(Value chv) {
+    Obj *o = as_chan(chv, "recv");
+    Chan *c = o->as.chan;
+    Task *self = sch_self;
+    pthread_mutex_lock(&sch_mu);
+    if (c->len > 0) {              /* take from the buffer, then refill it */
+        Value v = c->buf[c->head];
+        c->head = (c->head + 1) % c->cap;
+        c->len--;
+        Task *s = chanq_pop(&c->sendq, &c->sendq_tail);
+        if (s) {
+            c->buf[(c->head + c->len) % c->cap] = s->xfer;
+            c->len++;
+            gc_write_barrier(o, s->xfer);
+            sch_wake(s);
+        }
+        pthread_mutex_unlock(&sch_mu);
+        return v;
+    }
+    Task *s = chanq_pop(&c->sendq, &c->sendq_tail);
+    if (s) {                       /* unbuffered rendezvous */
+        Value v = s->xfer;
+        sch_wake(s);
+        pthread_mutex_unlock(&sch_mu);
+        return v;
+    }
+    if (c->closed) {               /* drained and closed: None, forever */
+        pthread_mutex_unlock(&sch_mu);
+        return em_none();
+    }
+    self->xfer = em_none();
+    self->xfer_ok = false;
+    chanq_push(&c->recvq, &c->recvq_tail, self);
+    sch_block(self);
+    Value v = self->xfer_ok ? self->xfer : em_none();
+    self->xfer = em_none();
+    pthread_mutex_unlock(&sch_mu);
+    return v;
+}
+
+void em_close(Value chv) {
+    Obj *o = as_chan(chv, "close");
+    Chan *c = o->as.chan;
+    pthread_mutex_lock(&sch_mu);
+    if (c->closed) {
+        pthread_mutex_unlock(&sch_mu);
+        rt_fatal("close of an already closed channel");
+    }
+    c->closed = true;
+    for (Task *t; (t = chanq_pop(&c->recvq, &c->recvq_tail)) != NULL; ) {
+        t->xfer_ok = false;        /* woken receivers see the drained channel */
+        sch_wake(t);
+    }
+    for (Task *t; (t = chanq_pop(&c->sendq, &c->sendq_tail)) != NULL; ) {
+        t->send_failed = true;     /* a parked send on a closed channel is fatal */
+        sch_wake(t);
+    }
+    pthread_mutex_unlock(&sch_mu);
+}
+
+Value em_chan_len(Value chv) {
+    Obj *o = as_chan(chv, "chan_len");
+    pthread_mutex_lock(&sch_mu);
+    int64_t n = (int64_t)o->as.chan->len;
+    pthread_mutex_unlock(&sch_mu);
+    return em_int(n);
+}
+
+/* --- spawn / join / yield / sleep ---------------------------------------- */
+
+static void *task_trampoline(void *arg) {
+    Task *self = arg;
+    sch_self = self;
+    rt_cur_file = self->src_file;
+    pthread_mutex_lock(&sch_mu);
+    self->roots = &rt_roots;       /* this thread's own shadow stack */
+    sch_acquire(self);             /* wait our turn before touching the heap */
+    pthread_mutex_unlock(&sch_mu);
+
+    Value fn = self->fn;
+    RootFrame fr;
+    rt_push_frame(&fr, &self->result, 1);
+    self->result = em_call(fn, 0);
+    rt_pop_frame();
+
+    pthread_mutex_lock(&sch_mu);
+    self->state = T_DONE;
+    self->fn = em_none();
+    for (Task *t = self->joinq; t; ) {
+        Task *n = t->qnext;
+        t->xfer = self->result;
+        t->xfer_ok = true;
+        sch_wake(t);
+        t = n;
+    }
+    self->joinq = NULL;
+    /* Leave the all-tasks list: the Task struct now only has to stay alive
+     * for whoever still holds the handle, and the GC owns that decision. */
+    for (Task **link = &sch_all; *link; link = &(*link)->next)
+        if (*link == self) { *link = self->next; break; }
+    self->next = NULL;
+    self->roots = NULL;
+    sch_alive--;
+    sch_release();
+    pthread_mutex_unlock(&sch_mu);
+    return NULL;
+}
+
+Value em_spawn(Value fn) {
+    if (!(fn.tag == V_OBJ && fn.as.o->tag == O_FUNC))
+        rt_fatal("spawn() expects a function, got %s", type_name(fn));
+    if (fn.as.o->as.func.arity != 0)
+        rt_fatal("spawn() expects a function of no arguments, got one of %zu",
+                 fn.as.o->as.func.arity);
+    Task *t = xmalloc(sizeof(Task));
+    memset(t, 0, sizeof *t);
+    t->state = T_RUNNABLE;
+    t->fn = fn;
+    t->result = t->xfer = em_none();
+    t->src_file = rt_cur_file;
+    /* Allocate the handle before the thread exists: rt_obj_new() may collect,
+     * and a half-built task must not be reachable when it does. */
+    Obj *o = rt_obj_new(O_TASK);
+    o->as.task = t;
+    t->handle = o;
+    obj_charge(o, sizeof(Task));
+
+    pthread_mutex_lock(&sch_mu);
+    t->roots = &rt_roots;          /* replaced by the child with its own */
+    t->next = sch_all;
+    sch_all = t;
+    sch_alive++;
+    sch_spawned++;
+    runq_push(t);                  /* runnable, but the spawner keeps running */
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 1u << 20);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    int rc = pthread_create(&t->thread, &attr, task_trampoline, t);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
+        pthread_mutex_unlock(&sch_mu);
+        rt_fatal("could not start task: %s", strerror(rc));
+    }
+    pthread_mutex_unlock(&sch_mu);
+    return obj_val(o);
+}
+
+Value em_join(Value tv) {
+    Obj *o = as_task(tv, "join");
+    Task *t = o->as.task;
+    Task *self = sch_self;
+    if (t == self) rt_fatal("join() on the running task would deadlock");
+    pthread_mutex_lock(&sch_mu);
+    if (t->state == T_DONE) {
+        Value r = t->result;
+        pthread_mutex_unlock(&sch_mu);
+        return r;
+    }
+    self->qnext = t->joinq;        /* the join queue is a plain stack */
+    t->joinq = self;
+    self->state = T_BLOCKED;
+    sch_release();
+    while (self->state != T_RUNNABLE) pthread_cond_wait(&sch_cv, &sch_mu);
+    sch_acquire(self);
+    Value r = self->xfer;
+    self->xfer = em_none();
+    pthread_mutex_unlock(&sch_mu);
+    return r;
+}
+
+/* Observability, mirroring gc_stats(): how many tasks have been started, how
+ * many are still alive, and how many times the token has changed hands. */
+Value em_task_stats(void) {
+    pthread_mutex_lock(&sch_mu);
+    int64_t spawned = (int64_t)sch_spawned, alive = (int64_t)sch_alive,
+            switches = (int64_t)sch_switches;
+    pthread_mutex_unlock(&sch_mu);
+    return em_rec_litn(3, "spawned", em_int(spawned), "alive", em_int(alive),
+                       "switches", em_int(switches));
+}
+
+Value em_task_done(Value tv) {
+    Obj *o = as_task(tv, "task_done");
+    pthread_mutex_lock(&sch_mu);
+    bool done = o->as.task->state == T_DONE;
+    pthread_mutex_unlock(&sch_mu);
+    return em_bool(done);
+}
+
+void em_yield(void) {
+    Task *self = sch_self;
+    pthread_mutex_lock(&sch_mu);
+    if (sch_runq) sch_yield_locked(self);   /* nobody waiting: stay put */
+    pthread_mutex_unlock(&sch_mu);
+}
+
+void em_sleep(Value secs) {
+    double s = secs.tag == V_FLOAT ? secs.as.f
+             : secs.tag == V_INT   ? (double)secs.as.i
+             : (rt_fatal("sleep() expects a number, got %s", type_name(secs)), 0.0);
+    if (s < 0) s = 0;
+    Task *self = sch_self;
+    double deadline = mono_now() + s;
+    pthread_mutex_lock(&sch_mu);
+    self->state = T_SLEEPING;
+    sch_sleepers++;
+    sch_release();
+    for (;;) {
+        double left = deadline - mono_now();
+        if (left <= 0) break;
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += (time_t)left;
+        ts.tv_nsec += (long)((left - (double)(time_t)left) * 1e9);
+        if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+        pthread_cond_timedwait(&sch_cv, &sch_mu, &ts);
+    }
+    sch_sleepers--;
+    self->state = T_RUNNABLE;
+    runq_push(self);
+    sch_acquire(self);
+    pthread_mutex_unlock(&sch_mu);
 }
 
 /* --- higher-order list builtins ------------------------------------------ */

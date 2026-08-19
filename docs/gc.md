@@ -23,6 +23,11 @@ conservative C-stack scanning, no ref-counting, no leaks-until-exit arena.
 
 ## Rooting: the shadow stack
 
+> With [green threads](concurrency.md) there is one shadow stack per task:
+> `rt_roots` is thread-local and the collector walks every live task's stack.
+> Only the task holding the scheduling token can allocate, so collection is
+> still single-threaded and lock-free.
+
 Generated code gives every function one slot array and registers it:
 
 ```c

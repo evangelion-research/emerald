@@ -30,6 +30,7 @@ typedef enum {
     TY_ANY, TY_NEVER, TY_NONE, TY_BOOL, TY_INT, TY_FLOAT, TY_STR,
     TY_LIT, TY_LIST, TY_REC, TY_UNION, TY_VAR, TY_ALIAS, TY_FUNC,
     TY_TENSOR, TY_FIN,
+    TY_OPAQUE,  /* Chan[T], Task[T]: a runtime handle with one element type */
 } TyKind;
 
 /* tensor dtype tags used by the checker (the runtime's DType is independent) */
@@ -56,6 +57,9 @@ struct Type {
     struct { Type **params; Type *ret; size_t count; } fun; /* TY_FUNC */
     struct { CDType dt; Shape *shape; } tensor;             /* TY_TENSOR */
     DimExpr *fin;                                            /* TY_FIN */
+    /* TY_OPAQUE: the handle's name ("Chan" / "Task") lives in `var` and the
+     * value it carries in `elem`. Handles have no structure a program can
+     * inspect, so equality is the name plus the element type. */
     /* TY_ALIAS: a reference to a named alias. A self-reference encountered
      * while an alias body is being resolved becomes this node (see resolve_name). */
     struct { const struct Alias *al; Type **args; size_t argc; } ref;
@@ -99,6 +103,18 @@ static Type *ty_list(Type *elem) {
     Type *t = ty_new(TY_LIST);
     t->elem = elem;
     return t;
+}
+
+/* Chan[T] / Task[T]: a handle carrying values of type `elem`. */
+static Type *ty_opaque(const char *name, Type *elem) {
+    Type *t = ty_new(TY_OPAQUE);
+    t->var = (char *)name;
+    t->elem = elem;
+    return t;
+}
+
+static bool is_opaque(const Type *t, const char *name) {
+    return t->k == TY_OPAQUE && strcmp(t->var, name) == 0;
 }
 
 static Type *ty_func(Type **params, size_t count, Type *ret) {
@@ -237,6 +253,23 @@ static Type *gc_stats_type(void) {
     return t;
 }
 
+/* The record task_stats() returns: three counters, like gc_stats(). */
+static Type *task_stats_type(void) {
+    static Type *t;
+    if (!t) {
+        static char *names[] = {"spawned", "alive", "switches"};
+        t = ty_new(TY_REC);
+        t->rec.count = 3;
+        t->rec.names = xmalloc(sizeof(char *) * 3);
+        t->rec.types = xmalloc(sizeof(Type *) * 3);
+        for (size_t i = 0; i < 3; i++) {
+            t->rec.names[i] = names[i];
+            t->rec.types[i] = &t_int;
+        }
+    }
+    return t;
+}
+
 /* --- type equality / assignability -------------------------------------- */
 
 /* Cycle-safe type comparison: resolve alias references, then recurse with a
@@ -317,6 +350,8 @@ static bool type_eq_rec(const Type *a0, const Type *b0, EqVis *v) {
                shape_eq(a->tensor.shape, b->tensor.shape);
     case TY_FIN:
         return dim_eq(a->fin, b->fin);
+    case TY_OPAQUE:
+        return strcmp(a->var, b->var) == 0 && type_eq_rec(a->elem, b->elem, v);
     default:
         return true;
     }
@@ -390,6 +425,14 @@ static bool assignable_rec(const Type *dst0, const Type *src0, EqVis *v) {
         if (src->k != TY_TENSOR || dst->tensor.dt != src->tensor.dt) return false;
         return shape_eq(dst->tensor.shape, src->tensor.shape) ||
                dst->tensor.shape->dynamic || src->tensor.shape->dynamic;
+    case TY_OPAQUE:
+        /* invariant in the element type -- a Chan[int] handed to code that
+         * expects Chan[any] would let that code send a str into it -- except
+         * that an unannotated handle (Chan[any], what chan() produces) is the
+         * escape hatch in both directions. */
+        if (src->k != TY_OPAQUE || strcmp(dst->var, src->var) != 0) return false;
+        return type_eq(dst->elem, src->elem) ||
+               dst->elem->k == TY_ANY || src->elem->k == TY_ANY;
     default:
         return dst->k == sk;
     }
@@ -568,6 +611,12 @@ static void type_write(char *buf, size_t cap, const Type *t) {
             if (i) tw_append(buf, cap, " | ");
             type_write(buf, cap, t->uni.alts[i]);
         }
+        break;
+    case TY_OPAQUE:
+        tw_append(buf, cap, t->var);
+        tw_append(buf, cap, "[");
+        type_write(buf, cap, t->elem);
+        tw_append(buf, cap, "]");
         break;
     case TY_TENSOR: {
         tw_append(buf, cap, "Tensor[");
@@ -881,6 +930,17 @@ static Type *resolve_name(Ck *ck, const TypeExpr *te, const TyEnv *env) {
     else if (strcmp(te->name, "int") == 0) builtin = &t_int;
     else if (strcmp(te->name, "float") == 0) builtin = &t_float;
     else if (strcmp(te->name, "str") == 0) builtin = &t_str;
+    if (!builtin &&
+        (strcmp(te->name, "Chan") == 0 || strcmp(te->name, "Task") == 0)) {
+        if (te->arg_count != 1) {
+            ck_error(ck, "E_TYPE_ARITY", te->line, te->col,
+                     "type '%s' takes 1 type argument, got %zu",
+                     te->name, te->arg_count);
+            return &t_any;
+        }
+        return ty_opaque(strcmp(te->name, "Chan") == 0 ? "Chan" : "Task",
+                         resolve_type(ck, te->args[0], env));
+    }
     if (builtin) {
         if (te->arg_count) {
             ck_error(ck, "E_TYPE_NOT_GENERIC", te->line, te->col,
@@ -1811,6 +1871,15 @@ static Type *infer_call(Ck *ck, const Expr *e) {
         /* the variadic builtins accept any number of arguments */
         if (strcmp(name, "print") == 0 ||
             strcmp(name, "eprint") == 0) return &t_none;
+        /* pretty printing: any value, string rendering is pure */
+        if (strcmp(name, "pprint") == 0 || strcmp(name, "pprint_err") == 0) {
+            ck_arity(ck, e, dname, 1);
+            return &t_none;
+        }
+        if (strcmp(name, "pp_format") == 0) {
+            ck_arity(ck, e, dname, 1);
+            return &t_str;
+        }
         if (strcmp(name, "len") == 0) {
             if (ck_arity(ck, e, dname, 1)) {
                 Type *a = ty_base(argt[0]);
@@ -1984,6 +2053,101 @@ static Type *infer_call(Ck *ck, const Expr *e) {
                          "file_exists() path must be str, got %s",
                          type_str(argt[0]));
             return &t_bool;
+        }
+
+        /* --- green threads and channels (docs/concurrency.md) ----------
+         * The handle types carry the element type so a channel's traffic is
+         * checked at both ends: `chan()` alone produces Chan[any], and an
+         * annotation (`c: Chan[int] = chan(0)`) pins it down. */
+        if (strcmp(name, "spawn") == 0) {
+            if (!ck_arity(ck, e, dname, 1)) return ty_opaque("Task", &t_any);
+            Type *f = ty_resolve(argt[0]);
+            if (f->k == TY_ANY) return ty_opaque("Task", &t_any);
+            if (f->k != TY_FUNC || f->fun.count != 0) {
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "spawn() takes a function of no arguments, got %s",
+                         type_str(argt[0]));
+                return ty_opaque("Task", &t_any);
+            }
+            return ty_opaque("Task", f->fun.ret);
+        }
+        if (strcmp(name, "join") == 0) {
+            if (!ck_arity(ck, e, dname, 1)) return &t_any;
+            Type *t = ty_resolve(argt[0]);
+            if (t->k == TY_ANY) return &t_any;
+            if (!is_opaque(t, "Task")) {
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "join() expects a task, got %s", type_str(argt[0]));
+                return &t_any;
+            }
+            return t->elem;
+        }
+        if (strcmp(name, "task_done") == 0) {
+            if (ck_arity(ck, e, dname, 1)) {
+                Type *t = ty_resolve(argt[0]);
+                if (t->k != TY_ANY && !is_opaque(t, "Task"))
+                    ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                             "task_done() expects a task, got %s", type_str(argt[0]));
+            }
+            return &t_bool;
+        }
+        if (strcmp(name, "task_stats") == 0) {
+            ck_arity(ck, e, dname, 0);
+            return task_stats_type();
+        }
+        if (strcmp(name, "task_yield") == 0) {
+            ck_arity(ck, e, dname, 0);
+            return &t_none;
+        }
+        if (strcmp(name, "sleep") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_float, argt[0]) &&
+                !assignable(&t_int, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "sleep() expects a number of seconds, got %s",
+                         type_str(argt[0]));
+            return &t_none;
+        }
+        if (strcmp(name, "chan") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_int, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "chan() capacity must be int, got %s", type_str(argt[0]));
+            return ty_opaque("Chan", &t_any);
+        }
+        if (strcmp(name, "send") == 0) {
+            if (ck_arity(ck, e, dname, 2)) {
+                Type *c = ty_resolve(argt[0]);
+                if (c->k != TY_ANY && !is_opaque(c, "Chan"))
+                    ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                             "send() expects a channel, got %s", type_str(argt[0]));
+                else if (is_opaque(c, "Chan") && !assignable(c->elem, argt[1]))
+                    ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                             "send() on %s cannot carry %s",
+                             type_str(argt[0]), type_str(argt[1]));
+            }
+            return &t_none;
+        }
+        if (strcmp(name, "recv") == 0) {
+            if (!ck_arity(ck, e, dname, 1)) return &t_any;
+            Type *c = ty_resolve(argt[0]);
+            if (c->k == TY_ANY) return &t_any;
+            if (!is_opaque(c, "Chan")) {
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "recv() expects a channel, got %s", type_str(argt[0]));
+                return &t_any;
+            }
+            /* a closed, drained channel yields None, so every receive has to
+             * consider that case -- the same shape as read_line() */
+            return c->elem->k == TY_ANY ? &t_any : ty_join(c->elem, &t_none);
+        }
+        if (strcmp(name, "chan_close") == 0 || strcmp(name, "chan_len") == 0) {
+            if (ck_arity(ck, e, dname, 1)) {
+                Type *c = ty_resolve(argt[0]);
+                if (c->k != TY_ANY && !is_opaque(c, "Chan"))
+                    ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                             "%s() expects a channel, got %s", dname,
+                             type_str(argt[0]));
+            }
+            return strcmp(name, "chan_close") == 0 ? &t_none : &t_int;
         }
 
         /* --- tensor primitives: shape-obligation typing rules (W4). Each
@@ -3204,6 +3368,12 @@ static void check_assign(Ck *ck, const Stmt *s) {
             if (s->as.assign.value->kind == E_LIST &&
                 s->as.assign.value->as.list.count == 0 &&
                 ty_resolve(ann)->k == TY_LIST)
+                val = ann;
+            /* the same contextual typing for `c: Chan[int] = chan(0)`: the
+             * constructor cannot know the element type, so the annotation is
+             * what pins it down for both ends of the channel */
+            if (ty_resolve(ann)->k == TY_OPAQUE && ty_resolve(val)->k == TY_OPAQUE &&
+                ty_resolve(val)->elem->k == TY_ANY)
                 val = ann;
             if (ck->proof && ann->k == TY_ANY)
                 ck_error(ck, "E_PROOF_ANY", s->line, s->col,
