@@ -37,7 +37,7 @@ Everything else can reasonably be v1.1 if these boundaries are explicit.
 
 **Confirmed.** `Taskfile.yml`'s `install` task copies only `bin/emeraldc` and
 `stdlib/*.rald`. The `dist` task copies the compiler, stdlib, README, and
-changelog, but not `src/runtime.c` or `include/`. Yet `src/main.c` invokes the
+changelog, but not `src/runtime_*.c` or `include/`. Yet `src/main.c` invokes the
 system C compiler with a runtime source path (`$EMERALD_SRC` or the baked
 `EMERALD_SRC_DIR`) for every generated program. The baked path is the build
 machine's checkout, not a path that exists in an installed prefix or release
@@ -136,7 +136,7 @@ REPL and verifies that scratch files do not remain.
 ### 5. Documented integer wrapping is not implemented in defined C
 
 **Confirmed by inspection; needs sanitizer/compiler testing.** README promises
-64-bit two's-complement wrapping, but `src/runtime.c` performs signed C
+64-bit two's-complement wrapping, but `src/runtime_*.c` performs signed C
 arithmetic directly in `em_add`, `em_sub`, `em_mul`, `em_pow`, `em_neg`, floor
 division, and shifts. Signed overflow is undefined behavior in C, not wrapping.
 The left shift of a signed value and right shift of a negative value have

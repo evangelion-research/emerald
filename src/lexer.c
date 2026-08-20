@@ -69,6 +69,7 @@ Token lexer_next(Lexer *lx) {
       if (*lx->cur == '\n') {
         lx->line++;
         lx->col = 1;
+        lx->cur++;
       } else {
         lx->cur++;
         lx->col++;

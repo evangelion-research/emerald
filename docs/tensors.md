@@ -9,11 +9,11 @@ half — how tensors exist, run, and interact with the GC. The **type-level** ha
 
 Tensor operations are **whole-array runtime calls**, not per-element generated
 code. `matmul(a, b)` lowers to a single `em_tensor_matmul()`
-call; the loop nest lives in `src/runtime.c` over an unboxed `float *`. The
+call; the loop nest lives in `src/runtime_*.c` over an unboxed `float *`. The
 `Value` boxing cost is therefore paid once per *operation*, not once per
 *element*.
 
-That is what lets the **untyped codegen survive numerics**: `src/codegen.c` still
+That is what lets the **untyped codegen survive numerics**: `src/codegen_*.c` still
 never mentions a `Type`, and a tensor is just another `Value` holding an `Obj`.
 No monomorphization is added — none is needed.
 

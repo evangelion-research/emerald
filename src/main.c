@@ -540,7 +540,7 @@ int main(int argc, char **argv) {
     char *lastslash = strrchr(srcroot, '/');
     if (lastslash && !strcmp(lastslash, "/src")) *lastslash = '\0';
     snprintf(cmd, cmdlen,
-             "%s -std=c11 -O2 -pthread -I '%s' -I '%s/include' -o '%s' '%s' '%s/runtime.c'",
+             "%s -std=c11 -O2 -pthread -I '%s' -I '%s/include' -o '%s' '%s' '%s'/runtime_*.c",
              cc, srcdir, srcroot, out, cfile, srcdir);
     int rc = system(cmd);
     if (rc != 0) {

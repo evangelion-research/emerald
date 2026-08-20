@@ -27,12 +27,12 @@ c.rald ─┘                                        │
 | Stage    | File            | Responsibility                                                        | Driver flag      |
 |----------|-----------------|-----------------------------------------------------------------------|------------------|
 | Lexer    | `src/lexer.c`   | Tokens, keywords, numbers, strings, comments.                          | `--emit-tokens`  |
-| Parser   | `src/parser.c`  | Recursive descent → AST; record/block disambiguation; `error` desugaring. | `--emit-ast`   |
-| Modules  | `src/module.c`  | Import resolution, cycle detection, name mangling, linking.            | `-I <dir>`       |
+| Parser   | `src/parser_*.c`  | Recursive descent → AST; record/block disambiguation; `error` desugaring. | `--emit-ast`   |
+| Modules  | `src/module_*.c`  | Import resolution, cycle detection, name mangling, linking.            | `-I <dir>`       |
 | Shapes   | `src/dim.c`     | Canonical-form dimension solver (`dim_eq`/`dim_le`), escalation log.   | `--emit-shapes`  |
-| Checker  | `src/check.c`   | Structural type checking, flow narrowing, scope/return, error channels, tensor shapes. | `--check` |
-| Codegen  | `src/codegen.c` | AST → C with GC-rooted slot frames; short-circuit, `try`/`catch` lowering. | `--emit-c`   |
-| Runtime  | `src/runtime.c` | Tagged `Value` model, operators, builtins, generational GC.            | `runtime-check`  |
+| Checker  | `src/check_*.c`   | Structural type checking, flow narrowing, scope/return, error channels, tensor shapes. | `--check` |
+| Codegen  | `src/codegen_*.c` | AST → C with GC-rooted slot frames; short-circuit, `try`/`catch` lowering. | `--emit-c`   |
+| Runtime  | `src/runtime_*.c` | Tagged `Value` model, operators, builtins, generational GC.            | `runtime-check`  |
 | Diags    | `src/diag.c`    | Structured errors: code, location, caret, expected/actual, JSON.       | `--json`         |
 | Driver   | `src/main.c`    | CLI, file I/O, invokes `cc`, cleanup.                                  | —                |
 
@@ -43,8 +43,9 @@ declaration and tensor annotation from the linked program; the dimension solver
 it exercises (`src/dim.c`) is a standalone component with the project's first
 **unit** test harness (`tests/shape/dim_unit.c`), rather than a golden file.
 
-`src/check.c` is the largest file (~3,000 lines) and it is where the interesting
-work is — see [`type-system.md`](type-system.md), [`tensors.md`](tensors.md),
+The checker is the largest stage (`src/check_*.c`, ~4,500 lines across eight
+files sharing `src/check_internal.h`) and it is where the interesting work
+is — see [`type-system.md`](type-system.md), [`tensors.md`](tensors.md),
 and [`shapes.md`](shapes.md).
 
 ## Compilation unit
@@ -119,7 +120,7 @@ task bless        # regenerate golden files (review the diff!)
 task clean
 ```
 
-`task runtime-check` compiles `src/runtime.c` standalone under strict flags,
+`task runtime-check` compiles `src/runtime_*.c` standalone under strict flags,
 proving the runtime stays independent of the compiler's headers — it is
 compiled into every generated program, not into `emeraldc`.
 

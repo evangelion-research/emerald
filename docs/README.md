@@ -43,7 +43,7 @@ From the repository root:
 task                 # build bin/emeraldc
 task test            # compiler, runtime, stdlib, REPL, shape, warning, report, and CLI tests
 task examples        # compile and run the smoke examples
-task runtime-check   # compile src/runtime.c standalone
+task runtime-check   # compile src/runtime_*.c standalone
 ```
 
 For installation and archive behavior, use the `install` and `dist` tasks only

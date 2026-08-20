@@ -98,7 +98,7 @@ work either way.
 ## How linking works
 
 The checker and the code generator know nothing about modules. They see one flat
-program, exactly as they did before modules existed. `src/module.c` bridges the
+program, exactly as they did before modules existed. `src/module_*.c` bridges the
 gap: it walks the import graph, parses each module once, and **links** the
 results into a single `Program` whose statements are ordered dependencies-first.
 

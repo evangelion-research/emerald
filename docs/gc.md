@@ -1,6 +1,6 @@
 # Emerald's Garbage Collector
 
-A **precise, two-generation mark-and-sweep** collector in `src/runtime.c`,
+A **precise, two-generation mark-and-sweep** collector in `src/runtime_*.c`,
 with rooting done by the generated code itself (a *shadow stack*). No
 conservative C-stack scanning, no ref-counting, no leaks-until-exit arena.
 
