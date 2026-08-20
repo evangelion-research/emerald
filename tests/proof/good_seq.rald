@@ -1,0 +1,15 @@
+# Immutable seq values are covariant and remain sound under --proof.
+type Animal = { name: str }
+type Dog = Animal & { bark: str }
+
+def count(animals: seq[Animal]) -> int pure { return len(animals) }
+
+def names(dogs: seq[Dog]) -> seq[Animal] pure {
+    return dogs
+}
+
+dogs: seq[Dog] = [
+    { name: "rex", bark: "woof" },
+    { name: "spot", bark: "ruff" }
+]
+print(count(dogs), len(names(dogs)))

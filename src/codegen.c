@@ -300,8 +300,12 @@ static const char *binop_fn(BinOp op) {
     case B_MOD: return "em_mod";
     case B_FLOORDIV: return "em_floordiv"; case B_POW: return "em_pow";
     case B_EQ: return "em_eq";   case B_NE: return "em_ne";
+    case B_IN: return "em_contains";
     case B_LT: return "em_lt";   case B_LE: return "em_le";
     case B_GT: return "em_gt";   case B_GE: return "em_ge";
+    case B_BITOR: return "em_bitor"; case B_BITXOR: return "em_bitxor";
+    case B_BITAND: return "em_bitand"; case B_LSHIFT: return "em_lshift";
+    case B_RSHIFT: return "em_rshift";
     default: return "?";
     }
 }
@@ -352,6 +356,16 @@ static int gen_call(Cg *cg, const Expr *e) {
             else
                 emit(cg, "%s = em_range(%s, %s);", slotref(t, tb),
                      slotref(args[0], ab), slotref(args[1], bb));
+        } else if (strcmp(name, "dict") == 0 || strcmp(name, "set") == 0) {
+            if (argc == 0)
+                emit(cg, "%s = %s(0);", slotref(t, tb),
+                     strcmp(name, "dict") == 0 ? "em_dict_litn" : "em_set_litn");
+            else if (argc == 1)
+                emit(cg, "%s = %s(%s);", slotref(t, tb),
+                     strcmp(name, "dict") == 0 ? "em_dict_from" : "em_set_from",
+                     slotref(args[0], ab));
+            else
+                emit(cg, "%s = em_none();", slotref(t, tb));
         } else {
             Access kind;
             int slot;
@@ -367,12 +381,30 @@ static int gen_call(Cg *cg, const Expr *e) {
             } else {
                 FuncInfo *tf = find_top_func(cg, name);
                 if (tf) {
-                    /* direct call to a top-level function (env is always NULL) */
+                    /* direct calls can fill omitted defaults and reorder
+                     * keyword arguments before entering the fixed C ABI. */
+                    size_t np = tf->node->as.func.param_count;
+                    int *mapped = xmalloc(sizeof(int) * np);
+                    for (size_t j = 0; j < np; j++) mapped[j] = -1000000000;
+                    size_t pos = 0;
+                    for (size_t i = 0; i < argc; i++) {
+                        const char *an = e->as.call.arg_names ? e->as.call.arg_names[i] : NULL;
+                        size_t j = pos;
+                        if (an) {
+                            for (j = 0; j < np; j++)
+                                if (strcmp(tf->node->as.func.params[j], an) == 0) break;
+                        } else { while (j < np && mapped[j] != -1000000000) j++; pos = j + 1; }
+                        if (j < np) mapped[j] = args[i];
+                    }
                     sb_printf(&call, "%s = %s(NULL", slotref(t, tb), tf->cname);
-                    for (size_t i = 0; i < argc; i++)
-                        sb_printf(&call, ", %s", slotref(args[i], ab));
-                    sb_printf(&call, ");");
-                    emit(cg, "%s", call.buf);
+                    for (size_t j = 0; j < np; j++) {
+                        if (mapped[j] != -1000000000) sb_printf(&call, ", %s", slotref(mapped[j], ab));
+                        else {
+                            int dv = gen_expr(cg, tf->node->as.func.defaults[j]);
+                            sb_printf(&call, ", %s", slotref(dv, ab));
+                        }
+                    }
+                    sb_printf(&call, ");"); emit(cg, "%s", call.buf); free(mapped);
                 } else {
                     fprintf(stderr,
                             "emeraldc: internal error: unresolved call '%s'\n",
@@ -430,7 +462,7 @@ static void gen_catch_arms(Cg *cg, const Expr *e, int err, int dst,
 }
 
 static int gen_expr(Cg *cg, const Expr *e) {
-    char tb[32], ab[32], bb[32];
+    char tb[32], ab[32], bb[32], cb[32];
     switch (e->kind) {
     case E_INT: {
         int t = new_temp(cg);
@@ -478,23 +510,32 @@ static int gen_expr(Cg *cg, const Expr *e) {
             return gen_var_read(cg, e->as.sval);
         FuncInfo *tf = find_top_func(cg, e->as.sval);
         if (tf) {
-            int t = new_temp(cg);
-            emit(cg, "%s = em_mkclosure(%s_tramp, %zu, NULL, 0);",
-                 slotref(t, tb), tf->cname, tf->node->as.func.param_count);
+            int t = new_temp(cg); size_t np=tf->node->as.func.param_count, min=np;
+            while(min && tf->node->as.func.defaults && tf->node->as.func.defaults[min-1]) min--;
+            size_t dc=(tf->node->as.func.defaults) ? np-min : 0;
+            if(!dc) emit(cg, "%s = em_mkclosure(%s_tramp, %zu, NULL, 0, NULL, 0);", slotref(t,tb),tf->cname,np);
+            else {
+                emit(cg, "{ Value __defs[%zu];", dc);
+                for(size_t j=min;j<np;j++){ int dv=gen_expr(cg,tf->node->as.func.defaults[j]); emit(cg,"  __defs[%zu] = %s;",j-min,slotref(dv,ab)); }
+                emit(cg, "  %s = em_mkclosure(%s_tramp, %zu, NULL, 0, __defs, %zu);",slotref(t,tb),tf->cname,np,dc);
+                emit(cg, "}");
+            }
             return t;
         }
         fprintf(stderr, "emeraldc: internal error: unresolved name '%s'\n",
                 e->as.sval);
         exit(1);
     }
-    case E_LIST: {
+    case E_LIST:
+    case E_TUPLE: {
         size_t n = e->as.list.count;
         int *items = xmalloc(sizeof(int) * n);
         for (size_t i = 0; i < n; i++)
             items[i] = gen_expr(cg, e->as.list.items[i]);
         int t = new_temp(cg);
         SB call = {0};
-        sb_printf(&call, "%s = em_list_litn(%zu", slotref(t, tb), n);
+        sb_printf(&call, "%s = %s(%zu", slotref(t, tb),
+                  e->kind == E_TUPLE ? "em_tuple_litn" : "em_list_litn", n);
         for (size_t i = 0; i < n; i++)
             sb_printf(&call, ", %s", slotref(items[i], ab));
         sb_printf(&call, ");");
@@ -522,6 +563,59 @@ static int gen_expr(Cg *cg, const Expr *e) {
         free(vals);
         return t;
     }
+    case E_DICT: {
+        size_t n = e->as.dict.count; int *keys = xmalloc(sizeof(int) * n);
+        int *vals = xmalloc(sizeof(int) * n);
+        for (size_t i = 0; i < n; i++) { keys[i] = gen_expr(cg, e->as.dict.keys[i]); vals[i] = gen_expr(cg, e->as.dict.values[i]); }
+        int t = new_temp(cg); SB call = {0};
+        sb_printf(&call, "%s = em_dict_litn(%zu", slotref(t, tb), n);
+        for (size_t i = 0; i < n; i++) sb_printf(&call, ", %s, %s", slotref(keys[i], ab), slotref(vals[i], bb));
+        sb_printf(&call, ");"); emit(cg, "%s", call.buf); free(call.buf); free(keys); free(vals); return t;
+    }
+    case E_SET: {
+        size_t n = e->as.set.count; int *items = xmalloc(sizeof(int) * n);
+        for (size_t i = 0; i < n; i++) items[i] = gen_expr(cg, e->as.set.items[i]);
+        int t = new_temp(cg); SB call = {0}; sb_printf(&call, "%s = em_set_litn(%zu", slotref(t, tb), n);
+        for (size_t i = 0; i < n; i++) sb_printf(&call, ", %s", slotref(items[i], ab));
+        sb_printf(&call, ");"); emit(cg, "%s", call.buf); free(call.buf); free(items); return t;
+    }
+    case E_SLICE: {
+        int seq = gen_expr(cg, e->as.slice.seq);
+        int lo = e->as.slice.start ? gen_expr(cg, e->as.slice.start) : -1;
+        int hi = e->as.slice.stop ? gen_expr(cg, e->as.slice.stop) : -1;
+        int st = e->as.slice.step ? gen_expr(cg, e->as.slice.step) : -1;
+        int t = new_temp(cg);
+        emit(cg, "%s = em_slice_ex(%s, %s, %s, %s);", slotref(t, tb), slotref(seq, ab),
+             lo < 0 ? "em_none()" : slotref(lo, bb), hi < 0 ? "em_none()" : slotref(hi, cb),
+             st < 0 ? "em_none()" : slotref(st, cb));
+        return t;
+    }
+    case E_FSTR: {
+        int t = new_temp(cg); SB lit = {0}; sb_c_string(&lit, e->as.fstr.texts[0]);
+        emit(cg, "%s = em_str_new(%s);", slotref(t, tb), lit.buf); free(lit.buf);
+        for (size_t i = 0; i < e->as.fstr.count; i++) {
+            int v = gen_expr(cg, e->as.fstr.exprs[i]); int sv = new_temp(cg);
+            emit(cg, "%s = em_str(%s);", slotref(sv, cb), slotref(v, ab));
+            emit(cg, "%s = em_add(%s, %s);", slotref(t, tb), slotref(t, bb), slotref(sv, cb));
+            SB tail = {0}; sb_c_string(&tail, e->as.fstr.texts[i + 1]);
+            emit(cg, "%s = em_add(%s, em_str_new(%s));", slotref(t, tb), slotref(t, bb), tail.buf); free(tail.buf);
+        }
+        return t;
+    }
+    case E_COMP: {
+        int seq = gen_expr(cg, e->as.comp.seq); int out = new_temp(cg);
+        const char *ctor = e->as.comp.kind == COMP_LIST ? "em_list_litn(0)" :
+                           e->as.comp.kind == COMP_SET ? "em_set_litn(0)" : "em_dict_litn(0)";
+        emit(cg, "%s = %s;", slotref(out, tb), ctor);
+        int idx = new_temp(cg); emit(cg, "%s = em_int(0);", slotref(idx, ab));
+        emit(cg, "for (;;) {"); cg->indent++; emit(cg, "Value __it;");
+        emit(cg, "if (!rt_iter_get(%s, %s.as.i, &__it)) break;", slotref(seq, ab), slotref(idx, bb));
+        emit(cg, "%s.as.i += 1;", slotref(idx, ab)); gen_var_write(cg, e->as.comp.var, "__it");
+        if (e->as.comp.cond) { int c = gen_expr(cg, e->as.comp.cond); emit(cg, "if (!em_truthy(%s)) continue;", slotref(c, cb)); }
+        if (e->as.comp.kind == COMP_DICT) { int k = gen_expr(cg, e->as.comp.key); int v = gen_expr(cg, e->as.comp.elt); emit(cg, "em_dict_set(%s, %s, %s);", slotref(out, ab), slotref(k, bb), slotref(v, cb)); }
+        else { int v = gen_expr(cg, e->as.comp.elt); if (e->as.comp.kind == COMP_SET) emit(cg, "em_set_add(%s, %s);", slotref(out, ab), slotref(v, bb)); else emit(cg, "em_append(%s, %s);", slotref(out, ab), slotref(v, bb)); }
+        cg->indent--; emit(cg, "}"); return out;
+    }
     case E_BINOP: {
         BinOp op = e->as.bin.op;
         if (op == B_PIPE) { /* x |> f == f(x) */
@@ -536,7 +630,7 @@ static int gen_expr(Cg *cg, const Expr *e) {
             int f = gen_expr(cg, e->as.bin.lhs);
             int g = gen_expr(cg, e->as.bin.rhs);
             int t = new_temp(cg);
-            emit(cg, "%s = em_compose(%s, %s);", slotref(t, tb),
+            emit(cg, "%s = em_compose_or_rshift(%s, %s);", slotref(t, tb),
                  slotref(f, ab), slotref(g, bb));
             return t;
         }
@@ -623,7 +717,7 @@ static int gen_expr(Cg *cg, const Expr *e) {
         size_t arity = e->as.lam.param_count;
         int t = new_temp(cg);
         if (n == 0) {
-            emit(cg, "%s = em_mkclosure(%s_tramp, %zu, NULL, 0);",
+            emit(cg, "%s = em_mkclosure(%s_tramp, %zu, NULL, 0, NULL, 0);",
                  slotref(t, tb), child->cname, arity);
         } else {
             emit(cg, "{ Value __cap[%zu];", n);
@@ -632,7 +726,7 @@ static int gen_expr(Cg *cg, const Expr *e) {
                 emit(cg, "  __cap[%zu] = %s;", k,
                      cellref(cg, child->captures.names[k], cb));
             }
-            emit(cg, "  %s = em_mkclosure(%s_tramp, %zu, __cap, %zu);",
+            emit(cg, "  %s = em_mkclosure(%s_tramp, %zu, __cap, %zu, NULL, 0);",
                  slotref(t, tb), child->cname, arity, n);
             emit(cg, "}");
         }
@@ -814,16 +908,22 @@ static void gen_nested_def(Cg *cg, const Stmt *s) {
     if (slot < 0) return;
     bool cell = cg->fi->local_cell[slot];
     size_t n = child->captures.count;
-    size_t arity = s->as.func.param_count;
+    size_t arity = s->as.func.param_count, min=arity;
+    while(min && s->as.func.defaults && s->as.func.defaults[min-1]) min--;
+    size_t dc=s->as.func.defaults ? arity-min : 0;
     char ab[32];
 
     if (n == 0) {
-        if (cell)
-            emit(cg, "em_cell_set(%s, em_mkclosure(%s_tramp, %zu, NULL, 0));",
-                 slotref(slot, ab), child->cname, arity);
-        else
-            emit(cg, "%s = em_mkclosure(%s_tramp, %zu, NULL, 0);",
-                 slotref(slot, ab), child->cname, arity);
+        if (!dc) {
+            if (cell) emit(cg, "em_cell_set(%s, em_mkclosure(%s_tramp, %zu, NULL, 0, NULL, 0));",slotref(slot,ab),child->cname,arity);
+            else emit(cg, "%s = em_mkclosure(%s_tramp, %zu, NULL, 0, NULL, 0);",slotref(slot,ab),child->cname,arity);
+        } else {
+            emit(cg,"{ Value __defs[%zu];",dc);
+            for(size_t j=min;j<arity;j++){int dv=gen_expr(cg,s->as.func.defaults[j]);emit(cg,"  __defs[%zu] = %s;",j-min,slotref(dv,ab));}
+            if(cell) emit(cg,"  em_cell_set(%s, em_mkclosure(%s_tramp, %zu, NULL, 0, __defs, %zu));",slotref(slot,ab),child->cname,arity,dc);
+            else emit(cg,"  %s = em_mkclosure(%s_tramp, %zu, NULL, 0, __defs, %zu);",slotref(slot,ab),child->cname,arity,dc);
+            emit(cg,"}");
+        }
     } else {
         emit(cg, "{ Value __cap[%zu];", n);
         for (size_t k = 0; k < n; k++) {
@@ -831,12 +931,11 @@ static void gen_nested_def(Cg *cg, const Stmt *s) {
             emit(cg, "  __cap[%zu] = %s;", k,
                  cellref(cg, child->captures.names[k], cb));
         }
+        if (dc) { emit(cg,"  Value __defs[%zu];",dc); for(size_t j=min;j<arity;j++){int dv=gen_expr(cg,s->as.func.defaults[j]);emit(cg,"  __defs[%zu] = %s;",j-min,slotref(dv,ab));} }
         if (cell)
-            emit(cg, "  em_cell_set(%s, em_mkclosure(%s_tramp, %zu, __cap, %zu));",
-                 slotref(slot, ab), child->cname, arity, n);
+            emit(cg, dc ? "  em_cell_set(%s, em_mkclosure(%s_tramp, %zu, __cap, %zu, __defs, %zu));" : "  em_cell_set(%s, em_mkclosure(%s_tramp, %zu, __cap, %zu, NULL, 0));", slotref(slot,ab),child->cname,arity,n,dc);
         else
-            emit(cg, "  %s = em_mkclosure(%s_tramp, %zu, __cap, %zu);",
-                 slotref(slot, ab), child->cname, arity, n);
+            emit(cg, dc ? "  %s = em_mkclosure(%s_tramp, %zu, __cap, %zu, __defs, %zu);" : "  %s = em_mkclosure(%s_tramp, %zu, __cap, %zu, NULL, 0);", slotref(slot,ab),child->cname,arity,n,dc);
         emit(cg, "}");
     }
 }
@@ -984,19 +1083,46 @@ typedef struct {
 static void collect_used_expr(const Expr *e, Names *out);
 static void collect_used_block(const Block *b, Names *out);
 
+static void collect_comp_vars_expr(const Expr *e, Names *out);
+static void collect_comp_vars_block(const Block *b, Names *out);
+static void collect_comp_vars_expr(const Expr *e, Names *out) {
+    if (!e) return;
+    switch(e->kind) {
+    case E_COMP: names_add(out,e->as.comp.var); collect_comp_vars_expr(e->as.comp.seq,out); collect_comp_vars_expr(e->as.comp.cond,out); collect_comp_vars_expr(e->as.comp.elt,out); collect_comp_vars_expr(e->as.comp.key,out); break;
+    case E_LIST: case E_TUPLE: for(size_t i=0;i<e->as.list.count;i++)collect_comp_vars_expr(e->as.list.items[i],out); break;
+    case E_REC: for(size_t i=0;i<e->as.rec.count;i++)collect_comp_vars_expr(e->as.rec.values[i],out); break;
+    case E_DICT: for(size_t i=0;i<e->as.dict.count;i++){collect_comp_vars_expr(e->as.dict.keys[i],out);collect_comp_vars_expr(e->as.dict.values[i],out);} break;
+    case E_SET: for(size_t i=0;i<e->as.set.count;i++)collect_comp_vars_expr(e->as.set.items[i],out); break;
+    case E_BINOP: collect_comp_vars_expr(e->as.bin.lhs,out);collect_comp_vars_expr(e->as.bin.rhs,out);break;
+    case E_UNOP: collect_comp_vars_expr(e->as.un.operand,out);break;
+    case E_CALL: collect_comp_vars_expr(e->as.call.fn,out);for(size_t i=0;i<e->as.call.count;i++)collect_comp_vars_expr(e->as.call.args[i],out);break;
+    case E_INDEX: collect_comp_vars_expr(e->as.index.seq,out);collect_comp_vars_expr(e->as.index.idx,out);break;
+    case E_SLICE: collect_comp_vars_expr(e->as.slice.seq,out);collect_comp_vars_expr(e->as.slice.start,out);collect_comp_vars_expr(e->as.slice.stop,out);collect_comp_vars_expr(e->as.slice.step,out);break;
+    case E_ATTR: collect_comp_vars_expr(e->as.attr.obj,out);break;
+    case E_FSTR: for(size_t i=0;i<e->as.fstr.count;i++)collect_comp_vars_expr(e->as.fstr.exprs[i],out);break;
+    default: break;
+    }
+}
+static void collect_comp_vars_block(const Block *b, Names *out) { for(size_t i=0;i<b->count;i++){const Stmt*s=b->items[i];if(s->kind==S_EXPR)collect_comp_vars_expr(s->as.expr,out);else if(s->kind==S_ASSIGN){collect_comp_vars_expr(s->as.assign.value,out);collect_comp_vars_expr(s->as.assign.target,out);}else if(s->kind==S_RETURN)collect_comp_vars_expr(s->as.ret,out);else if(s->kind==S_IF){for(size_t j=0;j<s->as.ifs.count;j++){collect_comp_vars_expr(s->as.ifs.conds[j],out);collect_comp_vars_block(&s->as.ifs.blocks[j],out);}if(s->as.ifs.has_else)collect_comp_vars_block(&s->as.ifs.else_block,out);}else if(s->kind==S_FOR){collect_comp_vars_expr(s->as.fr.seq,out);collect_comp_vars_block(&s->as.fr.body,out);}else if(s->kind==S_WHILE){collect_comp_vars_expr(s->as.wh.cond,out);collect_comp_vars_block(&s->as.wh.body,out);}else if(s->kind==S_BLOCK){collect_comp_vars_block(&s->as.block,out);}else if(s->kind==S_MATCH){collect_comp_vars_expr(s->as.mtch.subject,out);for(size_t j=0;j<s->as.mtch.count;j++)collect_comp_vars_block(&s->as.mtch.blocks[j],out);}}}
+
 static void collect_used_expr(const Expr *e, Names *out) {
+    if (!e) return;
     switch (e->kind) {
     case E_NAME:
         names_add(out, e->as.sval);
         break;
-    case E_LIST:
-        for (size_t i = 0; i < e->as.list.count; i++)
-            collect_used_expr(e->as.list.items[i], out);
+    case E_LIST: case E_TUPLE:
+        for (size_t i = 0; i < e->as.list.count; i++) collect_used_expr(e->as.list.items[i], out);
         break;
     case E_REC:
-        for (size_t i = 0; i < e->as.rec.count; i++)
-            collect_used_expr(e->as.rec.values[i], out);
+        for (size_t i = 0; i < e->as.rec.count; i++) collect_used_expr(e->as.rec.values[i], out);
         break;
+    case E_DICT:
+        for(size_t i=0;i<e->as.dict.count;i++){collect_used_expr(e->as.dict.keys[i],out);collect_used_expr(e->as.dict.values[i],out);} break;
+    case E_SET: for(size_t i=0;i<e->as.set.count;i++)collect_used_expr(e->as.set.items[i],out); break;
+    case E_SLICE: collect_used_expr(e->as.slice.seq,out);collect_used_expr(e->as.slice.start,out);collect_used_expr(e->as.slice.stop,out);collect_used_expr(e->as.slice.step,out);break;
+    case E_COMP: collect_used_expr(e->as.comp.seq,out);collect_used_expr(e->as.comp.cond,out);collect_used_expr(e->as.comp.elt,out);collect_used_expr(e->as.comp.key,out);break;
+    case E_FSTR: for(size_t i=0;i<e->as.fstr.count;i++)collect_used_expr(e->as.fstr.exprs[i],out);break;
     case E_BINOP:
         collect_used_expr(e->as.bin.lhs, out);
         collect_used_expr(e->as.bin.rhs, out);
@@ -1182,6 +1308,7 @@ static void collect_lambdas_block(const Block *b, Expr ***lams, size_t *count,
 
 static void collect_lambdas_expr(const Expr *e, Expr ***lams, size_t *count,
                                  size_t *cap) {
+    if (!e) return;
     switch (e->kind) {
     case E_LAMBDA:
         if (*count == *cap) {
@@ -1191,14 +1318,18 @@ static void collect_lambdas_expr(const Expr *e, Expr ***lams, size_t *count,
         (*lams)[(*count)++] = (Expr *)e;
         collect_lambdas_expr(e->as.lam.body, lams, count, cap);
         break;
-    case E_LIST:
-        for (size_t i = 0; i < e->as.list.count; i++)
-            collect_lambdas_expr(e->as.list.items[i], lams, count, cap);
+    case E_LIST: case E_TUPLE:
+        for (size_t i = 0; i < e->as.list.count; i++) collect_lambdas_expr(e->as.list.items[i], lams, count, cap);
         break;
     case E_REC:
-        for (size_t i = 0; i < e->as.rec.count; i++)
-            collect_lambdas_expr(e->as.rec.values[i], lams, count, cap);
+        for (size_t i = 0; i < e->as.rec.count; i++) collect_lambdas_expr(e->as.rec.values[i], lams, count, cap);
         break;
+    case E_DICT:
+        for(size_t i=0;i<e->as.dict.count;i++){collect_lambdas_expr(e->as.dict.keys[i],lams,count,cap);collect_lambdas_expr(e->as.dict.values[i],lams,count,cap);}break;
+    case E_SET: for(size_t i=0;i<e->as.set.count;i++)collect_lambdas_expr(e->as.set.items[i],lams,count,cap);break;
+    case E_SLICE: collect_lambdas_expr(e->as.slice.seq,lams,count,cap);collect_lambdas_expr(e->as.slice.start,lams,count,cap);collect_lambdas_expr(e->as.slice.stop,lams,count,cap);collect_lambdas_expr(e->as.slice.step,lams,count,cap);break;
+    case E_COMP: collect_lambdas_expr(e->as.comp.seq,lams,count,cap);collect_lambdas_expr(e->as.comp.cond,lams,count,cap);collect_lambdas_expr(e->as.comp.elt,lams,count,cap);collect_lambdas_expr(e->as.comp.key,lams,count,cap);break;
+    case E_FSTR: for(size_t i=0;i<e->as.fstr.count;i++)collect_lambdas_expr(e->as.fstr.exprs[i],lams,count,cap);break;
     case E_BINOP:
         collect_lambdas_expr(e->as.bin.lhs, lams, count, cap);
         collect_lambdas_expr(e->as.bin.rhs, lams, count, cap);
@@ -1451,6 +1582,9 @@ static FuncInfo *make_top_root(Ctx *ctx, const Block *body) {
     Expr **lams = NULL;
     size_t n = 0, cap = 0;
     collect_lambdas_block(body, &lams, &n, &cap);
+    Names comp = {0}; collect_comp_vars_block(body, &comp);
+    for (size_t ci = 0; ci < comp.count; ci++) add_local(fi, comp.names[ci]);
+    free(comp.names);
     fi->child_cap = n ? n : 1;
     fi->children = xcalloc(fi->child_cap, sizeof(FuncInfo *));
     fi->child_count = n;
@@ -1495,6 +1629,9 @@ static FuncInfo *build_func(Ctx *ctx, const Stmt *node, FuncInfo *parent) {
         add_local(fi, node->as.func.params[i]);
     LocalCtx lc = { ctx->globals, fi };
     ast_collect_assigned(&node->as.func.body, collect_local_cb, &lc);
+    Names comp = {0}; collect_comp_vars_block(&node->as.func.body, &comp);
+    for (size_t ci = 0; ci < comp.count; ci++) add_local(fi, comp.names[ci]);
+    free(comp.names);
     collect_match_pats_block(&node->as.func.body, collect_local_cb, &lc);
 
     Stmt **defs = NULL;
@@ -1708,7 +1845,8 @@ void codegen_program(FILE *out, const Program *prog, const char *filename) {
     cg.indent = 1;
     gen_block(&cg, &prog->body);
 
-    int ntemps = cg.max_temps < 1 ? 1 : cg.max_temps;
+    int ntemps = (int)root->locals.count + cg.max_temps;
+    if (ntemps < 1) ntemps = 1;
     fprintf(out, "int main(int argc, char **argv) {\n");
     fprintf(out, "    rt_init();\n");
     fprintf(out, "    rt_set_args(argc, argv);\n");

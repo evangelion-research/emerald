@@ -1,6 +1,6 @@
 # Builtins
 
-Emerald has **seventy-six builtins**, compiled directly into calls on the
+Emerald has **seventy-eight builtins**, compiled directly into calls on the
 runtime (`src/runtime.c`) rather than resolved through a module. They are
 always in scope in every module: the forty core builtins (core,
 GC-observability, files-and-process, and the stdlib foundation), the eleven
@@ -8,7 +8,10 @@ GC-observability, files-and-process, and the stdlib foundation), the eleven
 of Phase 2 (see the [Tensors](#tensors) section).
 
 They are not the standard library — that lives in [`stdlib/`](../stdlib/) and is
-ordinary Emerald. A builtin exists only when it *cannot* be written in Emerald:
+ordinary Emerald. The mutable `dict` and `set` runtime values are the one
+collection exception: their storage and mutation are builtin, while their
+constructors and operators are exposed directly as `dict()` and `set()`. A
+builtin exists only when it *cannot* be written in Emerald:
 allocation-level (`len`, `range`, `append`, `slice`), formatting (`str`,
 `print`), foreign (`read_file`, `run`, `argv`), or privileged (`gc_stats`). See
 [`stdlib/SPEC.md`](../stdlib/SPEC.md) §1.1 for why each of the ten added for the
@@ -67,12 +70,33 @@ Flushes stdout and stderr. `write_out` already flushes, so this is for the case
 where `print` output must be on screen before a long computation that has not
 printed its own newline yet.
 
+## Dictionaries and sets
+
+`dict()` creates an empty string-keyed dictionary. `dict(pairs)` copies an
+iterable of two-item lists or tuples, and `dict(other_dict)` copies a dictionary.
+Use `d[key]` to read and `d[key] = value` to insert or replace; missing keys are
+runtime errors, like Python's subscription operation. `len(d)` returns the
+number of entries, iteration yields keys, and `key in d` tests membership.
+Non-string keys are rejected by the checker for literals and by the runtime for
+computed keys.
+
+`set()` creates an empty set. `set(iterable)` collects values from any iterable;
+iteration and `len()` work as for dictionaries. Set union, intersection,
+difference, and symmetric difference use `|`, `&`, `-`, and `^` respectively.
+These operations return fresh sets and do not mutate their operands.
+
 ## Sequences and conversion
+
+`seq[T]` is the immutable, covariant view of a list. `freeze(xs)` returns a
+`seq` without copying; `thaw(s)` returns a mutable copy. Indexing, iteration,
+`len`, and `map`/`filter`/`reduce` accept sequences, while `append` and indexed
+assignment reject them. See [`type-system.md`](type-system.md) for the
+proof-mode invariance rule for mutable lists.
 
 ### `len(x) -> int`
 
-Length of a `str` (in bytes), `list` (elements), or record (fields). Anything
-else is rejected at compile time with `E_TYPE_NO_LEN`.
+Length of a `str` (in bytes), `list`, tuple, dictionary, set, or record. Other
+values are rejected at compile time with `E_TYPE_NO_LEN`.
 
 ### `range(n) -> list[int]` / `range(lo, hi) -> list[int]`
 
@@ -425,20 +449,17 @@ None of these are pure: a task is an effect.
 
 ## What is deliberately still missing
 
-No dict type, no string methods, no `sorted`, no `min`/`max`, no `abs`, no math
-beyond `sqrt`/`tan`.
+No string methods, no `sorted`, no `min`/`max`, no `abs`, no math beyond
+`sqrt`/`tan`.
 
-Those are not gaps any more — they are
-[`stdlib/`](../stdlib/) modules: `dict`, `strings`, `sort`, `lists`, `math`.
-They are *not* builtins on purpose. A standard library belongs in Emerald
-modules resolved through the [module system](modules.md), not in a growing `if
-strcmp(name, ...)` ladder in `check.c`, and writing it in the language is the
-only way to find out what the language is missing.
+Those are [`stdlib/`](../stdlib/) modules: `strings`, `sort`, `lists`, and
+`math`. Dictionaries and sets are deliberately not modules: their runtime
+storage, mutation, and collection operators are builtin.
 
 Still genuinely absent, with no library answer:
 
 | Missing | Why it matters |
 |---|---|
 | `select` over channels | a task can only wait on one channel at a time, so fan-in needs a dedicated collector task rather than one loop over several channels |
-| bitwise operators | `\|` and `&` are type-level only, so there is no xor. `dict.hash_str` is djb2 rather than the FNV-1a the spec called for |
+| hashable-key constraints | dictionaries are string-keyed because the type system cannot express a general hashability bound |
 | integer division | `/` is float division, so `math.floor_div` rounds through a double and is exact only under 2^53 |

@@ -495,10 +495,24 @@ static void rw_expr(RW *rw, Expr *e, const RScope *sc) {
         for (size_t i = 0; i < e->as.list.count; i++)
             rw_expr(rw, e->as.list.items[i], sc);
         break;
-    case E_REC:
-        for (size_t i = 0; i < e->as.rec.count; i++)
-            rw_expr(rw, e->as.rec.values[i], sc);
+    case E_TUPLE:
+        for (size_t i = 0; i < e->as.list.count; i++) rw_expr(rw, e->as.list.items[i], sc);
         break;
+    case E_REC:
+        for (size_t i = 0; i < e->as.rec.count; i++) rw_expr(rw, e->as.rec.values[i], sc);
+        break;
+    case E_DICT:
+        for (size_t i = 0; i < e->as.dict.count; i++) { rw_expr(rw,e->as.dict.keys[i],sc); rw_expr(rw,e->as.dict.values[i],sc); }
+        break;
+    case E_SET:
+        for (size_t i = 0; i < e->as.set.count; i++) rw_expr(rw,e->as.set.items[i],sc);
+        break;
+    case E_SLICE:
+        rw_expr(rw,e->as.slice.seq,sc); if(e->as.slice.start)rw_expr(rw,e->as.slice.start,sc); if(e->as.slice.stop)rw_expr(rw,e->as.slice.stop,sc); if(e->as.slice.step)rw_expr(rw,e->as.slice.step,sc); break;
+    case E_COMP:
+        rw_expr(rw,e->as.comp.seq,sc); if(e->as.comp.cond)rw_expr(rw,e->as.comp.cond,sc); rw_expr(rw,e->as.comp.elt,sc); if(e->as.comp.key)rw_expr(rw,e->as.comp.key,sc); break;
+    case E_FSTR:
+        for(size_t i=0;i<e->as.fstr.count;i++)rw_expr(rw,e->as.fstr.exprs[i],sc); break;
     case E_BINOP:
         rw_expr(rw, e->as.bin.lhs, sc);
         rw_expr(rw, e->as.bin.rhs, sc);
@@ -728,6 +742,8 @@ static void rw_func(RW *rw, Stmt *s, const RScope *parent) {
     for (size_t i = 0; i < s->as.func.param_count; i++)
         rw_type(rw, s->as.func.param_types[i], &sc);
     rw_type(rw, s->as.func.ret_type, &sc);
+    for (size_t i = 0; i < s->as.func.param_count; i++)
+        if (s->as.func.defaults && s->as.func.defaults[i]) rw_expr(rw, s->as.func.defaults[i], &sc);
     rw_block(rw, &s->as.func.body, &sc);
     rw->tvars.count = mark;
 

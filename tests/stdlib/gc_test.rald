@@ -1,7 +1,5 @@
-import dict
 import lists
 import strings
-from dict import Map
 
 # Build a large structure through append, forcing many collections, then verify
 # every element survived. A missing write barrier shows up here as a crash or a
@@ -21,14 +19,14 @@ for i in range(2000) {
 }
 print("rows intact:", ok)
 
-# A map big enough to rehash several times, with the values themselves heap
+# A map big enough to grow several times, with the values themselves heap
 # objects, so promotion and the remembered set are both exercised.
-m: Map[list[str]] = dict.new_map()
-for i in range(2000) { dict.set(m, "key" + str(i), ["a" + str(i), "b" + str(i)]) }
-print(dict.size(m))
+m = dict()
+for i in range(2000) { m["key" + str(i)] = ["a" + str(i), "b" + str(i)] }
+print(len(m))
 good = True
 for i in range(2000) {
-    v = dict.get_or(m, "key" + str(i), [])
+    v = m["key" + str(i)]
     if len(v) != 2 { good = False }
     elif v[0] != "a" + str(i) { good = False }
 }

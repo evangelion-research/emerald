@@ -218,6 +218,25 @@ primary        := int_lit | float_lit | string_lit
 Python (implemented via statement lowering in codegen, so side effects on the
 right-hand side are skipped correctly).
 
+### Extended expression forms
+
+Tuples use comma-separated parenthesized expressions (`(a, b)`; `(a,)` is a
+one-tuple). Bracket comprehensions support `[expr for name in seq if cond]`;
+brace comprehensions support `{expr for name in seq if cond}` and
+`{key: value for name in seq if cond}`. Non-record brace literals are dynamic
+sets (`{1, 2}`) or dictionaries (`{"name": value}`); identifier keys followed
+by a colon remain structural record fields.
+
+Postfix indexing accepts slices with omitted bounds and an optional step:
+`xs[lo:hi]`, `xs[:hi]`, `xs[lo:]`, and `xs[::step]`. Function parameters may
+have trailing defaults (`def f(x, y = 1)`) and calls may use keyword arguments
+(`f(y = 2, x = 3)`). An f-string is an `f`-prefixed quoted string with
+`{expression}` interpolations; doubled braces escape literal braces.
+
+Bitwise `|`, `^`, `&`, `<<`, and numeric `>>` operate on integers. The
+function-valued form of `>>` retains composition; `>>>` is also accepted as an
+unambiguous right-shift spelling.
+
 ### The `{` ambiguity
 
 `{` opens both blocks and record literals. Like Go, a record literal is

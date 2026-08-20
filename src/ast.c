@@ -29,7 +29,9 @@ static const char *binop_name(BinOp op) {
     case B_EQ: return "==";  case B_NE: return "!=";
     case B_LT: return "<";   case B_LE: return "<=";
     case B_GT: return ">";   case B_GE: return ">=";
-    case B_AND: return "and"; case B_OR: return "or";
+    case B_AND: return "and"; case B_OR: return "or"; case B_IN: return "in";
+    case B_BITOR: return "|"; case B_BITXOR: return "^"; case B_BITAND: return "&";
+    case B_LSHIFT: return "<<"; case B_RSHIFT: return ">>";
     case B_PIPE: return "|>"; case B_COMPOSE: return ">>";
     }
     return "?";
@@ -161,6 +163,11 @@ static void print_expr(FILE *out, const Expr *e) {
         }
         fputs(")", out);
         break;
+    case E_TUPLE:
+        fputs("(tuple", out);
+        for (size_t i = 0; i < e->as.list.count; i++) { fputs(" ", out); print_expr(out, e->as.list.items[i]); }
+        fputs(")", out);
+        break;
     case E_REC:
         fputs("(record", out);
         for (size_t i = 0; i < e->as.rec.count; i++) {
@@ -170,6 +177,18 @@ static void print_expr(FILE *out, const Expr *e) {
         }
         fputs(")", out);
         break;
+    case E_DICT:
+        fputs("(dict", out);
+        for (size_t i = 0; i < e->as.dict.count; i++) { fputs(" (", out); print_expr(out, e->as.dict.keys[i]); fputs(" ", out); print_expr(out, e->as.dict.values[i]); fputs(")", out); }
+        fputs(")", out); break;
+    case E_SET:
+        fputs("(set", out); for (size_t i = 0; i < e->as.set.count; i++) { fputs(" ", out); print_expr(out, e->as.set.items[i]); } fputs(")", out); break;
+    case E_SLICE:
+        fputs("(slice ", out); print_expr(out, e->as.slice.seq); fputs(" ", out); if(e->as.slice.start) print_expr(out,e->as.slice.start); else fputs("None",out); fputs(" ",out); if(e->as.slice.stop) print_expr(out,e->as.slice.stop); else fputs("None",out); fputs(")",out); break;
+    case E_COMP:
+        fprintf(out, "(comp %s %s ", e->as.comp.kind == COMP_LIST ? "list" : e->as.comp.kind == COMP_SET ? "set" : "dict", e->as.comp.var); print_expr(out,e->as.comp.seq); fputs(" ",out); print_expr(out,e->as.comp.elt); fputs(")",out); break;
+    case E_FSTR:
+        fputs("(fstr",out); for(size_t i=0;i<e->as.fstr.count;i++){ fputs(" ",out); print_expr(out,e->as.fstr.exprs[i]); } fputs(")",out); break;
     case E_BINOP:
         fprintf(out, "(%s ", binop_name(e->as.bin.op));
         print_expr(out, e->as.bin.lhs);
@@ -187,6 +206,7 @@ static void print_expr(FILE *out, const Expr *e) {
         print_expr(out, e->as.call.fn);
         for (size_t i = 0; i < e->as.call.count; i++) {
             fputs(" ", out);
+            if (e->as.call.arg_names && e->as.call.arg_names[i]) fprintf(out, "%s=", e->as.call.arg_names[i]);
             print_expr(out, e->as.call.args[i]);
         }
         fputs(")", out);
@@ -346,6 +366,7 @@ static void print_stmt(FILE *out, const Stmt *s, int indent) {
             if (i) fputs(" ", out);
             fprintf(out, "%s:", s->as.func.params[i]);
             print_type(out, s->as.func.param_types[i]);
+            if (s->as.func.defaults && s->as.func.defaults[i]) { fputs("=", out); print_expr(out, s->as.func.defaults[i]); }
         }
         fputs(") -> ", out);
         print_type(out, s->as.func.ret_type);

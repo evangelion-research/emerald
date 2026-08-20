@@ -15,7 +15,8 @@ types cost nothing at runtime — and unannotated code still runs like Python.
 | `any`                | the gradual escape hatch; compatible with everything        |
 | `never`              | the empty type; no value inhabits it                        |
 | `3` `-1` `"red"` `True` | **literal types**: a single value as a type              |
-| `list[T]`            | list with element type `T`                                  |
+| `list[T]`            | mutable list with element type `T`                          |
+| `seq[T]`             | immutable, covariant sequence with element type `T`          |
 | `{ x: int, y: int }` | record (structural, anonymous)                              |
 | `A \| B`             | union                                                       |
 | `A & B`              | intersection of two record types (fields merge, right wins) |
@@ -47,14 +48,41 @@ Assignability rules (`dst <- src`):
   with assignable types (width subtyping). Extra fields are fine.
 - `src` fits `A | B` if it fits either; `A | B` fits `dst` only if **every**
   alternative fits.
-- `list[S]` fits `list[T]` if `S` fits `T` — covariant, i.e. conveniently
-  unsound in exactly the way TypeScript arrays are. A `list[int]` passed as
-  `list[int | None]` can be mutated to smuggle a `None` back; the runtime's
-  tagged values keep this from ever being memory-unsafe.
+- In ordinary mode, `list[S]` fits `list[T]` if `S` fits `T` — covariant, as
+  in TypeScript arrays. When this upcast would rely on mutable aliasing, the
+  checker emits `W_UNSOUND_COVARIANCE`; it remains memory-safe because runtime
+  values are tagged. Under `--proof`, mutable lists are invariant (apart from
+  fresh literal widening and the gradual `any` escape hatch), so the same
+  upcast is rejected.
+- `seq[S]` fits `seq[T]` covariantly in every mode. A `seq` is backed by the
+  same runtime list representation, but the checker rejects `append` and item
+  assignment, making the covariance sound. `freeze(list[T]) -> seq[T]` and
+  `thaw(seq[T]) -> list[T]` make the boundary explicit.
 - A function type `(A, B) -> C` fits `(A', B') -> C'` when its parameters are
   invariant (`A == A'`, `B == B'`) and its return is covariant (`C` fits
   `C'`). A top-level `def` name reads as a function value of its declared
   type; a nested `def` likewise, and it captures enclosing locals.
+
+## Mutable lists, immutable sequences, and proof mode
+
+`list[T]` is the ergonomic mutable collection. Its ordinary-mode covariance is
+kept for compatibility with the scripting language, but `W_UNSOUND_COVARIANCE`
+marks assignments and calls that could write a wider element type through a
+narrower list reference. Treat that warning as a request to use `seq[T]` or
+`freeze()` when the value is read-only.
+
+`seq[T]` is the sound collection boundary: it supports indexing, length,
+iteration, and the read-only `map`/`filter`/`reduce` paths, but rejects
+`append()` and `xs[i] = value`. A list literal receives its `seq` element type
+from a contextual annotation, so `xs: seq[int] = [1, 2, 3]` is checked without
+introducing a second literal syntax. `thaw()` copies before returning a mutable
+list, so mutations cannot affect the source sequence.
+
+Proof mode uses the same rule rather than requiring every program to migrate:
+mutable `list[T]` becomes invariant, while immutable `seq[T]` remains covariant.
+Fresh literals may still widen at a call boundary because they have not escaped
+as aliases; this is why ordinary list-building proofs such as `map((x) => ...,
+[1, 2])` remain usable.
 
 ## Literal types
 
@@ -356,13 +384,12 @@ Three declarations on a `def` turn the checker from a type checker into a
   recognized yet, so those also need `partial`.
 
 - **`--proof`** — `emeraldc --check --proof f.rald`. Proof mode bans `any`
-  (in annotations, in signatures, and wherever a value's inferred type is
-  `any`) and bans `partial`. A clean `--check --proof` therefore means every
-  value has a static type and every function terminates structurally — the
-  minimal meaning of "this is a proof" (see `proofs.md`). `[]` literals
-  still have element type `any` inside, and `any` hidden inside a type is
-  not yet tainted through, so proof mode is a strict first cut, not a
-  complete soundness guarantee.
+  (including `any` reachable inside a type constructor), bans `partial`, and
+  makes mutable `list[T]` invariant. A clean `--check --proof` therefore means
+  every value has a static type, mutable aliases cannot cross an unsound list
+  upcast, and every function terminates structurally — the minimal meaning of
+  "this is a proof" (see `proofs.md`). Use `seq[T]` for sound covariant
+  read-only data.
 
 Both `pure` and `partial` may appear on the same function (`pure partial`),
 and neither changes code generation — they are checker-only.
@@ -386,7 +413,8 @@ serve as tagged sum types for pattern matching.
   `c = 0; def bump() -> int { c = c + 1; return c }; return bump`.
 
 - **Higher-order builtins** — typed with fresh type variables at each call
-  site (so nested use composes):
+  site (so nested use composes); `map`, `filter`, and `reduce` preserve whether
+  their sequence argument is a mutable `list` or immutable `seq`:
 
   ```
   map(f: (T) -> U, xs: list[T]) -> list[U]

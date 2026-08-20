@@ -23,7 +23,7 @@ of a program's meaning as is practical.
 - **Expected errors** — `error` declarations, `Result[T, E]`, `try` propagation,
   and exhaustive `catch`; no exceptions.
 - **Runtime** — a two-generation mark-and-sweep garbage collector with shadow
-  stacks, and 76 builtins compiled straight into runtime calls.
+  stacks, and 78 builtins compiled straight into runtime calls.
 - **Concurrency** — cooperative green threads: `spawn`/`join`/`chan`/`send`/
   `recv`/`sleep`/`task_yield`, with deadlock reporting.
 - **Standard library** — 13 modules in Emerald: `math`, `lists`, `strings`,

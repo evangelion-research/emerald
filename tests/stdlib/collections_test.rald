@@ -1,14 +1,16 @@
-import set
 import sort
 
-a = set.from_list(["x", "y", "x"])
-b = set.from_list(["y", "z"])
-print(set.size(a), set.has(a, "x"), set.has(a, "q"))
-print(set.sorted_elements(set.union(a, b)), set.sorted_elements(set.intersect(a, b)))
-print(set.sorted_elements(set.difference(a, b)), set.is_subset(set.from_list(["y"]), a))
-set.add(a, "w")
-print(set.remove(a, "w"), set.remove(a, "w"), set.is_empty(set.new_set()))
-print(set.sorted_elements(set.from_list([])))
+a = set(["x", "y", "x"])
+b = set(["y", "z"])
+def elements(s) -> list[str] {
+    out: list[str] = []
+    for x in s { append(out, x) }
+    return out
+}
+print(len(a), "x" in a, "q" in a)
+print(sort.sorted_strs(elements(a | b)), sort.sorted_strs(elements(a & b)))
+print(sort.sorted_strs(elements(a - b)), sort.sorted_strs(elements(a ^ b)))
+print(len(set([])), "y" in set(["y"]))
 
 xs = [5, 3, 9, 1, 3]
 print(sort.sorted_ints(xs), sort.sorted_strs(["pear", "apple", "fig"]))

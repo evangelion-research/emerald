@@ -1898,6 +1898,20 @@ static Type *infer_binop(Ck *ck, const Expr *e) {
         return ty_join(l, r); /* Python semantics: result is one operand */
     case B_EQ: case B_NE:
         return &t_bool;
+    case B_IN:
+        if (r->k != TY_ANY && r->k != TY_LIST && r->k != TY_SEQ &&
+            r->k != TY_STR && r->k != TY_UNION)
+            ck_error(ck, "E_TYPE_OPERAND", e->line, e->col,
+                     "right side of 'in' is not a container: %s", type_str(r));
+        return &t_bool;
+    case B_BITOR: case B_BITXOR: case B_BITAND: case B_LSHIFT: case B_RSHIFT:
+        if (l->k == TY_ANY || r->k == TY_ANY) return &t_any;
+        if ((l->k != TY_INT && l->k != TY_BOOL) ||
+            (r->k != TY_INT && r->k != TY_BOOL))
+            ck_error(ck, "E_TYPE_OPERAND", e->line, e->col,
+                     "bitwise operators require int operands, got %s and %s",
+                     type_str(l), type_str(r));
+        return &t_int;
     case B_LT: case B_LE: case B_GT: case B_GE: {
         bool ok = (is_numeric(l) && is_numeric(r)) ||
                   (l->k == TY_STR && r->k == TY_STR) ||
@@ -1924,7 +1938,8 @@ static Type *infer_binop(Ck *ck, const Expr *e) {
                        type_str(l), type_str(fnt->fun.params[0]));
         return fnt->fun.ret;
     }
-    case B_COMPOSE: { /* f >> g == x -> g(f(x)) */
+    case B_COMPOSE: { /* functions compose; numeric operands are right shift */
+        if (is_numeric(l) && is_numeric(r)) return &t_int;
         Type *fl = ty_resolve(l);
         Type *fr = ty_resolve(r);
         if (fl->k != TY_FUNC || fl->fun.count != 1 ||
@@ -2187,6 +2202,39 @@ static void assign_owned(Ck *ck, Var *v, const char *name, const Expr *value) {
     }
 }
 
+static bool func_has_defaults(const FuncSig *f) {
+    if (!f->node || !f->node->as.func.defaults) return false;
+    for (size_t i=0;i<f->param_count;i++) if (f->node->as.func.defaults[i]) return true;
+    return false;
+}
+
+static size_t func_required(const FuncSig *f) {
+    size_t n = f->param_count;
+    while (n && f->node && f->node->as.func.defaults && f->node->as.func.defaults[n - 1]) n--;
+    return n;
+}
+
+static bool map_call_args(Ck *ck, const Expr *e, const FuncSig *f, size_t *out) {
+    size_t np=f->param_count, pos=0;
+    bool *used=xcalloc(np ? np : 1,sizeof(bool)); bool ok=true;
+    for(size_t i=0;i<e->as.call.count;i++) {
+        const char *name=e->as.call.arg_names ? e->as.call.arg_names[i] : NULL;
+        size_t j=pos;
+        if(name) { for(j=0;j<np;j++) if(strcmp(f->node->as.func.params[j],name)==0) break; if(j==np) ok=false; }
+        else { while(j<np&&used[j])j++; pos=j+1; }
+        if(j>=np || used[j]) ok=false; else { used[j]=true; out[i]=j; }
+    }
+    size_t req=func_required(f), supplied=0; for(size_t j=0;j<np;j++) if(used[j]) supplied++;
+    if(supplied < req || supplied > np) ok=false;
+    if(!ok) {
+        if (!func_has_defaults(f) && e->as.call.count != np)
+            ck_error(ck,"E_TYPE_ARITY",e->line,e->col,"%s() takes %zu arguments, got %zu",f->disp,np,e->as.call.count);
+        else
+            ck_error(ck,"E_TYPE_ARITY",e->line,e->col,"invalid arguments for %s() (expected %zu..%zu arguments, got %zu)",f->disp,req,np,e->as.call.count);
+    }
+    free(used); return ok;
+}
+
 static Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
     const Expr *fn = e->as.call.fn;
     size_t argc = e->as.call.count;
@@ -2219,6 +2267,12 @@ static Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
         if (strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
             strcmp(name, "reduce") == 0)
             return infer_map_like(ck, e, name, argt, islam);
+        if (strcmp(name, "dict") == 0 || strcmp(name, "set") == 0) {
+            if (argc > 1)
+                ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
+                         "%s() takes 0 or 1 arguments, got %zu", name, argc);
+            return &t_any; /* runtime values are intentionally not type constructors */
+        }
         FuncSig *f = find_func(ck, name);
         if (!f) /* plain builtins have no typed signature: lambdas are free */
             for (size_t i = 0; i < argc; i++)
@@ -2604,29 +2658,30 @@ static Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
         }
 
         if (f) {
+            size_t *argpi = xmalloc(sizeof(size_t) * (argc ? argc : 1));
+            bool call_ok = map_call_args(ck, e, f, argpi);
             /* purity: a pure function may only call other pure functions */
             if (ck->cur_pure && !f->pure)
                 ck_error(ck, "E_TYPE_PURE_CALL", e->line, e->col,
                          "pure function calls impure function '%s'", dname);
-            if (!ck_arity(ck, e, dname, f->param_count))
-                return f->tparam_count ? &t_any : f->ret;
+            if (!call_ok) { free(argpi); return f->tparam_count ? &t_any : f->ret; }
             if (f->tparam_count == 0) {
                 /* infer deferred lambdas against the declared parameter types */
                 for (size_t i = 0; i < argc; i++)
                     if (islam[i])
                         argt[i] = infer_lambda(ck, e->as.call.args[i],
-                                               f->params[i]);
+                                               f->params[argpi[i]]);
                 for (size_t i = 0; i < argc; i++) {
-                    note_shape_crossing(ck, f->params[i], argt[i]);
-                    ck_covariance(ck, f->params[i], argt[i], e->line, e->col);
-                    if (!assignable(f->params[i], argt[i]))
+                    Type *param = f->params[argpi[i]];
+                    note_shape_crossing(ck, param, argt[i]);
+                    ck_covariance(ck, param, argt[i], e->line, e->col);
+                    if (!assignable(param, argt[i]))
                         ck_error_t(ck, "E_TYPE_ARG", e->line, e->col,
-                                   f->params[i], argt[i],
+                                   param, argt[i],
                                    "argument %zu of %s(): expected %s, got %s",
-                                   i + 1, dname, type_str(f->params[i]),
-                                   type_str(argt[i]));
+                                   i + 1, dname, type_str(param), type_str(argt[i]));
                 }
-                return f->ret;
+                free(argpi); return f->ret;
             }
             /* generic call: infer type arguments by unification, then re-check */
             Subst sub;
@@ -2635,7 +2690,7 @@ static Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
             sub.types = xmalloc(sizeof(Type *) * f->tparam_count);
             memset(sub.types, 0, sizeof(Type *) * f->tparam_count);
             for (size_t i = 0; i < argc; i++)
-                if (!islam[i]) unify(f->params[i], argt[i], &sub);
+                if (!islam[i]) unify(f->params[argpi[i]], argt[i], &sub);
             /* contextual return-type propagation: a type parameter that appears
              * only in the return type (`m: Map[V] = new_map()`) is bound from
              * the expected result. Only still-unbound parameters are filled, so
@@ -2658,14 +2713,14 @@ static Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
             for (size_t i = 0; i < argc; i++)
                 if (islam[i])
                     argt[i] = infer_lambda(ck, e->as.call.args[i],
-                                           ty_subst(f->params[i], &sub));
+                                           ty_subst(f->params[argpi[i]], &sub));
             /* now unify everything, so lambda return types bind the rest */
             for (size_t i = 0; i < argc; i++)
-                unify(f->params[i], argt[i], &sub);
+                unify(f->params[argpi[i]], argt[i], &sub);
             for (size_t j = 0; j < f->tparam_count; j++)
                 if (!sub.types[j]) sub.types[j] = &t_any;
             for (size_t i = 0; i < argc; i++) {
-                Type *pi = ty_subst(f->params[i], &sub);
+                Type *pi = ty_subst(f->params[argpi[i]], &sub);
                 note_shape_crossing(ck, pi, argt[i]);
                 ck_covariance(ck, pi, argt[i], e->line, e->col);
                 if (!assignable(pi, argt[i]))
@@ -2675,7 +2730,7 @@ static Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
                                i + 1, dname, type_str(pi), type_str(argt[i]));
             }
             Type *ret = ty_subst(f->ret, &sub);
-            free(sub.types);
+            free(sub.types); free(argpi);
             return ret;
         }
         /* an undefined name being called is its own error */
@@ -2697,9 +2752,9 @@ static Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
     if (ck->cur_pure && ft->fun.eff != EFF_PURE)
         ck_error(ck, "E_TYPE_PURE_CALL", e->line, e->col,
                  "pure function calls impure function value");
-    if (argc != ft->fun.count) {
+    if (argc > ft->fun.count) {
         ck_error(ck, "E_TYPE_ARITY", e->line, e->col,
-                 "function takes %zu argument%s, got %zu",
+                 "function takes at most %zu argument%s, got %zu",
                  ft->fun.count, ft->fun.count == 1 ? "" : "s", argc);
         return ft->fun.ret;
     }
@@ -2973,6 +3028,45 @@ static Type *infer(Ck *ck, const Expr *e) {
             elem = ty_join(elem, infer(ck, e->as.list.items[i]));
         return ty_list(elem);
     }
+    case E_TUPLE:
+        for (size_t i = 0; i < e->as.list.count; i++) infer(ck, e->as.list.items[i]);
+        return &t_any;
+    case E_DICT:
+        for (size_t i = 0; i < e->as.dict.count; i++) {
+            Type *key = ty_base(infer(ck, e->as.dict.keys[i]));
+            infer(ck, e->as.dict.values[i]);
+            if (key->k != TY_STR && key->k != TY_ANY)
+                ck_error(ck, "E_TYPE_DICT_KEY", e->line, e->col,
+                         "dict keys must be str, got %s", type_str(key));
+        }
+        return &t_any;
+    case E_SET:
+        for (size_t i = 0; i < e->as.set.count; i++) infer(ck,e->as.set.items[i]);
+        return &t_any;
+    case E_SLICE: {
+        Type *s = ty_base(infer(ck,e->as.slice.seq));
+        if(e->as.slice.start) infer(ck,e->as.slice.start); if(e->as.slice.stop) infer(ck,e->as.slice.stop); if(e->as.slice.step) infer(ck,e->as.slice.step);
+        if(s->k==TY_LIST||s->k==TY_SEQ||s->k==TY_STR) return s;
+        return &t_any;
+    }
+    case E_FSTR:
+        for(size_t i=0;i<e->as.fstr.count;i++) infer(ck,e->as.fstr.exprs[i]);
+        return &t_str;
+    case E_COMP: {
+        infer(ck,e->as.comp.seq); Scope sc; memset(&sc,0,sizeof(sc)); sc.parent=ck->scope;
+        Var *v=env_add(&sc.locals,e->as.comp.var,&t_any,false); v->bound=true;
+        Scope *saved=ck->scope; ck->scope=&sc;
+        if(e->as.comp.cond) infer(ck,e->as.comp.cond);
+        Type *et=infer(ck,e->as.comp.elt);
+        if (e->as.comp.key) {
+            Type *key = ty_base(infer(ck, e->as.comp.key));
+            if (key->k != TY_STR && key->k != TY_ANY)
+                ck_error(ck, "E_TYPE_DICT_KEY", e->line, e->col,
+                         "dict comprehension keys must be str, got %s", type_str(key));
+        }
+        ck->scope=saved; free(sc.locals.items);
+        if(e->as.comp.kind==COMP_LIST) return ty_list(et); return &t_any;
+    }
     case E_REC: {
         Type *t = ty_new(TY_REC);
         t->rec.names = e->as.rec.names;
@@ -3020,7 +3114,7 @@ static Type *infer(Ck *ck, const Expr *e) {
     case E_INDEX: {
         Type *seq = ty_base(infer(ck, e->as.index.seq));
         Type *idx = infer(ck, e->as.index.idx);
-        if (!assignable(&t_int, idx) || idx->k == TY_FLOAT)
+        if (seq->k != TY_ANY && (!assignable(&t_int, idx) || idx->k == TY_FLOAT))
             ck_error(ck, "E_TYPE_INDEX", e->line, e->col,
                      "index must be int, got %s", type_str(idx));
         if (seq->k == TY_NEVER) return &t_never;
@@ -4110,7 +4204,7 @@ static void check_assign(Ck *ck, const Stmt *s) {
         mark_escaped(ck, s->as.assign.value);
         Type *seq = ty_base(infer(ck, target->as.index.seq));
         Type *idx = infer(ck, target->as.index.idx);
-        if (!assignable(&t_int, idx) || idx->k == TY_FLOAT)
+        if (seq->k != TY_ANY && (!assignable(&t_int, idx) || idx->k == TY_FLOAT))
             ck_error(ck, "E_TYPE_INDEX", s->line, s->col,
                      "index must be int, got %s", type_str(idx));
         if (seq->k == TY_STR) {

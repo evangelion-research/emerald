@@ -13,6 +13,13 @@
 /* Strings of SSO_MAX bytes or fewer live inline in the Value (see runtime.h). */
 #define SSO_MAX 7
 
+static bool value_eq(Value a, Value b);
+static bool is_str(Value v);
+static bool is_list(Value v);
+static bool is_set(Value v);
+static bool is_tuple(Value v);
+static Value set_binary(Value a, Value b, char op);
+
 _Thread_local RootFrame *rt_roots = NULL;
 
 /* Every green thread has its own shadow stack; the scheduler owns the list of
@@ -126,6 +133,7 @@ static void gc_mark_obj(Obj *o, bool minor) {
     case O_STR:
         break;
     case O_LIST:
+    case O_TUPLE:
         for (size_t i = 0; i < o->as.list.len; i++)
             gc_mark_value(o->as.list.items[i], minor);
         break;
@@ -133,9 +141,19 @@ static void gc_mark_obj(Obj *o, bool minor) {
         for (size_t i = 0; i < o->as.rec.len; i++)
             gc_mark_value(o->as.rec.vals[i], minor);
         break;
+    case O_DICT:
+        for (size_t i = 0; i < o->as.dict.len; i++) {
+            gc_mark_value(o->as.dict.keys[i], minor);
+            gc_mark_value(o->as.dict.vals[i], minor);
+        }
+        break;
+    case O_SET:
+        for (size_t i = 0; i < o->as.set.len; i++)
+            gc_mark_value(o->as.set.items[i], minor);
+        break;
     case O_FUNC:
-        for (size_t i = 0; i < o->as.func.env_count; i++)
-            gc_mark_value(o->as.func.env[i], minor);
+        for (size_t i = 0; i < o->as.func.env_count; i++) gc_mark_value(o->as.func.env[i], minor);
+        for (size_t i = 0; i < o->as.func.default_count; i++) gc_mark_value(o->as.func.defaults[i], minor);
         break;
     case O_CELL:
         gc_mark_value(o->as.cell.val, minor);
@@ -170,9 +188,11 @@ static void gc_mark_roots(bool minor) {
 static void gc_free_obj(Obj *o) {
     switch (o->tag) {
     case O_STR:  free(o->as.str.data); break;
-    case O_LIST: free(o->as.list.items); break;
+    case O_LIST: case O_TUPLE: free(o->as.list.items); break;
     case O_REC:  free(o->as.rec.keys); free(o->as.rec.vals); break;
-    case O_FUNC: free(o->as.func.env); break;
+    case O_DICT: free(o->as.dict.keys); free(o->as.dict.vals); break;
+    case O_SET:  free(o->as.set.items); break;
+    case O_FUNC: free(o->as.func.env); free(o->as.func.defaults); break;
     case O_CELL: break;
     case O_TENSOR:
         free(o->as.tensor.dims);
@@ -377,6 +397,87 @@ Value em_list_litn(size_t n, ...) {
     return obj_val(o);
 }
 
+Value em_tuple_litn(size_t n, ...) {
+    Obj *o = rt_obj_new(O_TUPLE);
+    o->as.list.items = xmalloc(sizeof(Value) * (n ? n : 1));
+    o->as.list.cap = o->as.list.len = n ? n : 1;
+    obj_charge(o, sizeof(Value) * (n ? n : 1));
+    va_list ap; va_start(ap, n);
+    for (size_t i = 0; i < n; i++) o->as.list.items[i] = va_arg(ap, Value);
+    va_end(ap); o->as.list.len = n;
+    return obj_val(o);
+}
+
+Value em_dict_litn(size_t n, ...) {
+    Obj *o = rt_obj_new(O_DICT);
+    o->as.dict.keys = xmalloc(sizeof(Value) * (n ? n : 1));
+    o->as.dict.vals = xmalloc(sizeof(Value) * (n ? n : 1));
+    o->as.dict.cap = n ? n : 1;
+    o->as.dict.len = 0;
+    obj_charge(o, sizeof(Value) * (n ? n : 1) * 2);
+    Value out = obj_val(o);
+    va_list ap; va_start(ap, n);
+    for (size_t i = 0; i < n; i++) {
+        Value key = va_arg(ap, Value), value = va_arg(ap, Value);
+        em_dict_set(out, key, value);
+    }
+    va_end(ap);
+    return out;
+}
+
+Value em_set_litn(size_t n, ...) {
+    Obj *o = rt_obj_new(O_SET);
+    o->as.set.items = xmalloc(sizeof(Value) * (n ? n : 1));
+    o->as.set.cap = n ? n : 1;
+    o->as.set.len = 0;
+    obj_charge(o, sizeof(Value) * (n ? n : 1));
+    Value out = obj_val(o);
+    va_list ap; va_start(ap, n);
+    for (size_t i = 0; i < n; i++) em_set_add(out, va_arg(ap, Value));
+    va_end(ap);
+    return out;
+}
+
+/* Python-style constructors. Dictionaries are deliberately string-keyed;
+ * there is no hashability constraint in Emerald's type language. */
+static bool is_pair(Value v) {
+    return is_list(v) || is_tuple(v);
+}
+
+Value em_dict_from(Value iterable) {
+    Value out = em_dict_litn(0);
+    RootFrame fr;
+    rt_push_frame(&fr, &out, 1);
+    if (iterable.tag == V_OBJ && iterable.as.o->tag == O_DICT) {
+        for (size_t i = 0; i < iterable.as.o->as.dict.len; i++)
+            em_dict_set(out, iterable.as.o->as.dict.keys[i], iterable.as.o->as.dict.vals[i]);
+    } else {
+        int64_t i = 0; Value item;
+        while (rt_iter_get(iterable, i++, &item)) {
+            if (!is_pair(item) || item.as.o->as.list.len != 2)
+                rt_fatal("dict() iterable elements must be 2-item lists or tuples");
+            em_dict_set(out, item.as.o->as.list.items[0], item.as.o->as.list.items[1]);
+        }
+    }
+    rt_pop_frame();
+    return out;
+}
+
+Value em_set_from(Value iterable) {
+    Value out = em_set_litn(0);
+    RootFrame fr;
+    rt_push_frame(&fr, &out, 1);
+    if (iterable.tag == V_OBJ && iterable.as.o->tag == O_DICT) {
+        for (size_t i = 0; i < iterable.as.o->as.dict.len; i++)
+            em_set_add(out, iterable.as.o->as.dict.keys[i]);
+    } else {
+        int64_t i = 0; Value item;
+        while (rt_iter_get(iterable, i++, &item)) em_set_add(out, item);
+    }
+    rt_pop_frame();
+    return out;
+}
+
 Value em_rec_litn(size_t n, ...) {
     Obj *o = rt_obj_new(O_REC);
     o->as.rec.keys = xmalloc(sizeof(char *) * (n ? n : 1));
@@ -409,7 +510,10 @@ static const char *type_name(Value v) {
         switch (v.as.o->tag) {
         case O_STR:  return "str";
         case O_LIST: return "list";
+        case O_TUPLE: return "tuple";
         case O_REC:  return "record";
+        case O_DICT: return "dict";
+        case O_SET: return "set";
         case O_FUNC: return "function";
         case O_CELL: return "cell";
         case O_TENSOR: return "tensor";
@@ -422,6 +526,8 @@ static const char *type_name(Value v) {
 
 static bool is_str(Value v)  { return v.tag == V_STR || (v.tag == V_OBJ && v.as.o->tag == O_STR); }
 static bool is_list(Value v) { return v.tag == V_OBJ && v.as.o->tag == O_LIST; }
+static bool is_tuple(Value v) { return v.tag == V_OBJ && v.as.o->tag == O_TUPLE; }
+static bool is_set(Value v) { return v.tag == V_OBJ && v.as.o->tag == O_SET; }
 static bool is_rec(Value v)  { return v.tag == V_OBJ && v.as.o->tag == O_REC; }
 static bool is_num(Value v)  { return v.tag == V_INT || v.tag == V_FLOAT || v.tag == V_BOOL; }
 static bool is_tensor(Value v) { return v.tag == V_OBJ && v.as.o->tag == O_TENSOR; }
@@ -503,12 +609,14 @@ static void write_value(SB *sb, Value v, bool repr) {
             }
             break;
         case O_LIST:
-            sb_puts(sb, "[");
+        case O_TUPLE:
+            sb_puts(sb, v.as.o->tag == O_TUPLE ? "(" : "[");
             for (size_t i = 0; i < v.as.o->as.list.len; i++) {
                 if (i) sb_puts(sb, ", ");
                 write_value(sb, v.as.o->as.list.items[i], true);
             }
-            sb_puts(sb, "]");
+            if (v.as.o->tag == O_TUPLE && v.as.o->as.list.len == 1) sb_puts(sb, ",");
+            sb_puts(sb, v.as.o->tag == O_TUPLE ? ")" : "]");
             break;
         case O_REC:
             sb_puts(sb, "{");
@@ -517,6 +625,24 @@ static void write_value(SB *sb, Value v, bool repr) {
                 sb_puts(sb, v.as.o->as.rec.keys[i]);
                 sb_puts(sb, ": ");
                 write_value(sb, v.as.o->as.rec.vals[i], true);
+            }
+            sb_puts(sb, "}");
+            break;
+        case O_DICT:
+            sb_puts(sb, "{");
+            for (size_t i = 0; i < v.as.o->as.dict.len; i++) {
+                if (i) sb_puts(sb, ", ");
+                write_value(sb, v.as.o->as.dict.keys[i], true);
+                sb_puts(sb, ": ");
+                write_value(sb, v.as.o->as.dict.vals[i], true);
+            }
+            sb_puts(sb, "}");
+            break;
+        case O_SET:
+            sb_puts(sb, "{");
+            for (size_t i = 0; i < v.as.o->as.set.len; i++) {
+                if (i) sb_puts(sb, ", ");
+                write_value(sb, v.as.o->as.set.items[i], true);
             }
             sb_puts(sb, "}");
             break;
@@ -674,6 +800,7 @@ Value em_add(Value a, Value b) {
 
 #define NUM_BINOP(name, op, sym)                                              \
     Value name(Value a, Value b) {                                            \
+        if (is_set(a) && is_set(b)) return set_binary(a, b, '-');              \
         if (is_tensor(a) || is_tensor(b)) return em_tensor_sub(a, b);         \
         if (a.tag == V_INT && b.tag == V_INT) return em_int(a.as.i op b.as.i);\
         if (is_num(a) && is_num(b)) {                                         \
@@ -802,9 +929,29 @@ static bool value_eq(Value a, Value b) {
     case O_STR:  break; /* unreachable: both-strings handled above */
     case O_FUNC: return x == y; /* functions compare by identity */
     case O_TENSOR: return x == y; /* tensors compare by identity */
+    case O_DICT:
+        if (x->as.dict.len != y->as.dict.len) return false;
+        for (size_t i = 0; i < x->as.dict.len; i++) {
+            bool found = false;
+            for (size_t j = 0; j < y->as.dict.len; j++)
+                if (value_eq(x->as.dict.keys[i], y->as.dict.keys[j]) &&
+                    value_eq(x->as.dict.vals[i], y->as.dict.vals[j])) { found = true; break; }
+            if (!found) return false;
+        }
+        return true;
+    case O_SET:
+        if (x->as.set.len != y->as.set.len) return false;
+        for (size_t i = 0; i < x->as.set.len; i++) {
+            bool found = false;
+            for (size_t j = 0; j < y->as.set.len; j++)
+                if (value_eq(x->as.set.items[i], y->as.set.items[j])) { found = true; break; }
+            if (!found) return false;
+        }
+        return true;
     case O_CHAN: case O_TASK: return x == y; /* handles compare by identity */
     case O_CELL: return value_eq(x->as.cell.val, y->as.cell.val);
     case O_LIST:
+    case O_TUPLE:
         if (x->as.list.len != y->as.list.len) return false;
         for (size_t i = 0; i < x->as.list.len; i++)
             if (!value_eq(x->as.list.items[i], y->as.list.items[i])) return false;
@@ -859,6 +1006,30 @@ Value em_le(Value a, Value b) { return em_bool(value_cmp(a, b) <= 0); }
 Value em_gt(Value a, Value b) { return em_bool(value_cmp(a, b) > 0); }
 Value em_ge(Value a, Value b) { return em_bool(value_cmp(a, b) >= 0); }
 
+static Value bitop(Value a, Value b, char op) {
+    if (is_set(a) && is_set(b)) return set_binary(a, b, op);
+    if (a.tag != V_INT || b.tag != V_INT)
+        rt_fatal("bitwise operators require int operands, got %s and %s",
+                 type_name(a), type_name(b));
+    switch (op) {
+    case '|': return em_int(a.as.i | b.as.i);
+    case '^': return em_int(a.as.i ^ b.as.i);
+    case '&': return em_int(a.as.i & b.as.i);
+    case '<':
+        if (b.as.i < 0 || b.as.i >= 64) rt_fatal("invalid shift count");
+        return em_int(a.as.i << b.as.i);
+    case '>':
+        if (b.as.i < 0 || b.as.i >= 64) rt_fatal("invalid shift count");
+        return em_int(a.as.i >> b.as.i);
+    }
+    return em_none();
+}
+Value em_bitor(Value a, Value b) { return bitop(a, b, '|'); }
+Value em_bitxor(Value a, Value b) { return bitop(a, b, '^'); }
+Value em_bitand(Value a, Value b) { return bitop(a, b, '&'); }
+Value em_lshift(Value a, Value b) { return bitop(a, b, '<'); }
+Value em_rshift(Value a, Value b) { return bitop(a, b, '>'); }
+
 bool em_truthy(Value v) {
     switch (v.tag) {
     case V_NONE:  return false;
@@ -869,8 +1040,10 @@ bool em_truthy(Value v) {
     case V_OBJ:
         switch (v.as.o->tag) {
         case O_STR:  return str_len(&v) != 0;
-        case O_LIST: return v.as.o->as.list.len != 0;
+        case O_LIST: case O_TUPLE: return v.as.o->as.list.len != 0;
         case O_REC:  return true; /* records are always truthy, like objects */
+        case O_DICT: return v.as.o->as.dict.len != 0;
+        case O_SET: return v.as.o->as.set.len != 0;
         case O_FUNC: return true; /* functions are always truthy */
         case O_CELL: return em_truthy(v.as.o->as.cell.val);
         case O_TENSOR: return true; /* tensors are always truthy */
@@ -893,9 +1066,16 @@ static size_t norm_index(int64_t i, size_t len, const char *what) {
 }
 
 Value em_index(Value seq, Value idx) {
+    if (seq.tag == V_OBJ && seq.as.o->tag == O_DICT) {
+        if (!is_str(idx)) rt_fatal("dict keys must be str, got %s", type_name(idx));
+        for (size_t i = 0; i < seq.as.o->as.dict.len; i++)
+            if (value_eq(seq.as.o->as.dict.keys[i], idx)) return seq.as.o->as.dict.vals[i];
+        rt_fatal("dict key not found");
+    }
     if (idx.tag != V_INT) rt_fatal("indices must be int, not %s", type_name(idx));
-    if (is_list(seq))
-        return seq.as.o->as.list.items[norm_index(idx.as.i, seq.as.o->as.list.len, "list")];
+    if (is_list(seq) || (seq.tag == V_OBJ && seq.as.o->tag == O_TUPLE))
+        return seq.as.o->as.list.items[norm_index(idx.as.i, seq.as.o->as.list.len,
+                                                   seq.as.o->tag == O_TUPLE ? "tuple" : "list")];
     if (is_str(seq)) {
         size_t i = norm_index(idx.as.i, str_len(&seq), "string");
         return str_copy(str_data(&seq) + i, 1);
@@ -919,6 +1099,10 @@ Value em_index(Value seq, Value idx) {
 }
 
 void em_setindex(Value seq, Value idx, Value v) {
+    if (seq.tag == V_OBJ && seq.as.o->tag == O_DICT) {
+        em_dict_set(seq, idx, v);
+        return;
+    }
     if (!is_list(seq)) rt_fatal("cannot assign into a %s by index", type_name(seq));
     if (idx.tag != V_INT) rt_fatal("indices must be int, not %s", type_name(idx));
     seq.as.o->as.list.items[norm_index(idx.as.i, seq.as.o->as.list.len, "list")] = v;
@@ -969,10 +1153,18 @@ void em_setattr(Value rec, const char *name, Value v) {
 }
 
 bool rt_iter_get(Value seq, int64_t i, Value *out) {
-    if (is_list(seq)) {
+    if (is_list(seq) || (seq.tag == V_OBJ && seq.as.o->tag == O_TUPLE)) {
         if ((size_t)i >= seq.as.o->as.list.len) return false;
         *out = seq.as.o->as.list.items[i];
         return true;
+    }
+    if (seq.tag == V_OBJ && seq.as.o->tag == O_DICT) {
+        if ((size_t)i >= seq.as.o->as.dict.len) return false;
+        *out = seq.as.o->as.dict.keys[i]; return true;
+    }
+    if (seq.tag == V_OBJ && seq.as.o->tag == O_SET) {
+        if ((size_t)i >= seq.as.o->as.set.len) return false;
+        *out = seq.as.o->as.set.items[i]; return true;
     }
     if (is_str(seq)) {
         if ((size_t)i >= str_len(&seq)) return false;
@@ -1003,7 +1195,12 @@ void em_print(size_t n, ...) {
 
 Value em_len(Value v) {
     if (is_str(v)) return em_int((int64_t)str_len(&v));
-    if (is_list(v)) return em_int((int64_t)v.as.o->as.list.len);
+    if (is_list(v) || (v.tag == V_OBJ && v.as.o->tag == O_TUPLE))
+        return em_int((int64_t)v.as.o->as.list.len);
+    if (v.tag == V_OBJ && v.as.o->tag == O_DICT)
+        return em_int((int64_t)v.as.o->as.dict.len);
+    if (v.tag == V_OBJ && v.as.o->tag == O_SET)
+        return em_int((int64_t)v.as.o->as.set.len);
     if (is_rec(v)) return em_int((int64_t)v.as.o->as.rec.len);
     if (is_tensor(v)) {
         if (v.as.o->as.tensor.ndim == 0) return em_int(0);
@@ -1283,6 +1480,96 @@ void em_append(Value xs, Value v) {
     gc_write_barrier(o, v);
 }
 
+void em_dict_set(Value dict, Value key, Value value) {
+    if (!(dict.tag == V_OBJ && dict.as.o->tag == O_DICT))
+        rt_fatal("dict assignment expects a dict");
+    if (!is_str(key))
+        rt_fatal("dict keys must be str, got %s", type_name(key));
+    Obj *o = dict.as.o;
+    for (size_t i = 0; i < o->as.dict.len; i++)
+        if (value_eq(o->as.dict.keys[i], key)) {
+            o->as.dict.vals[i] = value; gc_write_barrier(o, value); return;
+        }
+    if (o->as.dict.len == o->as.dict.cap) {
+        size_t old = o->as.dict.cap;
+        o->as.dict.cap = old ? old * 2 : 4;
+        o->as.dict.keys = xrealloc(o->as.dict.keys, sizeof(Value) * o->as.dict.cap);
+        o->as.dict.vals = xrealloc(o->as.dict.vals, sizeof(Value) * o->as.dict.cap);
+        obj_charge(o, (o->as.dict.cap - old) * sizeof(Value) * 2);
+    }
+    o->as.dict.keys[o->as.dict.len] = key;
+    o->as.dict.vals[o->as.dict.len++] = value;
+    gc_write_barrier(o, key); gc_write_barrier(o, value);
+}
+
+void em_set_add(Value set, Value value) {
+    if (!(set.tag == V_OBJ && set.as.o->tag == O_SET))
+        rt_fatal("set insertion expects a set");
+    Obj *o = set.as.o;
+    for (size_t i = 0; i < o->as.set.len; i++)
+        if (value_eq(o->as.set.items[i], value)) return;
+    if (o->as.set.len == o->as.set.cap) {
+        size_t old = o->as.set.cap;
+        o->as.set.cap = old ? old * 2 : 4;
+        o->as.set.items = xrealloc(o->as.set.items, sizeof(Value) * o->as.set.cap);
+        obj_charge(o, (o->as.set.cap - old) * sizeof(Value));
+    }
+    o->as.set.items[o->as.set.len++] = value;
+    gc_write_barrier(o, value);
+}
+
+static Value set_binary(Value a, Value b, char op) {
+    if (!is_set(a) || !is_set(b))
+        rt_fatal("set operation requires two sets, got %s and %s",
+                 type_name(a), type_name(b));
+    Value out = em_set_litn(0);
+    const Obj *x = a.as.o, *y = b.as.o;
+    if (op == '|' || op == '^' || op == '-')
+        for (size_t i = 0; i < x->as.set.len; i++) {
+            bool in = false;
+            for (size_t j = 0; j < y->as.set.len; j++)
+                if (value_eq(x->as.set.items[i], y->as.set.items[j])) { in = true; break; }
+            if (op == '|' || (op == '^' && !in) || (op == '-' && !in))
+                em_set_add(out, x->as.set.items[i]);
+        }
+    if (op == '|' || op == '^')
+        for (size_t i = 0; i < y->as.set.len; i++) {
+            bool in = false;
+            for (size_t j = 0; j < x->as.set.len; j++)
+                if (value_eq(y->as.set.items[i], x->as.set.items[j])) { in = true; break; }
+            if (op == '|' || (op == '^' && !in)) em_set_add(out, y->as.set.items[i]);
+        }
+    if (op == '&')
+        for (size_t i = 0; i < x->as.set.len; i++)
+            for (size_t j = 0; j < y->as.set.len; j++)
+                if (value_eq(x->as.set.items[i], y->as.set.items[j])) {
+                    em_set_add(out, x->as.set.items[i]); break;
+                }
+    return out;
+}
+
+Value em_contains(Value needle, Value haystack) {
+    if (haystack.tag == V_OBJ && haystack.as.o->tag == O_DICT) {
+        if (!is_str(needle)) rt_fatal("dict keys must be str, got %s", type_name(needle));
+        for (size_t i = 0; i < haystack.as.o->as.dict.len; i++)
+            if (value_eq(needle, haystack.as.o->as.dict.keys[i])) return em_bool(true);
+        return em_bool(false);
+    }
+    if (is_str(haystack) && is_str(needle))
+        return em_bool(strstr(str_data(&haystack), str_data(&needle)) != NULL);
+    if (is_list(haystack) || is_tuple(haystack) || is_set(haystack)) {
+        size_t n = is_set(haystack) ? haystack.as.o->as.set.len : haystack.as.o->as.list.len;
+        for (size_t i = 0; i < n; i++) {
+            Value item = is_set(haystack) ? haystack.as.o->as.set.items[i]
+                                           : haystack.as.o->as.list.items[i];
+            if (value_eq(needle, item)) return em_bool(true);
+        }
+        return em_bool(false);
+    }
+    rt_fatal("%s is not a container", type_name(haystack));
+    return em_none();
+}
+
 /* Python's s[lo:hi] as a function: clamped, never an error, negatives count
  * from the end. Also slices lists, because the alternative is a second name. */
 static void slice_bounds(int64_t lo, int64_t hi, size_t n, size_t *out_lo,
@@ -1321,6 +1608,43 @@ Value em_slice(Value seq, Value lo, Value hi) {
     }
     rt_fatal("cannot slice a %s", type_name(seq));
     return em_none();
+}
+
+Value em_slice_ex(Value seq, Value lo, Value hi, Value step) {
+    int64_t st = step.tag == V_NONE ? 1 : step.as.i;
+    if (step.tag != V_NONE && step.tag != V_INT) rt_fatal("slice step must be int");
+    if (st == 0) rt_fatal("slice step cannot be zero");
+    size_t n = is_str(seq) ? str_len(&seq) :
+               (is_list(seq) || (seq.tag == V_OBJ && seq.as.o->tag == O_TUPLE))
+                   ? seq.as.o->as.list.len : 0;
+    if (!is_str(seq) && !is_list(seq) && !(seq.tag == V_OBJ && seq.as.o->tag == O_TUPLE))
+        rt_fatal("cannot slice a %s", type_name(seq));
+    int64_t a = lo.tag == V_NONE ? (st > 0 ? 0 : (int64_t)n - 1) : lo.as.i;
+    int64_t b = hi.tag == V_NONE ? (st > 0 ? (int64_t)n : -1) : hi.as.i;
+    if (a < 0) a += (int64_t)n; if (b < 0 && hi.tag != V_NONE) b += (int64_t)n;
+    if (st > 0) {
+        if (a < 0) a = 0; if (a > (int64_t)n) a = (int64_t)n;
+        if (b < 0) b = 0; if (b > (int64_t)n) b = (int64_t)n;
+    } else {
+        if (a < -1) a = -1; if (a >= (int64_t)n) a = (int64_t)n - 1;
+        if (b < -1) b = -1; if (b >= (int64_t)n) b = (int64_t)n - 1;
+    }
+    size_t count = 0;
+    for (int64_t i = a; st > 0 ? i < b : i > b; i += st) count++;
+    if (is_str(seq)) {
+        char *buf = xmalloc(count + 1); size_t k = 0;
+        for (int64_t i = a; st > 0 ? i < b : i > b; i += st) buf[k++] = str_data(&seq)[i];
+        buf[k] = '\0'; return str_take(buf, count);
+    }
+    if (seq.as.o->tag == O_TUPLE) {
+        Obj *o = rt_obj_new(O_TUPLE); o->as.list.items = xmalloc(sizeof(Value) * (count ? count : 1));
+        o->as.list.cap = o->as.list.len = count; obj_charge(o, sizeof(Value) * (count ? count : 1));
+        size_t k = 0; for (int64_t i = a; st > 0 ? i < b : i > b; i += st) o->as.list.items[k++] = seq.as.o->as.list.items[i];
+        return obj_val(o);
+    }
+    Obj *o = list_new(count); size_t k = 0;
+    for (int64_t i = a; st > 0 ? i < b : i > b; i += st) o->as.list.items[k++] = seq.as.o->as.list.items[i];
+    o->as.list.len = count; return obj_val(o);
 }
 
 /* freeze/thaw: a `seq` is an O_LIST the checker refuses to mutate, so
@@ -1416,12 +1740,21 @@ void em_exit(Value code) {
 /* --- first-class functions ------------------------------------------------ */
 
 Value em_mkclosure(Value (*fn)(Value *env, Value *args), size_t arity,
-                   Value *env, size_t env_count) {
-    RootFrame fr;
+                   Value *env, size_t env_count, Value *defaults,
+                   size_t default_count) {
+    RootFrame fr, df;
     rt_push_frame(&fr, env, env_count); /* root env while the Obj may allocate */
+    if (default_count) rt_push_frame(&df, defaults, default_count);
     Obj *o = rt_obj_new(O_FUNC);
     o->as.func.fn = fn;
     o->as.func.arity = arity;
+    o->as.func.default_count = default_count;
+    o->as.func.min_arity = arity - default_count;
+    if (default_count) {
+        o->as.func.defaults = xmalloc(sizeof(Value) * default_count);
+        memcpy(o->as.func.defaults, defaults, sizeof(Value) * default_count);
+        obj_charge(o, sizeof(Value) * default_count);
+    } else o->as.func.defaults = NULL;
     if (env_count) {
         o->as.func.env = xmalloc(sizeof(Value) * env_count);
         memcpy(o->as.func.env, env, sizeof(Value) * env_count);
@@ -1431,6 +1764,7 @@ Value em_mkclosure(Value (*fn)(Value *env, Value *args), size_t arity,
         o->as.func.env = NULL;
         o->as.func.env_count = 0;
     }
+    if (default_count) rt_pop_frame();
     rt_pop_frame();
     return obj_val(o);
 }
@@ -1459,15 +1793,18 @@ Value em_call(Value fn, size_t argc, ...) {
     if (!(fn.tag == V_OBJ && fn.as.o->tag == O_FUNC))
         rt_fatal("attempt to call a value of type %s", type_name(fn));
     Obj *c = fn.as.o;
-    if (c->as.func.arity != argc)
-        rt_fatal("function expects %zu argument(s), got %zu", c->as.func.arity, argc);
-    Value *args = xmalloc(sizeof(Value) * (argc ? argc : 1));
+    if (argc < c->as.func.min_arity || argc > c->as.func.arity)
+        rt_fatal("function expects %zu..%zu argument(s), got %zu", c->as.func.min_arity, c->as.func.arity, argc);
+    size_t passed = argc;
+    size_t total = c->as.func.arity;
+    Value *args = xmalloc(sizeof(Value) * (total ? total : 1));
     va_list ap;
     va_start(ap, argc);
-    for (size_t i = 0; i < argc; i++) args[i] = va_arg(ap, Value);
+    for (size_t i = 0; i < passed; i++) args[i] = va_arg(ap, Value);
     va_end(ap);
+    for (size_t i = passed; i < total; i++) args[i] = c->as.func.defaults[i - c->as.func.min_arity];
     RootFrame fr;
-    rt_push_frame(&fr, args, argc); /* root args while the callee may allocate */
+    rt_push_frame(&fr, args, total); /* root args while the callee may allocate */
     Value r = c->as.func.fn(c->as.func.env, args);
     rt_pop_frame();
     free(args);
@@ -1479,9 +1816,13 @@ static Value call_closure_n(Value fn, Value *args, size_t n) {
     if (!(fn.tag == V_OBJ && fn.as.o->tag == O_FUNC))
         rt_fatal("attempt to call a value of type %s", type_name(fn));
     Obj *c = fn.as.o;
-    if (c->as.func.arity != n)
-        rt_fatal("function expects %zu argument(s), got %zu", c->as.func.arity, n);
-    return c->as.func.fn(c->as.func.env, args);
+    if (n < c->as.func.min_arity || n > c->as.func.arity)
+        rt_fatal("function expects %zu..%zu argument(s), got %zu", c->as.func.min_arity, c->as.func.arity, n);
+    if (n == c->as.func.arity) return c->as.func.fn(c->as.func.env, args);
+    Value *full = xmalloc(sizeof(Value) * c->as.func.arity);
+    memcpy(full, args, sizeof(Value) * n);
+    for (size_t i=n;i<c->as.func.arity;i++) full[i]=c->as.func.defaults[i-c->as.func.min_arity];
+    Value r=c->as.func.fn(c->as.func.env,full); free(full); return r;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -2007,9 +2348,14 @@ static Value compose_tramp(Value *env, Value *args) {
     return r;
 }
 
+Value em_compose_or_rshift(Value a, Value b) {
+    if (a.tag == V_INT && b.tag == V_INT) return em_rshift(a, b);
+    return em_compose(a, b);
+}
+
 Value em_compose(Value f, Value g) {
     Value env[2] = { f, g };
-    return em_mkclosure(compose_tramp, 1, env, 2);
+    return em_mkclosure(compose_tramp, 1, env, 2, NULL, 0);
 }
 
 /* ---------------------------------------------------------------------- */

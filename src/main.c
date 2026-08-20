@@ -70,7 +70,7 @@ static void emit_tokens(const char *src) {
     for (;;) {
         Token t = lexer_next(&lx);
         printf("%d %s", t.line, token_kind_name(t.kind));
-        if (t.kind == TK_INT || t.kind == TK_FLOAT || t.kind == TK_STR ||
+        if (t.kind == TK_INT || t.kind == TK_FLOAT || t.kind == TK_STR || t.kind == TK_FSTR ||
             t.kind == TK_IDENT || t.kind == TK_ERROR)
             printf(" %.*s", t.len, t.start);
         printf("\n");
@@ -164,6 +164,7 @@ static void emit_expr_shapes(FILE *out, const Expr *e) {
             emit_expr_shapes(out, e->as.ctch.arms[i].body);
         break;
     case E_LIST:
+    case E_TUPLE:
         for (size_t i = 0; i < e->as.list.count; i++)
             emit_expr_shapes(out, e->as.list.items[i]);
         break;
@@ -171,6 +172,16 @@ static void emit_expr_shapes(FILE *out, const Expr *e) {
         for (size_t i = 0; i < e->as.rec.count; i++)
             emit_expr_shapes(out, e->as.rec.values[i]);
         break;
+    case E_DICT:
+        for(size_t i=0;i<e->as.dict.count;i++){emit_expr_shapes(out,e->as.dict.keys[i]);emit_expr_shapes(out,e->as.dict.values[i]);} break;
+    case E_SET:
+        for(size_t i=0;i<e->as.set.count;i++)emit_expr_shapes(out,e->as.set.items[i]); break;
+    case E_SLICE:
+        emit_expr_shapes(out,e->as.slice.seq); if(e->as.slice.start)emit_expr_shapes(out,e->as.slice.start); if(e->as.slice.stop)emit_expr_shapes(out,e->as.slice.stop); if(e->as.slice.step)emit_expr_shapes(out,e->as.slice.step); break;
+    case E_COMP:
+        emit_expr_shapes(out,e->as.comp.seq); emit_expr_shapes(out,e->as.comp.cond); emit_expr_shapes(out,e->as.comp.elt); emit_expr_shapes(out,e->as.comp.key); break;
+    case E_FSTR:
+        for(size_t i=0;i<e->as.fstr.count;i++)emit_expr_shapes(out,e->as.fstr.exprs[i]); break;
     case E_BINOP:
         emit_expr_shapes(out, e->as.bin.lhs);
         emit_expr_shapes(out, e->as.bin.rhs);

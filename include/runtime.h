@@ -22,8 +22,8 @@
 #include <stdint.h>
 
 typedef enum { V_NONE, V_BOOL, V_INT, V_FLOAT, V_OBJ, V_STR } VTag;
-typedef enum { O_STR, O_LIST, O_REC, O_FUNC, O_CELL, O_TENSOR,
-               O_CHAN, O_TASK } OTag;
+typedef enum { O_STR, O_LIST, O_TUPLE, O_REC, O_DICT, O_SET,
+               O_FUNC, O_CELL, O_TENSOR, O_CHAN, O_TASK } OTag;
 
 /* Tensor dtypes. Only f32 and f64 are implemented in Phase 2; the other tags
  * are reserved so the tag width is settled before Phase 4 (quantized models)
@@ -67,6 +67,8 @@ struct Obj {
         struct { size_t len; char *data; } str;              /* NUL-terminated */
         struct { size_t len, cap; Value *items; } list;
         struct { size_t len, cap; const char **keys; Value *vals; } rec;
+        struct { size_t len, cap; Value *keys; Value *vals; } dict;
+        struct { size_t len, cap; Value *items; } set;
         /* O_FUNC: a first-class function. `fn` takes the captured env and a
          * packed array of `arity` arguments; `env` is NULL for top-level
          * functions with no captures. Captured variables are stored in O_CELL
@@ -77,6 +79,9 @@ struct Obj {
             Value *env;
             size_t env_count;
             size_t arity;
+            size_t min_arity;
+            Value *defaults;
+            size_t default_count;
         } func;
         struct { Value val; } cell;   /* O_CELL: a mutable captured variable */
         /* O_TENSOR: a strided N-d array of floats. `data` is owned when
@@ -143,6 +148,14 @@ extern _Thread_local int rt_cur_line;
 Value em_str_new(const char *cstr);          /* copy of a C string */
 Value em_list_litn(size_t n, ...);           /* n Values, already rooted by caller */
 Value em_rec_litn(size_t n, ...);            /* n * (const char *key, Value val) */
+Value em_tuple_litn(size_t n, ...);
+Value em_dict_litn(size_t n, ...);            /* n * (Value key, Value value) */
+Value em_set_litn(size_t n, ...);
+Value em_dict_from(Value iterable);
+Value em_set_from(Value iterable);
+void em_dict_set(Value dict, Value key, Value value);
+void em_set_add(Value set, Value value);
+Value em_contains(Value needle, Value haystack);
 
 /* operators */
 Value em_add(Value a, Value b);
@@ -159,6 +172,11 @@ Value em_lt(Value a, Value b);
 Value em_le(Value a, Value b);
 Value em_gt(Value a, Value b);
 Value em_ge(Value a, Value b);
+Value em_bitor(Value a, Value b);
+Value em_bitxor(Value a, Value b);
+Value em_bitand(Value a, Value b);
+Value em_lshift(Value a, Value b);
+Value em_rshift(Value a, Value b);
 bool  em_truthy(Value v);
 
 /* indexing / attributes */
@@ -191,6 +209,7 @@ Value em_file_exists(Value path);   /* is the path openable for reading? */
 /* stdlib foundation: the operations no Emerald code can express */
 void  em_append(Value xs, Value v);  /* amortized in-place list growth */
 Value em_slice(Value seq, Value lo, Value hi); /* str or list; clamped */
+Value em_slice_ex(Value seq, Value lo, Value hi, Value step);
 Value em_freeze(Value xs);           /* list -> seq: a no-op at runtime */
 Value em_thaw(Value xs);             /* seq -> list: a copy, so mutation is isolated */
 Value em_ord(Value c);               /* first byte of a string, 0..255 */
@@ -214,7 +233,8 @@ void  rt_set_args(int argc, char **argv); /* called by main() before anything */
 
 /* first-class functions & closures */
 Value em_mkclosure(Value (*fn)(Value *env, Value *args), size_t arity,
-                   Value *env, size_t env_count);
+                   Value *env, size_t env_count, Value *defaults,
+                   size_t default_count);
 Value em_call(Value fn, size_t argc, ...);
 Value em_cell(Value v);        /* heap-box a value (mutable capture cell) */
 Value em_cell_get(Value cell);
@@ -227,6 +247,7 @@ Value em_reduce(Value fn, Value acc, Value xs);
 
 /* `f >> g`: a closure h(x) = g(f(x)) */
 Value em_compose(Value f, Value g);
+Value em_compose_or_rshift(Value a, Value b);
 
 /* --- green threads and channels (concurrency.md) -------------------------
  * Tasks are cooperatively scheduled: exactly one runs at a time and switches

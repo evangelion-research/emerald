@@ -1,12 +1,12 @@
 # The Emerald Standard Library — Specification
 
-**Status:** Tier 0 is **implemented**. Twelve modules (`result`, `chars`,
-`math`, `builder`, `lists`, `strings`, `sort`, `dict`, `set`, `io`, `sys`,
-`path`) compile and are covered by `tests/stdlib/` — `task test:stdlib`. The
+**Status:** Tier 0 is **implemented**. Ten modules (`result`, `chars`,
+`math`, `builder`, `lists`, `strings`, `sort`, `io`, `sys`, `path`) compile and
+are covered by `tests/stdlib/` — `task test:stdlib`. The
 first Tier 1 module, `fmt` (§5), is also done — it was the cheap one, and
 `strings` had just grown the methods that make it worth having.
 
-Building it changed three things in the compiler beyond the thirteen new builtins:
+Building it changed three things in the compiler beyond the fifteen new builtins:
 generic type parameters are now in scope inside a function body, unification
 looks through unions on both sides, and a global is only updatable from the
 module that declared it. The last was a linking bug the library found on its
@@ -39,13 +39,13 @@ Verified against the current compiler:
 | String concatenation `a + b` allocates a new string | Building a token's text one character at a time is **O(n²)** |
 | List concatenation `xs + [v]` allocates a new list; there is **no `append`** | Building any list in a loop is **O(n²)** |
 | `xs[i] = v` works and mutates in place (`em_setindex`); `xs[len(xs)] = v` is a runtime index error | In-place algorithms are fine; *growth* is not expressible |
-| `r.b = 2` on a record whose type was inferred is `E_TYPE_FIELD`, **even when the binding is annotated `any`** | Records cannot serve as dicts. There is no dict |
+| Records have fixed fields, while `dict()` creates a dynamic string-keyed map | Use dictionaries for computed keys; records remain structurally typed |
 | No exceptions, no `try` | Errors are values. Every fallible function returns `Result` |
 | No iterators or generators; `range(n)` materializes a list | Everything is eager. Laziness, where it is wanted, is a thunk (`() => e`) |
 | Nested generic aliases (`list[list[Entry[V]]]`) and `match` over a `Result` union both typecheck | The core data types below are expressible **today** |
 | Recursive *generic* aliases are rejected | A generic linked list / tree cannot be written; use `list[T]` and records |
-| Sixteen builtins, not thirteen — `map`/`filter`/`reduce` joined since `docs/builtins.md` was written | Corrected: that doc now documents fifty-two (twenty-seven core, plus the twenty-five Phase 2 tensor primitives) |
-| No bitwise operators at all — `\|` and `&` are type-level only | No xor, so no FNV-1a. `dict.hash_str` is djb2 |
+| Collection constructors and set operators are builtin; `dict` and `set` are not stdlib modules | The runtime owns dynamic storage while the checker keeps them as ordinary dynamic values |
+| `dict()`/`set()` are builtin collection constructors; `in` and set operators are runtime operations | Dynamic storage stays out of ordinary record values; dictionaries remain string-keyed |
 | `/` is float division and there is no `//` | Exact integer division is not expressible; `math.floor_div` rounds through a double |
 
 ### 1.1 The primitives that must exist first
@@ -135,8 +135,8 @@ inputs.
 
 **What moved.** The direct list builders are pure now: `strings.split`,
 `split_lines`, `rsplit`, `to_chars`; `lists.concat`, `reverse`, `chunk`,
-`unique`, `zip`, `enumerate`, `flatten`, `repeat`; `dict.keys`, `values`,
-`items`, `new_map` and the reading half of `dict`; `set`'s reading half;
+`unique`, `zip`, `enumerate`, `flatten`, `repeat`; and `path`'s reading helpers.
+Dictionary and set operations now live in the builtin runtime;
 `path.join`/`join_all`/`split_parts`; `builder.new` and `builder.build`.
 `tests/proof/good_local_build.rald` pins the rule; the `pure` markers in
 `tests/proof/good_stdlib.rald` keep the migration honest — a wrongly-marked
@@ -144,9 +144,7 @@ function is an `E_TYPE_PURE_CALL` the moment it compiles.
 
 **What stays impure, and why.** Anything that mutates through a parameter or a
 parameter's field: `builder.push` (appends to `b.parts`) and everything built
-on it — so the *string* builders (`strings.join`, `replace`, `upper`, `escape`,
-...) are still impure even though the *list* builders are not — plus `dict.set`
-and `remove`, `lists.push` and `extend`, and `sort.sorted`, whose `_merge_runs`
+on it — so the *string* builders (`strings.join`, `replace`, `upper`, `escape`,... ) are still impure even though the *list* builders are not — plus `lists.push` and `extend`, and `sort.sorted`, whose `_merge_runs`
 helper takes an output-buffer parameter. That out-parameter pattern needs
 ownership *transfer* from caller to callee, which is the natural next step and
 is not done. The honest line to remember: a function that builds by appending
@@ -231,8 +229,8 @@ compiler telling you a layering decision was wrong. The layering is: `chars` →
 stdlib/
   SPEC.md      this document
   result.rald  chars.rald   math.rald    builder.rald
-  lists.rald   strings.rald sort.rald    dict.rald
-  set.rald     io.rald      sys.rald     path.rald
+  lists.rald   strings.rald sort.rald    io.rald
+  sys.rald     path.rald
   fmt.rald     (Tier 1)
 tests/stdlib/
   strings_test.rald + strings_test.expected     (one pair per area)
@@ -245,7 +243,7 @@ paths (`text.strings`) are supported by the resolver but buy nothing yet.
 The dependency graph is a DAG, deepest first: `result` and `math` depend on
 nothing; `chars` on the `ord`/`chr` builtins; `builder` on `append`; `lists` on
 `result`; `strings` on `chars`, `builder` and `result`; `sort` on `lists`;
-`dict` on `result`; `set` on `dict` and `sort`; `io` and `path` on `strings`;
+`io` and `path` on `strings`;
 `sys` on `lists`; `fmt` on `builder`. `builder` deliberately does not import
 `strings`, because `strings` builds its results in `builder`. `fmt` is the one
 module that is not proof-clean — it takes `list[any]` — so it is Tier 1, not
@@ -529,50 +527,14 @@ def binary_search[T](xs: list[T], v: T, less: (T, T) -> bool) -> int  # -1 if ab
 Proving the postcondition is a genuinely good exercise for proof mode and a
 better advertisement for it than a factorial.
 
-### `dict` — the hash map the language does not have
+### `dict` and `set` — builtin collection values
 
-Depends on `chars`, `lists`, `append`. **String keys only** in Tier 0: every
-table in a compiler is string-keyed, and generic keys need a hashing story the
-type system cannot yet express (no `T extends Hashable`).
-
-```
-type Entry[V] = { key: str, val: V }
-type Map[V]   = { buckets: list[list[Entry[V]]], size: int }
-
-def new_map[V]() -> Map[V] pure
-def get[V](m: Map[V], k: str) -> Option[V] pure
-def get_or[V](m: Map[V], k: str, d: V) -> V pure
-def set[V](m: Map[V], k: str, v: V) -> None          # mutates, like Python's d[k]=v
-def has[V](m: Map[V], k: str) -> bool pure
-def remove[V](m: Map[V], k: str) -> bool             # True if it was there
-def clear[V](m: Map[V]) -> None
-def size[V](m: Map[V]) -> int pure
-def merge[V](a: Map[V], b: Map[V]) -> Map[V]         # right wins; calls set, so impure
-def bump(m: Map[int], k: str, by: int) -> None       # counters
-def keys[V](m: Map[V]) -> list[str] pure
-def values[V](m: Map[V]) -> list[V] pure
-def items[V](m: Map[V]) -> list[Entry[V]] pure
-def from_items[V](es: list[Entry[V]]) -> Map[V]      # calls set, so impure
-
-def hash_str(s: str) -> int pure                     # djb2 over ord(); see §8
-```
-
-Both types above were confirmed to typecheck against the current compiler,
-including `Entry[V]` nested inside `Map[V]`'s `list[list[...]]`.
-
-Iteration order is bucket order — **unspecified and not stable across
-insertions**. Anything that needs determinism (and a compiler's diagnostics do)
-calls `sort.sorted_strs(dict.keys(m))`. Python's insertion-order guarantee is
-deliberately not copied; matching it means a second index and this library has
-no profile justifying that yet.
-
-### `set` — membership
-
-`Set = Map[True]`, thin. `new_set`, `has`, `size`, `is_empty`, `elements`,
-`is_subset` are pure (they read the map or build a fresh one); `add`, `remove`,
-`from_list`, `union`, `intersect`, `difference` mutate, so they are impure.
-Exists because the checker will want visited sets and the alternative is
-`Map[bool]` written out at every call site.
+Dictionaries and sets are runtime builtins rather than stdlib modules.
+`dict()` creates an empty string-keyed dictionary; `dict(pairs)` accepts an
+iterable of two-item lists or tuples. `set()` and `set(iterable)` provide the
+corresponding set constructor. Dictionaries use indexing and assignment,
+`len`, iteration, and `in`. Set union, intersection, difference, and symmetric
+difference use `|`, `&`, `-`, and `^`; all set operations return fresh values.
 
 ### `math` — numeric helpers
 
@@ -727,7 +689,7 @@ fielding it repeatedly.
 | **Phase 2** | `tensor` only, per `SPEC_V2.md` §7 | Dogfoods the module system against real library code before the compiler depends on it. Nothing else in this document blocks Phase 2 |
 | **Done** | The §1.1 primitives, as thirteen builtins | Nothing above is writable first |
 | **Done** | `result`, `chars`, `builder`, `strings`, `lists` | What a lexer needs |
-| **Done** | `dict`, `set`, `sort`, `math` | What a parser and symbol table need |
+| **Done** | `sort`, `math` | What a parser and symbol table need |
 | **Done** | `io`, `sys`, `path` | What a compiler driver needs |
 | **Done** | `fmt` | The first Tier 1 module, pulled forward because `strings` had just grown the methods it formats |
 | **Next (Phase 3)** | The Emerald lexer, written against these | The first real user. Delete what it never calls |
@@ -764,9 +726,8 @@ than no spec.
 
 **Four places the implementation departs from §4:**
 
-- `dict.hash_str` is **djb2, not FNV-1a**. FNV mixes with xor and Emerald has no
-  bitwise operators. The modulo keeps the multiply under 2^32 so the int64
-  arithmetic cannot overflow.
+- Dictionaries are string-keyed because the type system has no general
+  hashability constraint; their storage and set operations are runtime builtins.
 - `strings.partition` returns `{ before, found, after }`, not `sep_found`.
 - `io.append` would collide with the `append` builtin (`E_TYPE_REDEFINE`), so it
   is **`io.append_to`**. Same for `lists.push` rather than `lists.append`. The
@@ -804,10 +765,10 @@ The cost is honest and small: `io.write` and `io.append_to` return a `Result`
 that is always `ok`, because the runtime has no non-aborting writer. The
 signature is the one that will still be right when it does.
 
-**D3 — Generic dict keys.** `Map[V]` is string-keyed because there is no way to
-say "keys must be hashable". Unchanged, and now backed by a concrete need rather
-than a guess. This is the first real argument for bounded type parameters, which
-`docs/type-system.md` lists as a deliberate omission.
+**D3 — Generic dict keys.** Dictionaries remain string-keyed because there is
+no way to say "keys must be hashable". This is the first real argument for
+bounded type parameters, which `docs/type-system.md` lists as a deliberate
+omission.
 
 **D4 — Purity and `append`.** Resolved as (2), then (1): the two-tier split
 first, local-mutation purity once proof-mode code needed to build lists. See

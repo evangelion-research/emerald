@@ -163,13 +163,14 @@ See [`docs/repl.md`](docs/repl.md).
 
 ## Builtins
 
-Seventy-six builtins compile straight into runtime calls and are in scope in
+Seventy-eight builtins compile straight into runtime calls and are in scope in
 every module: the forty core builtins (`print`, `len`, `range`, `str`, `int`,
 `float`, `append`, `slice`, `freeze`, `thaw`, `map`, `filter`, `reduce`,
 `read_file`, `argv`, `run`, `gc_stats`, and friends), the eleven green-thread
 builtins (`spawn`, `join`, `chan`, `send`, `recv`, `sleep`, `task_yield`, …),
 and the twenty-five Phase 2 tensor primitives (`zeros`, `ones`, `matmul`,
-`reshape`, `transpose`, `astype`, …). They are not values (`f = print` is an
+`reshape`, `transpose`, `astype`, …), plus the Python-style `dict()` and
+`set()` collection constructors. They are not values (`f = print` is an
 error — there is no closure to hand out) and cannot be redefined.
 
 A builtin exists only when it cannot be written in Emerald: allocation-level
@@ -209,7 +210,6 @@ flags:
 
 ```
 import strings
-import dict
 from result import Result, unwrap_or
 
 def parse_flag(arg: str) -> Result[{ name: str, val: str }, str] {
@@ -219,10 +219,10 @@ def parse_flag(arg: str) -> Result[{ name: str, val: str }, str] {
 }
 ```
 
-Twelve modules: `result` (errors as values — there are no exceptions), `chars`,
-`strings`, `builder`, `lists`, `sort`, `dict` (a real hash table, because
-records cannot take dynamic keys), `set`, `math` (including `exp`/`log`/`sin`
-written in Emerald), `io`, `sys`, `path`.
+Ten modules: `result` (errors as values — there are no exceptions), `chars`,
+`strings`, `builder`, `lists`, `sort`, `math` (including `exp`/`log`/`sin`
+written in Emerald), `io`, `sys`, and `path`. Dictionaries and sets are builtin
+runtime values constructed with `dict()` and `set()`.
 
 Its shape is Python's; its signatures are not, because there are no methods and
 no exceptions. It was scoped to what a self-hosted compiler needs and nothing
@@ -327,26 +327,24 @@ See [`docs/architecture.md`](docs/architecture.md).
 
 ## Language status
 
-"Python-flavored" sets expectations, so the gaps are stated explicitly. Not in
-v1 — roadmap, not a design stance:
-
-- **tuples** — no `(a, b)`; a multiple return needs a record;
-- **comprehensions** — use `map` / `filter` / `reduce` and lambdas;
-- **dict/set literals** — `{` always begins a record; `dict` and `set` are
-  stdlib modules, string-keyed only;
-- **slicing** — no `xs[1:3]`; `slice` takes explicit bounds;
-- **default / keyword arguments**;
-- **f-strings**;
-- **bitwise operators** — `|` and `&` are type-level only.
+The Python-shaped expression layer now includes tuples, list/set/dict
+comprehensions, dynamic dict and set literals, slicing (including omitted
+bounds and steps), default and keyword arguments, f-strings, and integer
+bitwise operators. Records remain available with their existing structural
+syntax; `{name: value}` is a record field when the key is an identifier, while
+quoted or computed keys form dictionaries. `>>` remains function composition
+for function values and is also numeric right shift for integer operands.
 
 Two semantic choices worth knowing before you rely on them:
 
 - **Integer arithmetic wraps.** `9223372036854775807 + 1` is
   `-9223372036854775808`, with no diagnostic: `int` is fixed-width
   two's-complement (64-bit), `float` is IEEE-754 double.
-- **`dict`/`set` are library, not builtin.** They are stdlib modules over
-  records, string-keyed only — there is no general "hashable key" constraint
-  to hang a `dict[K, V]` on.
+- **`dict`/`set` are builtin runtime values.** Use Python-style `dict()` and
+  `set()` constructors, indexing/assignment for dictionaries, `in` for
+  membership, and `|`, `&`, `-`, or `^` for set operations. Dictionaries remain
+  string-keyed because there is no general "hashable key" constraint to hang
+  a `dict[K, V]` on.
 
 ---
 

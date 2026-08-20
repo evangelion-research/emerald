@@ -68,8 +68,10 @@ struct TypeExpr {
 
 typedef enum {
     E_INT, E_FLOAT, E_STR, E_TRUE, E_FALSE, E_NONE,
-    E_NAME, E_LIST, E_REC,
-    E_BINOP, E_UNOP, E_CALL, E_INDEX, E_ATTR,
+    E_NAME, E_LIST, E_TUPLE, E_REC, E_DICT, E_SET,
+    E_BINOP, E_UNOP, E_CALL, E_INDEX, E_SLICE, E_ATTR,
+    E_COMP,     /* list/set/dict comprehension */
+    E_FSTR,     /* interpolated string */
     E_LAMBDA,   /* (a: int, b) => body: anonymous function value */
     E_TRY,      /* try e: unwrap a Result, propagating its error to the caller */
     E_CATCH,    /* catch e { Tag b -> expr, ... }: handle every expected error */
@@ -85,10 +87,13 @@ typedef struct {
     int line, col;
 } CatchArm;
 
+typedef enum { COMP_LIST, COMP_SET, COMP_DICT } CompKind;
+
 typedef enum {
     B_ADD, B_SUB, B_MUL, B_DIV, B_MOD, B_FLOORDIV, B_POW,
     B_EQ, B_NE, B_LT, B_LE, B_GT, B_GE,
-    B_AND, B_OR,
+    B_AND, B_OR, B_IN,
+    B_BITOR, B_BITXOR, B_BITAND, B_LSHIFT, B_RSHIFT,
     B_PIPE,     /* x |> f  ==  f(x) */
     B_COMPOSE,  /* f >> g  ==  x -> g(f(x)) */
 } BinOp;
@@ -109,11 +114,16 @@ struct Expr {
         int64_t ival;                 /* E_INT */
         double fval;                  /* E_FLOAT */
         char *sval;                   /* E_STR (unescaped), E_NAME */
-        struct { Expr **items; size_t count; } list;   /* E_LIST */
+        struct { Expr **items; size_t count; } list;   /* E_LIST / E_TUPLE */
         struct { char **names; Expr **values; size_t count; } rec; /* E_REC */
+        struct { Expr **keys; Expr **values; size_t count; } dict; /* E_DICT */
+        struct { Expr **items; size_t count; } set;              /* E_SET */
+        struct { Expr *seq, *start, *stop, *step; } slice;       /* E_SLICE */
+        struct { CompKind kind; char *var; Expr *seq, *cond, *elt, *key; } comp;
+        struct { char **texts; Expr **exprs; size_t count; } fstr;
         struct { BinOp op; Expr *lhs, *rhs; } bin;
         struct { UnOp op; Expr *operand; } un;
-        struct { Expr *fn; Expr **args; size_t count; } call; /* fn is E_NAME */
+        struct { Expr *fn; Expr **args; char **arg_names; size_t count; } call; /* fn is E_NAME */
         struct { Expr *seq, *idx; } index;
         struct { Expr *obj; char *name; } attr;
         Expr *try_expr;                   /* E_TRY */
@@ -209,6 +219,7 @@ struct Stmt {
             size_t tparam_count;
             char **params;
             TypeExpr **param_types; /* entries may be NULL (=any) */
+            Expr **defaults;        /* optional default expressions */
             size_t param_count;
             TypeExpr *ret_type;     /* NULL = any */
             bool pure;              /* `def f(...) -> T pure`: may only call pure code */
