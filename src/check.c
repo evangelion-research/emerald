@@ -34,15 +34,13 @@ typedef enum {
     TY_OPAQUE,  /* Chan[T], Task[T]: a runtime handle with one element type */
 } TyKind;
 
-/* Effect labels (SPEC_V3 D1/W3): a closed 5-bit set. A function type carries
- * the join of its effects; `pure` is the empty mask. */
+/* Effect labels (SPEC_V3 D1/W3). A function type carries the join of its
+ * effects; `pure` is the empty mask. Only the impurity `pure` rules out is
+ * tracked today -- the finer labels (rand/mut/alloc/nondet) arrive with the
+ * rest of D1, and each one is a new bit here. */
 typedef unsigned EffMask;
-#define EFF_PURE   0u
-#define EFF_IO     1u
-#define EFF_RAND   2u
-#define EFF_MUT    4u
-#define EFF_ALLOC  8u
-#define EFF_NONDET 16u
+#define EFF_PURE 0u
+#define EFF_IO   1u
 
 /* tensor dtype tags used by the checker (the runtime's DType is independent) */
 typedef enum { CDT_F32, CDT_F64 } CDType;
@@ -2442,15 +2440,15 @@ static Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
          * annotation (`c: Chan[int] = chan(0)`) pins it down. */
         if (strcmp(name, "spawn") == 0) {
             if (!ck_arity(ck, e, dname, 1)) return ty_opaque("Task", &t_any);
-            Type *f = ty_resolve(argt[0]);
-            if (f->k == TY_ANY) return ty_opaque("Task", &t_any);
-            if (f->k != TY_FUNC || f->fun.count != 0) {
+            Type *fnt = ty_resolve(argt[0]);
+            if (fnt->k == TY_ANY) return ty_opaque("Task", &t_any);
+            if (fnt->k != TY_FUNC || fnt->fun.count != 0) {
                 ck_error(ck, "E_TYPE_ARG", e->line, e->col,
                          "spawn() takes a function of no arguments, got %s",
                          type_str(argt[0]));
                 return ty_opaque("Task", &t_any);
             }
-            return ty_opaque("Task", f->fun.ret);
+            return ty_opaque("Task", fnt->fun.ret);
         }
         if (strcmp(name, "join") == 0) {
             if (!ck_arity(ck, e, dname, 1)) return &t_any;

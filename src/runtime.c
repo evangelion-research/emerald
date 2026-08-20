@@ -533,9 +533,9 @@ static void write_value(SB *sb, Value v, bool repr) {
             sb_puts(sb, ", [");
             for (uint8_t d = 0; d < t->as.tensor.ndim; d++) {
                 if (d) sb_puts(sb, ", ");
-                char tmp[24];
-                snprintf(tmp, sizeof tmp, "%" PRId64, t->as.tensor.dims[d]);
-                sb_puts(sb, tmp);
+                char buf[24];
+                snprintf(buf, sizeof buf, "%" PRId64, t->as.tensor.dims[d]);
+                sb_puts(sb, buf);
             }
             sb_puts(sb, "]]");
             break;
