@@ -15,10 +15,10 @@ int check_program(const Program *prog, const char *filename, DiagList *diags,
                   bool proof);
 
 /* Number of static<->dynamic shape crossings recorded by the last
- * check_program() run (SPEC_V2.md D4); reported by `--shape-report`. */
+ * check_program() run; reported by `--shape-report`. */
 size_t check_shape_crossings(void);
 
-/* W8 (SPEC_V3): the --proof-report measurement, collected by the last
+/* The --proof-report measurement, collected by the last
  * check_program() run. `partial_names` is owned by the checker and valid
  * until the next run. */
 typedef struct {

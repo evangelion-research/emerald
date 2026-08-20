@@ -1,0 +1,28 @@
+Emerald compiler 1.0.0
+
+Usage:
+  emeraldc [OPTIONS] file.rald
+  emeraldc --repl [-I DIR]...
+
+Compilation modes (choose at most one):
+  --emit-tokens       print the lexer token stream
+  --emit-ast          print the parser AST
+  --emit-shapes       print tensor and dimension annotations
+  --check             type-check without generating a binary
+  --emit-c            print generated C instead of compiling it
+  --repl              start the interactive compiler session
+
+Diagnostics and checking:
+  --json              emit diagnostics as JSON
+  --proof             enable proof-mode checks
+  --proof-report      print proof-mode measurements
+  --shape-report      print shape solver measurements
+  --werror            treat warnings as errors
+  -Wno-CODE           suppress one warning code
+
+Build options:
+  -I DIR              add a module search directory
+  -o OUT              choose the output binary path
+  --keep-c            keep the generated .gen.c file
+  -h, --help          show this help and exit
+  -v, --version       print the compiler version and exit

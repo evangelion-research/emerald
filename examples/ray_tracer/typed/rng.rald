@@ -1,10 +1,10 @@
 # rng.rald — a seeded PRNG with the state threaded explicitly.
 #
 # Emerald has no effects and no purity checker, so "the image is a function
-# of the seed" cannot be *stated* (PLAN.md §6 #14).  What we can do is make
+# of the seed" cannot be *stated* (the ray-tracer design §6 #14).  What we can do is make
 # it true by construction: the generator state is a value that is threaded
 # through every sampling call site and comes back out.  This is the state
-# monad, unrolled by hand — the verbosity is the point (PLAN.md §5.6,
+# monad, unrolled by hand — the verbosity is the point (the ray-tracer design §5.6,
 # milestone 6 measures it).
 #
 # Park-Miller minimal standard LCG: state in [1, 2^31-2], 16807 as the

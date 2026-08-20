@@ -1,6 +1,6 @@
 # Tensors
 
-Phase 2 makes Emerald a numeric language. This page documents the **runtime**
+Tensors make Emerald a numeric language. This page documents the **runtime**
 half — how tensors exist, run, and interact with the GC. The **type-level** half
 (shapes, dimensions, the solver, the typing rules) is in
 [`shapes.md`](shapes.md).
@@ -8,7 +8,7 @@ half — how tensors exist, run, and interact with the GC. The **type-level** ha
 ## The one decision that makes it work
 
 Tensor operations are **whole-array runtime calls**, not per-element generated
-code (`SPEC_V2.md` D1). `matmul(a, b)` lowers to a single `em_tensor_matmul()`
+code. `matmul(a, b)` lowers to a single `em_tensor_matmul()`
 call; the loop nest lives in `src/runtime.c` over an unboxed `float *`. The
 `Value` boxing cost is therefore paid once per *operation*, not once per
 *element*.

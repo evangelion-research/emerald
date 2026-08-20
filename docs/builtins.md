@@ -5,7 +5,7 @@ runtime (`src/runtime.c`) rather than resolved through a module. They are
 always in scope in every module: the forty core builtins (core,
 GC-observability, files-and-process, and the stdlib foundation), the eleven
 [green-thread](#green-threads) builtins, and the twenty-five tensor primitives
-of Phase 2 (see the [Tensors](#tensors) section).
+(see the [Tensors](#tensors) section).
 
 They are not the standard library — that lives in [`stdlib/`](../stdlib/) and is
 ordinary Emerald. The mutable `dict` and `set` runtime values are the one
@@ -14,8 +14,7 @@ constructors and operators are exposed directly as `dict()` and `set()`. A
 builtin exists only when it *cannot* be written in Emerald:
 allocation-level (`len`, `range`, `append`, `slice`), formatting (`str`,
 `print`), foreign (`read_file`, `run`, `argv`), or privileged (`gc_stats`). See
-[`stdlib/SPEC.md`](../stdlib/SPEC.md) §1.1 for why each of the ten added for the
-library had to be one.
+[`stdlib/SPEC.md`](../stdlib/SPEC.md) for the standard-library boundary.
 
 Two rules apply to all of them:
 
@@ -151,7 +150,7 @@ function may call only the **pure builtins** — `len`, `range`, `str`, `int`,
 `write_file`, `append_file`, or `run` from one is a compile error
 (`E_TYPE_PURE_CALL`). So "this function is a pure function of its inputs"
 *is* statable now, which is the precondition for every proof obligation about
-a model (see [`research-directions.md`](research-directions.md) §3, Track B).
+a model (see [`effects.md`](effects.md)).
 
 ## Files and processes
 
@@ -227,11 +226,10 @@ is checked against the list's, so `append([1], "s")` is a compile error.
 list-building function in the library was quadratic; `xs[len(xs)] = v` is a
 runtime index error, because `em_setindex` writes into existing storage.
 
-`append` mutates, so it is **not pure** — but with §1.2's local-mutation
-purity, a `pure` function may `append` to a list it allocated itself and has
+`append` mutates, so it is **not pure** — but with the local-mutation purity convention, a `pure` function may `append` to a list it allocated itself and has
 not let escape, so a function that builds its own `out: list[T] = []` is pure
 while one that mutates a parameter is not. See
-[`stdlib/SPEC.md`](../stdlib/SPEC.md) §1.2.
+[`stdlib/SPEC.md`](../stdlib/SPEC.md).
 
 ### `slice(seq, lo: int, hi: int)`
 
@@ -242,7 +240,9 @@ Clamped and total: bounds outside the sequence are pulled to its edges, an
 inverted range is empty, and negative bounds count from the end. `slice("hello",
 -3, 5)` is `"llo"`; `slice("abc", 2, 1)` is `""`. It never fails at runtime.
 
-There is no `s[a:b]` syntax; this is the whole slicing story.
+The `s[a:b]` and `s[a:b:c]` forms are also available; `slice` remains useful
+when bounds are computed or when the operation should be passed as a named
+builtin.
 
 ### `ord(c: str) -> int` / `chr(n: int) -> str`
 
@@ -292,7 +292,7 @@ xorshift state and maps to the default seed rather than wedging the generator.
 Spelled `seed_rand` rather than `seed` because the builtin namespace is flat and
 shared: a builtin named `seed` would make the global `seed = 7` that any
 hand-rolled PRNG writes an `E_TYPE_ASSIGN`. Same reasoning as `io.append_to`
-(see [`stdlib/SPEC.md`](../stdlib/SPEC.md) §8). Tier 1's `random.seed` will wrap
+(see [`stdlib/SPEC.md`](../stdlib/SPEC.md)). A future `random.seed` can wrap
 it under the Python name.
 
 ### `now() -> float`
@@ -387,8 +387,8 @@ builtins — is impure, and calling one from a `pure` function is
 
 ## Tensors
 
-Phase 2 (see [`tensors.md`](tensors.md) and [`shapes.md`](shapes.md)) adds
-**twenty-five** tensor primitives. They are builtins — not a stdlib module —
+The tensor surface (see [`tensors.md`](tensors.md) and [`shapes.md`](shapes.md))
+provides **twenty-five** tensor primitives. They are builtins — not a stdlib module —
 because their types are *shape obligations*, not ordinary signatures; the
 checker special-cases them to verify those obligations statically.
 

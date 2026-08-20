@@ -11,7 +11,7 @@
  *          specially (the variadic and optional-argument builtins)
  *   arity  the fixed argument count, or -1 when codegen lowers it specially
  *   pure   true when the result is a function of the arguments alone, so a
- *          `pure` Emerald function may call it (see stdlib/SPEC.md §1.2)
+ *          `pure` Emerald function may call it (see the standard-library purity convention)
  *
  * The checker owns the per-builtin *typing* rules; this file owns only the
  * facts all three consumers agree on.
@@ -52,7 +52,7 @@ EM_BUILTIN(     "run",           "em_run",            1, false)
 EM_BUILTIN(     "argv",          "em_argv",           0, false)
 EM_BUILTIN_VOID("exit",          "em_exit",           1, false)
 
-/* --- the stdlib foundation (stdlib/SPEC.md §1.1) ------------------------- */
+/* --- the stdlib foundation (the standard-library builtin boundary) ------------------------- */
 EM_BUILTIN_VOID("append",        "em_append",         2, false)
 EM_BUILTIN(     "slice",         "em_slice",          3, true)
 EM_BUILTIN(     "freeze",        "em_freeze",         1, true)

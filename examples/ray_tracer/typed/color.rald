@@ -1,4 +1,4 @@
-# color.rald — colors and the total PPM conversion (PLAN.md §5.5).
+# color.rald — colors and the total PPM conversion (the ray-tracer design §5.5).
 #
 # Color channels are nominally in [0,1] before gamma, Rgb8 in [0,255] after.
 # The conversion is total *because* of the clamp: without it the function
@@ -6,7 +6,7 @@
 # becomes, here, the thing that gives the function a total type.
 #
 # Chan = "r" | "g" | "b" is a Fin 3: a channel-generic fold is well-typed
-# by construction (PLAN.md §6 #5).
+# by construction (the ray-tracer design §6 #5).
 
 from math import clamp
 from vec import Dir

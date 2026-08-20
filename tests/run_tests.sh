@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Emerald test runner: golden tests per compiler stage.
 #
-#   tests/run_tests.sh [lexer|parser|check|json|e2e|proof|imports|stdlib|repl]...
-#                                                              (default: all stages)
+#   tests/run_tests.sh [lexer|parser|check|json|e2e|proof|imports|stdlib|repl|shape|warn|report|cli]...
+#                                                                         (default: all stages)
 #
 # Each stage compares tool output against a .expected file:
 #   lexer/   emeraldc --emit-tokens X.rald  vs X.expected
@@ -18,6 +18,7 @@
 #   repl/    one .in per session, fed to `emeraldc --repl` on stdin; the
 #            session's scratch path is rewritten to <repl> so the golden
 #            output does not depend on the pid.
+#   cli/     stable command-line help and version smoke tests.
 #   stdlib/  one .rald per module, compiled and run against .expected. These
 #            import from stdlib/ with no -I flag, so they also test that the
 #            stdlib root resolves by default.
@@ -182,6 +183,19 @@ run_warn() {
     fi
 }
 
+run_cli() {
+    echo "== cli"
+    report "emeraldc --help" tests/cli_help.expected \
+        "$("$EMERALDC" --help 2>&1)"
+    report "emeraldc --version" tests/cli_version.expected \
+        "$("$EMERALDC" --version 2>&1)"
+    if "$EMERALDC" --definitely-not-an-option >/dev/null 2>&1; then
+        FAIL=$((FAIL + 1)); echo "  FAIL invalid option (should exit nonzero)"
+    else
+        PASS=$((PASS + 1)); echo "  PASS invalid option"
+    fi
+}
+
 run_stdlib() {
     echo "== stdlib"
     for f in tests/stdlib/*.rald; do
@@ -203,7 +217,7 @@ run_stdlib() {
     done
 }
 
-stages="${*:-lexer parser check json proof e2e imports stdlib repl shape warn report}"
+stages="${*:-lexer parser check json proof e2e imports stdlib repl shape warn report cli}"
 for s in $stages; do
     case "$s" in
         lexer) run_lexer ;;
@@ -215,6 +229,7 @@ for s in $stages; do
         imports) run_imports ;;
         stdlib) run_stdlib ;;
         repl) run_repl ;;
+        cli) run_cli ;;
         shape) run_shape ;;
         warn) run_warn ;;
         report) run_report ;;

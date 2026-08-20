@@ -37,7 +37,7 @@ def checked(n: int) -> int {
 }
 print(checked(7))
 
-# --- seed_rand / now (stdlib/SPEC.md §1.1, the last three) -----------------
+# --- seed_rand / now --------------------------------------------------------
 # (read_line lives in readline_test.rald: it needs its own process so stdin can
 #  be piped to it — this program self-invokes and would otherwise re-run itself.)
 

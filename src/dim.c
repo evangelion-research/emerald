@@ -1,6 +1,6 @@
 /* Dimension-expression solver: normalize to a sum-of-products canonical form
  * and compare structurally. See include/dim.h for the model and D3 in
- * docs/SPEC_V2.md for why there is deliberately no SMT dependency here. */
+ * The solver deliberately has no SMT dependency. */
 #include "dim.h"
 #include "xalloc.h"
 

@@ -1,6 +1,6 @@
 # Fin[n] index safety (W5): an index provably out of range is rejected at
 # compile time (the runtime bounds check remains — this phase does not
-# eliminate it, see SPEC_V2.md W5).
+# eliminate it; the runtime check remains the final boundary.
 dim N
 
 def bad(xs: Tensor[f32, [N]], i: Fin[N + 1]) -> float {

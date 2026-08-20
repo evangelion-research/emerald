@@ -1,4 +1,4 @@
-# The exit criterion for Phase 2 (SPEC_V2.md): a shape bug is a compile error
+# A shape mismatch is a compile-time error.
 # with both shapes printed and the mismatching axis named.
 dim Batch, DModel, DHidden, DOut
 

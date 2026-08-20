@@ -1,8 +1,8 @@
 # Emerald build pipeline (go-task, taskfile.dev).
 #
 #   task            build bin/emeraldc (default)
-#   task test       run every stage's test suite (lexer/parser/check/e2e)
-#   task examples   compile & run all example programs
+#   task test       run the complete golden, runtime, shape, warning, report, and CLI suite
+#   task examples   compile & run the smoke examples
 #   task clean      remove build outputs and generated C
 
 version: '3'
@@ -42,7 +42,7 @@ tasks:
       - '{{.CC}} {{.CFLAGS}} -c src/runtime.c -o /dev/null -Iinclude'
 
   test:
-    desc: Run all stage test suites (lexer, parser, check, json, proof, e2e, imports, stdlib, repl)
+    desc: Run all stage test suites, including CLI, shape, warning, and proof-report checks
     deps: [build]
     cmds:
       - task: runtime-check
@@ -89,6 +89,12 @@ tasks:
     deps: [build]
     cmds:
       - ./tests/run_tests.sh repl
+
+  test:cli:
+    desc: Smoke tests for stable command-line help, version, and option errors
+    deps: [build]
+    cmds:
+      - ./tests/run_tests.sh cli
 
   test:stdlib:
     desc: Golden tests for the standard library (stdlib/*.rald)
@@ -172,7 +178,7 @@ tasks:
       - install -m 0644 stdlib/*.rald "{{.PREFIX}}/lib/emerald/stdlib/"
 
   dist:
-    desc: Build a relocatable release tarball (emerald-{{.VERSION}}.tar.gz)
+    desc: Build a release tarball (smoke-test it outside the checkout before release)
     deps: [build]
     cmds:
       - rm -rf dist emerald-{{.VERSION}}.tar.gz
@@ -190,4 +196,5 @@ tasks:
       - rm -f emerald-*.tar.gz
       - rm -f examples/*.gen.c tests/e2e/*.gen.c tests/imports/*/main.bin*
       - rm -f tests/stdlib/*.bin tests/stdlib/*.gen.c
-      - for f in examples/*.rald tests/e2e/*.rald examples/*/main.rald; do rm -f "${f%.rald}"; done
+      - for f in examples/*.rald tests/e2e/*.rald examples/*/main.rald examples/ray_tracer/typed/main.rald; do rm -f "${f%.rald}"; done
+      - rm -f examples/ray_tracer/out.ppm examples/.DS_Store

@@ -5,7 +5,7 @@
 # works on lists as well as strings, so there is no `lists.slice`.
 #
 # Almost nothing here is `pure`: building a list means `append`, and `append`
-# mutates. See stdlib/SPEC.md §1.2 — the functions that only *read* are marked
+# mutates. See the standard-library purity convention — the functions that only *read* are marked
 # pure, and they are the ones proof-mode code can still reach.
 
 from result import Option

@@ -167,7 +167,7 @@ static char *unescape_string(Parser *p, Token t);
  * dim_expr := dim_term (("+"|"-") dim_term)*
  * dim_term := dim_factor ("*" dim_factor)*
  * dim_factor := IDENT | INT
- * Only `+` and `*` are supported (SPEC_V2.md D3); a subtraction use case has
+ * Only `+` and `*` are supported in dimension expressions; a subtraction use case has
  * not appeared in the target ops. */
 static DimExpr *parse_dim_factor(Parser *p) {
     if (check(p, TK_INT)) {

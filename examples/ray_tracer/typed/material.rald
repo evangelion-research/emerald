@@ -1,22 +1,22 @@
-# material.rald — materials as a coalgebra (PLAN.md §5.4).
+# material.rald — materials as a coalgebra (the ray-tracer design §5.4).
 #
 # A material is a transition kernel: state -> observation + next state.
 # We encode it existentially as a record of closures — the state (albedo,
 # fuzz, index of refraction) is captured in the closure environment and is
 # genuinely hidden, which is the abstraction barrier structural records
-# don't give us (PLAN.md §5.3, Encoding 1).
+# don't give us (the ray-tracer design §5.3, Encoding 1).
 #
 # Two deliberate changes from one_weekend.rald:
 #   * the four positional (Ray, Vec3, Vec3, bool) collapse into one Contact
 #     record — naming the fields kills the swap bug;
 #   * scatter returns Scatter | None instead of { ok: bool, ... }: a miss
 #     carries NO fake attenuation or ray, and the caller cannot read them
-#     without narrowing first (PLAN.md §6 #7).
+#     without narrowing first (the ray-tracer design §6 #7).
 #
-# Deviation from the PLAN.md §5.4 sketch: scatter threads Rng explicitly
+# Deviation from the the ray-tracer design §5.4 sketch: scatter threads Rng explicitly
 # (Ray, Contact, Rng) -> Draw[Scatter | None], because sampling needs
 # randomness and there are no effects — the state monad again, and the
-# alternative (global rand()) would break determinism (PLAN.md §5.6).
+# alternative (global rand()) would break determinism (the ray-tracer design §5.6).
 
 from vec import Pt, Dir, Unit, dadd, dscale, ddot, dnear_zero, reflect, refract, random_unit_vector, random_in_unit_sphere, unit
 from ray import Ray

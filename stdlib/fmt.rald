@@ -9,7 +9,7 @@
 # than a Result, which is what the SPEC's sketch promises.
 #
 # Real f-strings ("{x}" with the name in the string) are a lexer feature and
-# belong in the language, not here — see stdlib/SPEC.md §5.
+# belong in the language, not here — see the standard-library inventory.
 #
 # This module is deliberately not proof-clean: it takes `list[any]`, and proof
 # mode bans `any`. It is Tier 1, not bootstrap.

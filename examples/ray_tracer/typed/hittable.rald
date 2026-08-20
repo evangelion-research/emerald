@@ -1,14 +1,14 @@
 # hittable.rald — primitives as a tagged sum with never-checked dispatch
-# (PLAN.md §5.3, Encoding 2).
+# (the ray-tracer design §5.3, Encoding 2).
 #
 # The book's `virtual hittable::hit` is an open set; we make the primitive
 # set a finite, closed union and pay for it with a `never` obligation at
 # every dispatch site: add a primitive and the build breaks in exactly the
-# named places (PLAN.md §6 #1).
+# named places (the ray-tracer design §6 #1).
 #
 # Hit = Contact & { t, mat }: material.rald defines the narrow Contact
 # record, and this module extends it by intersection — the layering that C++
-# gets from a forward declaration (PLAN.md §4).
+# gets from a forward declaration (the ray-tracer design §4).
 
 from vec import Pt, Dir, Unit, ddot, dscale, dlen_sq, psub, unit, uneg
 from ray import Ray, ray_at

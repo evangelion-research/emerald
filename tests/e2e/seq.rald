@@ -1,4 +1,4 @@
-# seq[T]: an immutable, covariant, sound sequence (SPEC_V3 W5). A seq is a
+# seq[T]: an immutable, covariant, sound sequence. A seq is a
 # list the checker refuses to mutate; freeze()/thaw() convert, at no runtime cost.
 
 def total(xs: seq[int]) -> int pure {

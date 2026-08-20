@@ -1,4 +1,4 @@
-# §1.2 local-mutation purity: a `pure` function may `append` to a list it
+# Local-mutation purity: a `pure` function may `append` to a list it
 # allocated itself and has not let escape. That is an unobservable effect, so
 # the function stays pure — and proof-mode code can finally *build* lists.
 

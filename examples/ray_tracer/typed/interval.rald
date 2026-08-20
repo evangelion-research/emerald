@@ -1,4 +1,4 @@
-# interval.rald — the smart-constructor pattern (PLAN.md §5.2).
+# interval.rald — the smart-constructor pattern (the ray-tracer design §5.2).
 #
 # The invariant "lo <= hi" is not statable as a refinement type, so the
 # public constructor returns Interval | None and every caller must narrow.

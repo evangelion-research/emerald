@@ -1,9 +1,9 @@
-# main.rald — entry point (PLAN.md §7, §12).
+# main.rald — entry point (the ray-tracer design §7, §12).
 #
 # Same default dimensions as one_weekend.rald (120 wide, 4 spp, depth 16)
 # so the two renderers can be compared; bump cfg.image_width to scale.
 # The render is a pure function of seed_state: same seed, byte-identical
-# out.ppm (PLAN.md milestone 0).
+# out.ppm (the ray-tracer design milestone 0).
 
 from scene import build_world
 from camera import camera

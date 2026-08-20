@@ -1,5 +1,5 @@
 # Proof mode is whole-program: it checks every linked module, not just the
-# entry. Under Phase 3's termination discipline (W4), the standard library no
+# entry. Under the current termination discipline, the standard library no
 # longer passes proof mode as a whole. The non-trivial `while` loops that
 # remain — math.gcd and the exp/log range reduction, sort's merge and binary
 # search, strings.find and read_lines, lists.chunk, builder's tree join, and

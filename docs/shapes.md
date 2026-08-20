@@ -1,9 +1,8 @@
 # Shapes
 
-Phase 2's thesis obligation is a shape bug becoming a **compile error with both
-shapes printed**. This page documents the type-level half: dimension names, the
-shape solver, the per-operation typing rules, and the boundary where checking
-goes dynamic.
+A shape bug is a **compile error with both shapes printed**. This page documents
+the type-level half: dimension names, the shape solver, the per-operation typing
+rules, and the boundary where checking goes dynamic.
 
 The runtime half is in [`tensors.md`](tensors.md).
 
@@ -55,9 +54,7 @@ deliberately no SMT dependency in this phase.
   forms, literal comparison, and `a <= a + k` for literal `k >= 0`.
 
 Anything `dim_le` cannot decide is **logged** (the escalation log, dumped by
-`dim_log_dump`) rather than guessed. That dataset is what decides the D3
-escalation question in Phase 3, from data rather than intuition. The solver is a
-standalone component (`src/dim.c`, `include/dim.h`) unit-tested directly by
+`dim_log_dump`) rather than guessed. The solver is a standalone component (`src/dim.c`, `include/dim.h`) unit-tested directly by
 `tests/shape/dim_unit.c` — the first non-golden test in the project.
 
 ## Typing rules
@@ -116,10 +113,9 @@ emeraldc --shape-report --check model.rald
 # shape-crossings: 12
 ```
 
-That counter is not bookkeeping: "how many obligations were discharged
-statically vs dynamically in ported model code" is the empirical result of the
-gradual-shape-typing paper (§15.1 of
-[`research-directions.md`](research-directions.md)).
+That counter is not bookkeeping: it shows how many obligations were
+discharged statically versus dynamically in model code, and makes gradual shape
+checking observable in tests and tooling.
 
 ## `Fin[n]` index safety
 

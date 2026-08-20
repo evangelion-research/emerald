@@ -26,9 +26,10 @@ of a program's meaning as is practical.
   stacks, and 78 builtins compiled straight into runtime calls.
 - **Concurrency** — cooperative green threads: `spawn`/`join`/`chan`/`send`/
   `recv`/`sleep`/`task_yield`, with deadlock reporting.
-- **Standard library** — 13 modules in Emerald: `math`, `lists`, `strings`,
-  `sort`, `dict`, `set`, `io`, `sys`, `path`, `chars`, `fmt`, `result`,
-  `builder`.
+- **Standard library** — 11 modules in Emerald: `math`, `lists`, `strings`,
+  `sort`, `io`, `sys`, `path`, `chars`, `fmt`, `result`, and `builder`.
+  Dictionaries and sets are builtin runtime values exposed through
+  Python-style `dict()` and `set()` constructors.
 - **Tensors and shapes** — a `dim` solver, `Tensor[dtype, shape]`, `Fin[n]`,
   and `--shape-report`.
 - **Proof mode** — `--proof` with warning-based taint rejection
@@ -38,17 +39,20 @@ of a program's meaning as is practical.
   JSON).
 - **Propositions** — `Eq[a, b]` with `refl` and dimension-level elimination
   across function boundaries.
-- **Operators** — floor division `//`, exponentiation `**`, and compound
-  assignment `+= -= *= /=`.
+- **Expressions** — tuples, list/set/dict comprehensions, dynamic dictionary
+  and set literals, slicing, default and keyword arguments, f-strings, and
+  integer bitwise operators.
+- **Operators** — floor division `//`, exponentiation `**`, compound
+  assignment `+= -= *= /=`, and numeric shifts.
 - **Tooling** — `--json` diagnostics, `--proof`, `--repl`, `--werror`,
   `-Wno-CODE`, `-I DIR`, `--version`, and a relocatable stdlib search order
   (`$EMERALD_STDLIB`, next to the executable, then the compile-time default).
-- **Release plumbing** — `task install` (into a `PREFIX`), `task dist` (a
-  relocatable tarball), and CI on macOS and Linux.
+- **Release plumbing** — `task install` (into a `PREFIX`),  `task dist` (a release tarball); clean-machine packaging and CI remain release
+  follow-up checks.
 
 ### Not in v1
 
-Tuples, comprehensions, dict/set literals, slicing, default and keyword
-arguments, f-strings, and bitwise operators are on the roadmap rather than
-present — see the README's "Language status" section. Integer arithmetic wraps
-silently (fixed-width 64-bit two's-complement).
+Methods, chained comparisons, channel `select`, Unicode-aware character
+operations, formatter/editor integrations, and a general hashable-key type
+constraint remain follow-up work. Dictionaries are intentionally string-keyed.
+Integer arithmetic wraps silently (fixed-width 64-bit two's-complement).

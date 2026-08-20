@@ -128,7 +128,7 @@ The three error-handling codes are documented with worked examples in
 
 ### Shape errors (`E_SHAPE_*`)
 
-The Phase 2 tensor shape system (`docs/shapes.md`). The diagnostic is the
+The tensor shape system (`docs/shapes.md`). The diagnostic is the
 deliverable: shape errors print both shapes (or the mismatching axis) as
 structured notes, so `--json` carries `left` / `right` / `mismatch` fields.
 

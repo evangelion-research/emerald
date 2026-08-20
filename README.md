@@ -168,7 +168,7 @@ every module: the forty core builtins (`print`, `len`, `range`, `str`, `int`,
 `float`, `append`, `slice`, `freeze`, `thaw`, `map`, `filter`, `reduce`,
 `read_file`, `argv`, `run`, `gc_stats`, and friends), the eleven green-thread
 builtins (`spawn`, `join`, `chan`, `send`, `recv`, `sleep`, `task_yield`, …),
-and the twenty-five Phase 2 tensor primitives (`zeros`, `ones`, `matmul`,
+and the twenty-five tensor primitives (`zeros`, `ones`, `matmul`,
 `reshape`, `transpose`, `astype`, …), plus the Python-style `dict()` and
 `set()` collection constructors. They are not values (`f = print` is an
 error — there is no closure to hand out) and cannot be redefined.
@@ -219,15 +219,15 @@ def parse_flag(arg: str) -> Result[{ name: str, val: str }, str] {
 }
 ```
 
-Ten modules: `result` (errors as values — there are no exceptions), `chars`,
+Eleven modules: `result` (errors as values — there are no exceptions), `chars`,
 `strings`, `builder`, `lists`, `sort`, `math` (including `exp`/`log`/`sin`
-written in Emerald), `io`, `sys`, and `path`. Dictionaries and sets are builtin
-runtime values constructed with `dict()` and `set()`.
+written in Emerald), `io`, `sys`, `path`, and `fmt`. Dictionaries and sets are
+builtin runtime values constructed with `dict()` and `set()`.
 
 Its shape is Python's; its signatures are not, because there are no methods and
-no exceptions. It was scoped to what a self-hosted compiler needs and nothing
-else. See [`stdlib/SPEC.md`](stdlib/SPEC.md) — including §8, the three compiler
-bugs and limitations writing it exposed.
+no exceptions. It is scoped to the compiler, runtime, examples, and tests. See
+[`stdlib/SPEC.md`](stdlib/SPEC.md) for the maintained module inventory and
+conventions.
 
 ## Modules
 
@@ -271,9 +271,8 @@ error[E_TYPE_RETURN]: returning str from a function declared to return int
 Pass `--json` to any mode to emit the same diagnostics as JSON (one object per
 error, with `kind`, `code`, `line`, `column`, `message`, `expected`, `actual`,
 and `source_line`). This is designed to be fed back to a tool — or an LLM —
-that fixes the program and re-runs; see
-[`docs/research-directions.md`](docs/research-directions.md) §11 for why that
-matters. Runtime errors in compiled programs also report their source location:
+that fixes the program and re-runs. Runtime errors in compiled programs also
+report their source location:
 
 ```
 emerald: runtime error: division by zero (at foo.rald:7)
@@ -291,7 +290,7 @@ Requires a C compiler and [go-task](https://taskfile.dev) (`brew install go-task
 ```sh
 task                 # build bin/emeraldc
 task test            # golden suite: lexer/parser/check/json/proof/e2e/imports/...
-task examples        # compile & run every example
+task examples        # compile & run the smoke examples
 
 bin/emeraldc examples/fib.rald && ./examples/fib
 ```
@@ -300,13 +299,14 @@ Install a release build (`PREFIX` defaults to `/usr/local`):
 
 ```sh
 task install PREFIX=/usr/local   # emeraldc -> $PREFIX/bin, stdlib -> $PREFIX/lib/emerald/stdlib
-task dist                        # relocatable emerald-1.0.0.tar.gz
+task dist                        # build emerald-1.0.0.tar.gz (smoke-test before release)
 ```
 
-The installed binary finds its stdlib with no flags or env vars: `$EMERALD_STDLIB`
-overrides when set, otherwise the compiler looks next to the executable
-(`../stdlib`, `../lib/emerald/stdlib`, …) and finally the compile-time default,
-so a copied binary works from any directory. `emeraldc --version` prints the
+The compiler searches for its stdlib with no `-I` flag: `$EMERALD_STDLIB`
+overrides when set, otherwise it looks next to the executable
+(`../stdlib`, `../lib/emerald/stdlib`, …) and finally the compile-time default.
+The archive/install paths still need the clean-machine smoke test listed in
+[`docs/REMAINING_V1.md`](docs/REMAINING_V1.md). `emeraldc --version` prints the
 version.
 
 ## Pipeline
@@ -375,8 +375,7 @@ checking, and shape types.** The type system also earned its keep in the
 ordinary way, catching a rejection sampler that never rebound its generator and
 a defocus disk that was 20× too large.
 
-Read [`PLAN.md`](examples/ray_tracer/PLAN.md) for the design and
-[`typed/README.md`](examples/ray_tracer/typed/README.md) for the full table,
+Read [`typed/README.md`](examples/ray_tracer/typed/README.md) for the full table,
 the deviations, and the performance cost of the brands (~10%).
 
 [`docs/proofs.md`](docs/proofs.md) is the general account — proof by exhaustive
@@ -384,26 +383,18 @@ case analysis, by enumeration, by parametricity, by impossibility — with the
 same honesty about where it stops, and
 [`examples/proofs.rald`](examples/proofs.rald) is a runnable tour.
 
-## Where this is going
+## Further work
 
-[`docs/research-directions.md`](docs/research-directions.md) is the agenda: a
-gap analysis and ten research tracks aimed at one thesis —
+The v1 implementation is intentionally focused: the compiler, runtime,
+standard library, examples, and golden tests are the maintained product
+surface. Concrete release risks and useful follow-up work are tracked in
+[`docs/REMAINING_V1.md`](docs/REMAINING_V1.md); the language reference documents
+only behavior that exists today.
 
-> **models as morphisms, interpretations as typed refinements between them,
-> obligations discharged exactly where possible and statistically where not,
-> with a machine-checkable certificate at the end.**
-
-The blockers are stated plainly there: no induction, no termination checking,
-`any` as a universal solvent, unsound covariant lists, no effects. The tracks
-that follow — shape types, effects and purity, interpretations as first-class
-typed objects, approximate `(ε, δ)` judgments, a proof fragment that actually
-means something — are ordered by how much of that they unblock.
-
-Phase 2 has already landed the first of those tracks: **tensors and shape
-types** ([`docs/tensors.md`](docs/tensors.md), [`docs/shapes.md`](docs/shapes.md)).
-A shape bug is now a compile error with both shapes printed, an MLP trains on
-XOR end-to-end ([`examples/mlp/`](examples/mlp/)), and `Fin[n]` rejects a
-provably out-of-range index at compile time.
+Tensors and shape checking are already part of v1
+([`docs/tensors.md`](docs/tensors.md), [`docs/shapes.md`](docs/shapes.md)). A
+shape bug is a compile error with both shapes printed, and the MLP example in
+[`examples/mlp/`](examples/mlp/) exercises the feature end to end.
 
 ---
 
@@ -413,7 +404,7 @@ provably out-of-range index at compile time.
 |---|---|
 | `include/` | compiler headers |
 | `src/` | compiler (`lexer` → `parser` → `module` → `check` → `codegen` → `main`, plus `diag`) and `runtime.c` (Value model + GC, compiled into every program) |
-| `docs/` | **start at [`docs/README.md`](docs/README.md)** — grammar, type system, builtins, modules, diagnostics, architecture, GC, proofs, research directions, plus the Phase 2 [`tensors.md`](docs/tensors.md) and [`shapes.md`](docs/shapes.md) |
+| `docs/` | **start at [`docs/README.md`](docs/README.md)** — language reference, implementation notes, release checklist, and the v1 risk audit |
 | `stdlib/` | the standard library, in Emerald — **start at [`stdlib/SPEC.md`](stdlib/SPEC.md)** |
 | `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `json`, `proof`, `e2e`, `imports`, `stdlib`, `repl`, `shape`, warnings, proof report) + `run_tests.sh` |
 | `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `functional/` (a seven-part tour of the functional core), `modules/` (a multi-file program), `ray_tracer/` (the experiment), `mlp/` (a hand-written MLP trained on XOR, and its `shape_bug` compile error) |

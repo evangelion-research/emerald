@@ -314,11 +314,41 @@ static char *find_exe_stdlib(const char *argv0) {
     return NULL;
 }
 
+static void print_help(void) {
+    printf("Emerald compiler %s\n", EMERALD_VERSION);
+    puts("");
+    puts("Usage:");
+    puts("  emeraldc [OPTIONS] file.rald");
+    puts("  emeraldc --repl [-I DIR]...");
+    puts("");
+    puts("Compilation modes (choose at most one):");
+    puts("  --emit-tokens       print the lexer token stream");
+    puts("  --emit-ast          print the parser AST");
+    puts("  --emit-shapes       print tensor and dimension annotations");
+    puts("  --check             type-check without generating a binary");
+    puts("  --emit-c            print generated C instead of compiling it");
+    puts("  --repl              start the interactive compiler session");
+    puts("");
+    puts("Diagnostics and checking:");
+    puts("  --json              emit diagnostics as JSON");
+    puts("  --proof             enable proof-mode checks");
+    puts("  --proof-report      print proof-mode measurements");
+    puts("  --shape-report      print shape solver measurements");
+    puts("  --werror            treat warnings as errors");
+    puts("  -Wno-CODE           suppress one warning code");
+    puts("");
+    puts("Build options:");
+    puts("  -I DIR              add a module search directory");
+    puts("  -o OUT              choose the output binary path");
+    puts("  --keep-c            keep the generated .gen.c file");
+    puts("  -h, --help          show this help and exit");
+    puts("  -v, --version       print the compiler version and exit");
+}
+
 static void usage(void) {
-    fputs("usage: emeraldc [--emit-tokens|--emit-ast|--emit-shapes|--check|--emit-c]\n"
-          "                [--json] [--proof] [--shape-report] [--proof-report] [--keep-c]\n"
-          "                [--werror] [-Wno-CODE]... [-I DIR]... [-o OUT] file.rald\n"
-          "       emeraldc --repl [-I DIR]...\n",
+    fputs("usage: emeraldc [OPTIONS] file.rald\n"
+          "       emeraldc --repl [-I DIR]...\n"
+          "try 'emeraldc --help' for more information\n",
           stderr);
     exit(2);
 }
@@ -377,6 +407,10 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--emit-c") == 0) mode = MODE_C;
         else if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
             printf("emeraldc %s\n", EMERALD_VERSION);
+            return 0;
+        }
+        else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            print_help();
             return 0;
         }
         else if (strcmp(argv[i], "--json") == 0) json_errors = true;

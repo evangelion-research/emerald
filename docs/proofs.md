@@ -63,7 +63,7 @@ same inductive structure, or an element of a `seq` field (`t.kids[0]`;
 the recursion). A function whose recursion cannot be shown to descend must
 declare `partial`, which marks it as *not* a proof.
 
-  Two more gaps are closed (SPEC_V3 W4):
+  Two additional proof-mode checks are implemented:
 
   - **Mutual recursion.** The checker builds the call-graph SCCs and rejects a
     cycle of more than one function (`is_even`/`is_odd`) as a cycle without
@@ -261,8 +261,7 @@ These are real limits, not omissions to work around:
 - **Induction is limited.** Non-generic types may be recursive (`type N = ...`),
   so inductively defined naturals or lists-as-cons-cells can be written, but
   the checker derives no induction principle for them — claims about all
-  lists are still limited to what parametricity gives. (This is SPEC_V3 W6;
-  it is the one planned workstream not yet landed.)
+  lists are still limited to what parametricity gives. This remains a deliberate v1 limitation.
 - **No dependent types.** A type cannot mention a value, so "this list has
   length `n`", "this index is in bounds", or "this integer is positive" are
   not expressible — *except* at the dimension level, where `Eq[a, b]` +

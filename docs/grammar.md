@@ -1,4 +1,4 @@
-# Emerald Grammar (v2 — as implemented)
+# Emerald Grammar (as implemented)
 
 Emerald keeps Python's *concepts and semantics* but uses **curly braces for
 scope** and adds a **TypeScript-style structural type layer** (records +
@@ -124,8 +124,8 @@ catch_arm     := (IDENT | "_") [IDENT] "->" expr
 - Neither form is exception handling: a result is an ordinary value, `try` is
   an early `return`, and there is no stack unwinding or hidden control flow.
 
-See [`errors.md`](errors.md) for the semantics, and
-[`core-calculus.md`](core-calculus.md) §5 for `[T-TRY]` and `[T-CATCH]`.
+See [`errors.md`](errors.md) for the semantics and the checked error
+propagation rules.
 
 ## Type Expressions
 
@@ -288,7 +288,7 @@ block's first statement first, or parenthesize the name.
   `gc_stats()`, `append(xs, v)`, `slice(seq, lo, hi)`, `ord(c)`, `chr(n)`,
   `argv()`, `exit(code)`, `map`/`filter`/`reduce`, `read_file(path)`,
   `read_file_opt(path)`, `file_exists(path)`, `write_file(path, s)`,
-  `append_file(path, s)`, `run(cmd)`. Builtins cannot be shadowed, redefined,
+  `append_file(path, s)`, `run(cmd)`, `dict()` / `set()`. Builtins cannot be shadowed, redefined,
   or used as values. Signatures and semantics: [`builtins.md`](builtins.md).
 - **Standard library**: ordinary Emerald modules in `stdlib/`, resolved with no
   `-I` flag (`import strings`). See [`../stdlib/SPEC.md`](../stdlib/SPEC.md).
@@ -300,6 +300,6 @@ block's first statement first, or parenthesize the name.
   the closure. Assigning a name inside a nested function still makes it a
   *local* of that function (as with globals, no `nonlocal`); mutate a
   captured list/record to share state.
-- **Known limitations**: no classes/methods, no exceptions, no `//` floor
-  division, comparison chains associate pairwise (`a < b < c` is
+- **Known limitations**: no classes/methods, no exceptions, and comparison
+  chains associate pairwise (`a < b < c` is
   `(a < b) < c`, unlike Python).

@@ -3,7 +3,7 @@
 # Builtins today: print len range str int gc_stats read_file write_file
 # append_file run sqrt tan rand.  There is no abs / min / max / pow /
 # float(), so this module is a prerequisite for everything else, not a
-# nicety (PLAN.md §3, §10.8).
+# nicety (the ray-tracer design §3, §10.8).
 
 def min(a: float, b: float) -> float {
     if a < b { return a }

@@ -34,7 +34,7 @@ typedef enum {
     TY_OPAQUE,  /* Chan[T], Task[T]: a runtime handle with one element type */
 } TyKind;
 
-/* Effect labels (SPEC_V3 D1/W3). A function type carries the join of its
+/* Effect labels. A function type carries the join of its
  * effects; `pure` is the empty mask. Only the impurity `pure` rules out is
  * tracked today -- the finer labels (rand/mut/alloc/nondet) arrive with the
  * rest of D1, and each one is a new bit here. */
@@ -238,7 +238,7 @@ static Type *ty_eq(DimExpr *lhs, DimExpr *rhs) {
     return t;
 }
 
-/* --- tensor shape obligations (SPEC_V2.md W4) --------------------------- */
+/* --- tensor shape obligations ------------------------------------------- */
 
 /* resolve to the underlying TY_TENSOR type, or NULL */
 static Type *tensor_of(Type *t) {
@@ -799,7 +799,7 @@ typedef struct {
     bool owned;     /* holds a list this function allocated itself (a fresh
                      * literal or fresh-list pure builtin) that has not escaped;
                      * the one target a `pure` function may `append` to — see
-                     * stdlib/SPEC.md §1.2 and expr_owned(). Globals and
+                     * the standard-library purity convention and expr_owned(). Globals and
                      * parameters are never owned. */
     const char *file; /* for globals: the declaring module. An assignment from
                        * another module's function body makes a local, not a
@@ -858,7 +858,7 @@ typedef struct {
                        * scope for annotations in its body as well as its
                        * signature (`out: list[T] = []` inside def f[T]) */
     int loop_depth;
-    /* --- shape system state (Phase 2 / W4) --- */
+    /* --- shape system state --- */
     char **dim_names;          /* module-level `dim` declarations */
     size_t dim_count, dim_cap;
     char **dim_params;         /* `B: dim` type parameters in scope */
@@ -1374,7 +1374,7 @@ static Type *resolve_type(Ck *ck, const TypeExpr *te, const TyEnv *env) {
             else if (strcmp(te->tensor.dtype->name, "f32") == 0) dt = CDT_F32;
             else
                 ck_error(ck, "E_SHAPE_DTYPE", te->line, te->col,
-                         "unknown tensor dtype '%s' (Phase 2 supports f32 and f64)",
+                         "unknown tensor dtype '%s' (v1 supports f32 and f64)",
                          te->tensor.dtype->name);
         }
         if (te->tensor.dynamic)
@@ -1639,7 +1639,7 @@ static bool is_numeric(const Type *t) {
     return t->k == TY_INT || t->k == TY_FLOAT || t->k == TY_BOOL || t->k == TY_ANY;
 }
 
-/* --- tensor primitive typing rules (SPEC_V2.md W4) ----------------------- */
+/* --- tensor primitive typing rules --------------------------------------- */
 
 /* If `t` is a tensor, return it. If it is `any`/`never` (the untyped escape
  * hatch), return `&t_any` as a sentinel. Anything else is an error. */
@@ -2110,7 +2110,7 @@ static Type *infer_map_like(Ck *ck, const Expr *e, const char *name,
     return r;
 }
 
-/* --- local-mutation purity (stdlib/SPEC.md §1.2) ------------------------- */
+/* --- local-mutation purity (the standard-library purity convention) ------------------------- */
 /*
  * A `pure` function may not have observable effects, and `append` mutates —
  * so the naive rule (a pure function may call only pure builtins) makes it
@@ -2254,7 +2254,7 @@ static Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
         const char *name = fn->as.sval;
         const char *dname = fn->disp ? fn->disp : name;
         /* purity: a pure function may only call pure builtins — with the one
-         * §1.2 escape: `append` to a list this function allocated itself is
+         * local-mutation escape: `append` to a list this function allocated itself is
          * an unobservable effect, so it is allowed when the target is owned. */
         bool bpure = false;
         if (ck->cur_pure && builtin_find(name, &bpure) && !bpure) {
@@ -2355,7 +2355,7 @@ static Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
             ck_arity(ck, e, dname, 0);
             return &t_float;
         }
-        /* --- the stdlib foundation (see stdlib/SPEC.md §1.1) ------------- */
+        /* --- the stdlib foundation (see the standard-library builtin boundary) ------------- */
         if (strcmp(name, "append") == 0) {
             if (!ck_arity(ck, e, dname, 2)) return &t_none;
             Type *l = ty_base(ty_resolve(argt[0]));
@@ -4054,7 +4054,7 @@ static void set_flow(Var *v, Type *val) {
     v->bound = true;
     /* a dynamic tensor bound to a statically-shaped annotation keeps the
      * annotation's shape on reads: the runtime asserts it at the boundary,
-     * so later ops must see the static shape (SPEC_V2.md D4). */
+     * so later ops must see the static shape. */
     Type *d = ty_resolve(v->decl), *s = ty_resolve(w);
     if (d->k == TY_TENSOR && s->k == TY_TENSOR &&
         !d->tensor.shape->dynamic && s->tensor.shape->dynamic)

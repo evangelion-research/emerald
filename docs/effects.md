@@ -1,6 +1,6 @@
 # Effects
 
-Emerald's purity story is a *closed* effect system (SPEC_V3 D1/W3): effects
+Emerald's purity story is a *closed* effect system: effects
 live on function **types**, not just on call sites, so a `pure` function cannot
 smuggle an impure callee through a higher-order boundary.
 
@@ -46,6 +46,5 @@ The surface syntax is `pure` only. The `-> T !{Rand, Mut}` annotation spelling,
 and full effect-*inference* over the call graph (fixpoint per SCC) with
 effect-polymorphic `map`/`filter`/`reduce`, are planned but not yet landed —
 the mask is currently inferred as the empty mask for `pure` functions and `IO`
-otherwise. The soundness guarantee that matters for Phase 3 (the higher-order
-purity hole is closed) is implemented and tested
+otherwise. The higher-order purity hole is closed and implemented/tested
 (`tests/check/{bad,good}_pure_higher_order.rald`).

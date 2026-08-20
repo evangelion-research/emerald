@@ -1,4 +1,4 @@
-# vec.rald — the affine space, typed (PLAN.md §5.1, Option C).
+# vec.rald — the affine space, typed (the ray-tracer design §5.1, Option C).
 #
 # Points, directions, and unit vectors are all structurally Vec3, but carry
 # a discriminant tag so the checker can tell them apart:
@@ -12,11 +12,11 @@
 # into any operation that wants a Dir; but a plain Dir does NOT satisfy a
 # Unit requirement, so reflect()/refract() — which are only correct on unit
 # input (book ch. 6/10) — reject non-unit vectors at compile time.
-# Pt is not a Dir at all: padd(p, p) is a compile error (PLAN.md §6 #8).
+# Pt is not a Dir at all: padd(p, p) is a compile error (the ray-tracer design §6 #8).
 #
 # The one hole: the brand is forgeable — anyone can write the literal by
 # hand, and nothing enforces ‖unit(v)‖ = 1 at runtime (no assert statement,
-# no refinement types; PLAN.md §6 #9/#10, §10.1).  unit() is the intended
+# no refinement types; the ray-tracer design §6 #9/#10, §10.1).  unit() is the intended
 # producer and normalizes, so the tag is honest.
 
 from math import abs
@@ -38,7 +38,7 @@ def dir(x: float, y: float, z: float) -> Dir {
 }
 
 # normalize and brand.  The runtime invariant ‖result‖ = 1 is not statable;
-# this is the named boundary where the claim is made good (PLAN.md §5.1).
+# this is the named boundary where the claim is made good (the ray-tracer design §5.1).
 def unit(v: Vec3) -> Unit {
     l = vlen(v)
     return { x: v.x / l, y: v.y / l, z: v.z / l, tag: "dir", unit: "unit" }

@@ -4,7 +4,8 @@ How `emeraldc` is built: ~12,000 lines of C11, warning-clean under
 `-Wall -Wextra`, no dependencies beyond libc and a C compiler to shell out to.
 
 Everything described here is implemented and covered by `task test`
-(123 tests across seven suites).
+(the full 185-case suite across compiler stages, runtime, CLI, and release
+smoke checks).
 
 ## The pipeline
 
@@ -96,7 +97,7 @@ tests/shape/    1 unit + 1 golden  dim solver + shape surface  (unit harness, --
 
 `tests/check/` holds two golden files per case (`.expected` and
 `.json.expected`) so the JSON diagnostic schema is pinned as tightly as the
-human-readable output — including the Phase 2 shape errors
+human-readable output — including the tensor shape errors
 (`bad_shape_matmul`, `bad_fin`), which pin the exit-criterion output. `tests/shape/`
 is different on purpose: `dim_unit.c` is a compiled unit test of the dimension
 solver, and `--emit-shapes` covers the shape surface. `tests/imports/` cases are
@@ -111,7 +112,7 @@ language.
 
 ```
 task              # build bin/emeraldc
-task test         # every suite (123 tests) + runtime-check
+task test         # every suite (185 tests) + runtime-check
 task test:lexer / test:parser / test:check / test:proof / test:e2e / test:imports
 task examples     # compile & run examples/*.rald and examples/*/main.rald
 task bless        # regenerate golden files (review the diff!)
@@ -141,19 +142,10 @@ emeraldc --emit-c prog.rald      # print generated C to stdout
 location baked in at build time (`-DEMERALD_SRC_DIR`), which is how a built
 `emeraldc` finds `runtime.c` to compile alongside your program.
 
-## Near-term engineering (not research)
+## Follow-up work
 
-The research agenda lives in
-[`research-directions.md`](research-directions.md). What follows is the
-ordinary language work that is still missing and does not need a paper:
-
-- Methods-by-convention: `f(rec, ...)` callable as `rec.f(...)`.
-- Exceptions with tracebacks (runtime errors currently abort with a located
-  message).
-- A dict type and a string-method library, written as Emerald modules resolved
-  from a `src/` root rather than as more builtins — see
-  [`builtins.md`](builtins.md).
-- `//`, chained comparisons, `+=`.
-- Separate compilation and a module cache; today the whole import graph is
-  re-parsed and re-checked on every build.
-- Self-hosting: rewrite lexer/parser/codegen in Emerald, keep the C runtime.
+The implementation deliberately keeps the compiler small and single-process.
+Packaging, security, correctness hardening, and larger language features are
+tracked with acceptance criteria in [`REMAINING_V1.md`](REMAINING_V1.md), rather
+than in speculative design documents. The architecture above and the test
+harness are the source of truth for the current release.

@@ -1,5 +1,5 @@
 /* Type-level natural expressions: a standalone canonical-form solver for the
- * shape system (SPEC_V2.md W2 / D3).
+ * shape system.
  *
  * A `DimExpr` is a dimension expression over named dimension variables and
  * integer literals, built from `+` and `*`. The solver normalizes each
@@ -7,7 +7,7 @@
  * deliberately avoiding an SMT dependency. `dim_le` implements the decidable
  * fragment needed for `Fin[n]` (W5): equal normal forms, literal comparison,
  * and `a <= a + k` for literal `k >= 0`. Anything else is reported as
- * *unresolved* so the SMT-vs-canonical decision (D3) is made from data.
+ * *unresolved* so future solver improvements can be guided by real programs.
  *
  * This file is standalone: it depends on nothing from the compiler, so it can
  * be unit-tested directly (tests/shape/dim_unit.c).

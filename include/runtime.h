@@ -25,7 +25,7 @@ typedef enum { V_NONE, V_BOOL, V_INT, V_FLOAT, V_OBJ, V_STR } VTag;
 typedef enum { O_STR, O_LIST, O_TUPLE, O_REC, O_DICT, O_SET,
                O_FUNC, O_CELL, O_TENSOR, O_CHAN, O_TASK } OTag;
 
-/* Tensor dtypes. Only f32 and f64 are implemented in Phase 2; the other tags
+/* Tensor dtypes. Only f32 and f64 are implemented in v1; the other tags
  * are reserved so the tag width is settled before Phase 4 (quantized models)
  * needs them. */
 typedef enum {
@@ -265,7 +265,7 @@ Value em_recv(Value ch);           /* block for a value; None once drained */
 void  em_close(Value ch);          /* close: further sends are a fatal error */
 Value em_chan_len(Value ch);       /* buffered items waiting to be received */
 
-/* --- tensors (Phase 2 numerics) -----------------------------------------
+/* --- tensors -------------------------------------------------------------
  * Whole-array runtime calls over an unboxed float buffer (see tensors.md).
  * `shape` is always a list[int]; axes are 0-based ints. `+ - * /` on two
  * tensors dispatch here from the operator functions. */

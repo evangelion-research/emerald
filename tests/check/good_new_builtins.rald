@@ -1,4 +1,4 @@
-# §1.1's last three builtins typecheck: read_line -> str | None, now -> float,
+# The input, clock, and seed builtins typecheck: read_line -> str | None, now -> float,
 # seed_rand(int) -> None.
 
 line: str | None = read_line()

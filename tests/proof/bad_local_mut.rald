@@ -1,4 +1,4 @@
-# §1.2 local-mutation purity, the other side: `append` is only allowed on a
+# Local-mutation purity, the other side: `append` is only allowed on a
 # list the pure function allocated itself. A parameter, a global, a record
 # field, and a list that has already escaped into a global are all rejected.
 

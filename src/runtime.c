@@ -2408,7 +2408,7 @@ static void t_set(Obj *t, size_t off, double v) {
 static DType parse_dtype(const char *s) {
     if (strcmp(s, "f32") == 0) return DT_F32;
     if (strcmp(s, "f64") == 0) return DT_F64;
-    rt_fatal("unsupported dtype '%s' (Phase 2 supports f32 and f64)", s);
+    rt_fatal("unsupported dtype '%s' (v1 supports f32 and f64)", s);
     return DT_F32;
 }
 
