@@ -1,0 +1,63 @@
+# pattern_match — exhaustive match on tagged unions and records.
+#
+# `match e { pat -> ... }` is checked for exhaustiveness by the type checker.
+# A missing arm produces `E_TYPE_MATCH`. `_` is a catch-all wildcard.
+#
+# Patterns:
+#   `_`           matches anything (binds nothing)
+#   `IDENT`       binds the entire matched value
+#   `literal`     matches an exact value (int/float/str/bool)
+#   `{ f: pat }`  matches a record, binding field `f`
+
+# --- match on tagged union alternatives --------------------------------------
+
+type Even = 0 | 2 | 4 | 6 | 8
+type Odd  = 1 | 3 | 5 | 7 | 9
+type Digit = Even | Odd
+
+def digit_info(d: Digit) {
+    match d {
+        0 -> { print("zero is even") }
+        1 -> { print("one is odd") }
+        _ -> { print("other digit") }
+    }
+}
+
+# --- match on compound records ---------------------------------------------
+
+type Point = { x: float, y: float }
+type Color = { r: float, g: float, b: float }
+
+def describe_point(p: Point) {
+    match p {
+        { x: _, y: _ } -> { print("point at (" + str(p.x) + ", " + str(p.y) + ")") }
+    }
+}
+
+def describe_color(c: Color) {
+    match c {
+        { r: _, g: _, b: _ } -> { print("rgb(" + str(c.r) + ", " + str(c.g) + ", " + str(c.b) + ")") }
+    }
+}
+
+# --- match with identifier binding -----------------------------------------
+
+def first_digit(d: Digit) {
+    match d {
+        x -> { print("digit: " + str(x)) }
+    }
+}
+
+# --- test driver ------------------------------------------------------------
+
+print("pattern_match demo:")
+print("digit_info(3):")
+digit_info(3)
+print("digit_info(6):")
+digit_info(6)
+print("describe_point({x: 1.0, y: 2.0}):")
+describe_point({x: 1.0, y: 2.0})
+print("describe_color({r: 1.0, g: 0.5, b: 0.25}):")
+describe_color({r: 1.0, g: 0.5, b: 0.25})
+print("first_digit(5):")
+first_digit(5)

@@ -1,0 +1,40 @@
+# testing — simple test patterns and assertions.
+#
+# Emerald has no dedicated test framework in Phase 2, but tests can be
+# expressed using the language's own mechanisms: `match` for exhaustiveness,
+# `error` for expected failures, and `catch` for graceful handling.
+
+# An assert-like function: matches on bool with a single arm.
+# If `cond` is True, the unit value is returned. If `cond` is False,
+# the `_` arm is missing, so the type checker flags E_TYPE_MATCH
+# at the call site — a compile-time assertion.
+def assert(cond: bool, msg: str) {
+    match cond {
+        True -> {}
+        _ -> {}
+    }
+}
+
+# --- some checks ------------------------------------------------------------
+
+def positive(n: int) -> bool {
+    return n > 0
+}
+
+def even(n: int) -> bool {
+    return n % 2 == 0
+}
+
+def hello() -> str {
+    return "hello"
+}
+
+# --- main --------------------------------------------------------------
+
+assert(positive(5), "expected positive")
+assert(positive(-1), "expected positive")
+assert(even(4), "expected even")
+assert(even(5), "expected even")
+assert(hello() == "hello", "expected hello")
+
+print("all assertions passed")

@@ -1,0 +1,32 @@
+# file_io — read_file, write_file, append_file builtins.
+#
+# These builtins are available in the standard library. File paths are
+# relative to the working directory.
+
+# write_file path content — overwrites the file, or creates it if absent.
+# append_file path content — appends content to the file (creates if absent).
+# read_file path — returns the file contents as a string, or errors if absent.
+
+def count_lines(path: str) -> int {
+    contents = read_file(path)
+    lines = 0
+    for _ in contents { lines = lines + 1 }
+    return lines
+}
+
+def main() -> None {
+    # Write a greeting
+    write_file("greeting.txt", "hello, world\n")
+
+    # Append a timestamp
+    append_file("greeting.txt", "appended line\n")
+
+    # Read back and print
+    contents = read_file("greeting.txt")
+    print("file contents:")
+    print(contents)
+
+    # Count lines
+    n = count_lines("greeting.txt")
+    print("line count:", n)
+}
