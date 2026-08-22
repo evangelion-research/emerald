@@ -1,389 +1,313 @@
 # Emerald
 
-A Python-flavored language with **braces instead of indentation**,
-**TypeScript-style structural typing** instead of classes, a **two-generation
-mark-and-sweep GC**, and a compiler written in modern C11 that emits native
-binaries via your system `cc`.
+<p align="center">
+  <img src="assets/emerlad_v1.jpeg" alt="Emerald programming language logo" width="704">
+</p>
 
-```
+Emerald is a statically typed programming language with Python-inspired syntax,
+brace-delimited blocks, and TypeScript-style structural typing. Its C11 compiler
+generates native executables through the system C compiler.
+
+Key capabilities include:
+
+- Structural records, unions, intersections, literal types, and generics
+- Flow-sensitive narrowing and exhaustive case analysis
+- Explicit, typed error handling without exceptions
+- Totality and purity checking, with a stricter proof mode
+- First-class functions, closures, pipelines, and tail-call optimization
+- Cooperative tasks, typed channels, and statically checked tensor dimensions
+- A precise, two-generation mark-and-sweep garbage collector
+- Human-readable and machine-readable diagnostics
+
+```rald
 type Point  = { x: int, y: int }
-type Point3 = Point & { z: int }          # structural "inheritance"
+type Point3 = Point & { z: int }
 
-def mag2(p: Point) -> int {
+def magnitude_squared(p: Point) -> int {
     return p.x * p.x + p.y * p.y
 }
 
 p: Point3 = { x: 3, y: 4, z: 5 }
-print(mag2(p))                            # Point3 is-a Point by shape
-for i in range(5) { print(i * i) }
+print(magnitude_squared(p))
 ```
 
-Emerald is built to explore how much of a real program's meaning a practical
-type system can hold, while providing a substrate for writing and studying
-neural networks through machine-checked interpretation.
+`Point3` is assignable to `Point` because it contains the required fields.
+Types are erased during compilation, so structural subtyping introduces no
+runtime dispatch overhead.
 
----
+## Project status
 
-## The type system
+Emerald is an experimental language and compiler for programming-language
+research, particularly type-driven verification and machine-checked numerical
+software. This repository contains the compiler, runtime, standard library,
+documentation, examples, and regression tests.
 
-Literal types, unions, generics, flow narrowing, and `never` — enough to make
-the checker verify exhaustive case analysis, so a change to a data type
-surfaces every site that must be updated:
+The current release version is `1.0.0`. See
+[`docs/RELEASE_V1.md`](docs/RELEASE_V1.md) for the implemented language and
+tooling surface.
 
-```
-type Circle = { kind: "circle", r: int }
-type Square = { kind: "square", side: int }
-type Shape  = Circle | Square
+## Requirements
 
-def area(s: Shape) -> int {
-    if s.kind == "circle" { return s.r * s.r * 3 }
-    if s.kind == "square" { return s.side * s.side }
-    impossible: never = s      # typechecks only if the cases are exhaustive
-    return 0
-}
+- A C11-compatible compiler available as `cc`
+- [Task](https://taskfile.dev/) (`brew install go-task` on macOS)
 
-def head[T](xs: list[T]) -> T { return xs[0] }   # generics
-type Pair[A, B] = { first: A, second: B }
-```
-
-Types are erased at runtime — there is no class, vtable, or nominal tag — so
-structural subtyping costs nothing.
-
-## Expected errors
-
-There are no exceptions. A function that can fail says so in its return type,
-and the checker holds both sides to it — the callee's declared errors are the
-complete list, and every caller either handles them or declares that it passes
-them on:
-
-```
-error NotFound { key: str }
-error Malformed { key: str, saw: str }
-
-def field(key: str) -> Result[str, NotFound | Malformed] { ... }
-
-def port() -> Result[int, NotFound | Malformed] {
-    const raw = try field("port")    # or return the failure to my caller
-    return ok(int(raw))
-}
-
-const n = catch port() {             # an expression: the value, or an arm's
-    NotFound e -> 80
-    Malformed e -> 0 - 1             # a missing arm is a compile error
-}
-```
-
-`error N { ... }` is sugar for a record with a literal `_tag`, so errors are
-ordinary discriminated unions and `catch` proves exhaustive with the same
-machinery as `match`. `try` compiles to a comparison and a `return`: no
-unwinding, no handler search, no hidden control flow. Rust's obligations,
-Effect's vocabulary — `map_error`, `catch_all`, `either`, `retry` and the rest
-live in [`stdlib/result.rald`](stdlib/result.rald). See
-[`docs/errors.md`](docs/errors.md) and
-[`examples/errors.rald`](examples/errors.rald).
-
-## Totality, purity, proof mode
-
-Three properties separate "well-typed" from "a claim you can defend", and each
-has a switch:
-
-- **Functions are total by default.** Every recursive call must descend
-  structurally — the argument is a projection chain out of a parameter of
-  recursive-alias type (`n.succ`, `xs.tail`), or an element of a `seq` field
-  (`t.kids[0]`). Mutual recursion is rejected as a cycle without structural
-  descent, and under `--proof` a `while` loop must have an evident monotone
-  integer counter (`for i in range(n)` is the supported total loop). A function
-  whose recursion can't be shown to descend must say `partial`, which marks it
-  as *not* a proof.
-- **`pure`** — `def forward(x: T) -> U pure` promises no `print`, no `rand`,
-  no file or process IO, and no impure callee (a nested `def` inside a pure
-  function must itself be pure). Purity lives on function *types*, so a pure
-  function cannot smuggle an impure callee through `map`/`filter`/`reduce` or
-  an indirect call (`docs/effects.md`).
-- **`seq[T]`** — the immutable, covariant, sound sequence. `list[T]` stays
-  covariant (and mutable) in ordinary code — the unsound upcast now warns
-  `W_UNSOUND_COVARIANCE` — while `seq[T]` is sound because the checker refuses
-  to mutate it. `freeze(xs)`/`thaw(s)` convert, and under `--proof` `list[T]`
-  is invariant while `seq[T]` is not.
-- **`Eq[a, b]`** — propositional equality of dimension expressions. `refl`
-  inhabits `Eq[a, a]`; a value `e: Eq[a, b]` in scope lets a `Tensor[f32, [a]]`
-  be used as `Tensor[f32, [b]]` across a function boundary.
-- **`--proof`** — `emeraldc --check --proof f.rald` bans `any` (including `any`
-  hidden inside a type constructor — the empty `[]` hole is closed), `partial`,
-  and non-termination. `--proof-report` (text or `--json`) prints what was
-  checked: function totals, vacuous obligations, taint sites, and covariance
-  warnings.
-
-## Functions are values, closures included
-
-Function types are written `(A, B) -> C`. Pass functions around, call them
-indirectly, and nest `def`s — a nested function captures enclosing locals by
-shared, mutable cell:
-
-```
-def make_adder(n: int) -> (int) -> int {
-    def add(x: int) -> int { return x + n }
-    return add
-}
-
-add5  = make_adder(5)
-add10 = make_adder(10)
-print(add5(1), add10(1))            # 6 11
-```
-
-The functional core sits on top of this: `const` immutable bindings, lambdas
-`(x: int) => x * 2` (unannotated parameters are inferred contextually), the
-higher-order builtins `map` / `filter` / `reduce`, pipelines with `|>` and
-composition with `>>`, exhaustive `match` on tagged records, thunks
-`() => expr` for lazy evaluation, and **tail-call optimization** — a direct
-`return f(...)` compiles to a jump, so tail recursion runs in constant stack
-(10M-deep recursion is fine). See [`examples/functional/`](examples/functional/)
-for a seven-part tour of each feature.
-
-## The REPL
-
-```
-$ emeraldc --repl          # or just: emeraldc
-emerald> xs = [1, 2]
-emerald> append(xs, 3)
-emerald> xs
-[1, 2, 3]
-```
-
-There is no interpreter — the session *is* its source text. Each entry is
-appended, the whole program is recompiled and re-run, and a marker line printed
-between the old text and the new entry tells the REPL which output to show. So
-the checker is the same checker, state needs no runtime support, and a typo
-leaves the session untouched; the price is that effects repeat, once per entry.
-`:list`, `:undo`, `:save FILE` and friends bridge back to ordinary files.
-See [`docs/repl.md`](docs/repl.md).
-
-## Builtins
-
-Seventy-seven builtins compile straight into runtime calls and are in scope in
-every module: the forty-one core builtins (`print`, `len`, `range`, `str`, `int`,
-`float`, `append`, `slice`, `freeze`, `thaw`, `map`, `filter`, `reduce`,
-`read_file`, `argv`, `run`, `gc_stats`, and friends), the eleven green-thread
-builtins (`spawn`, `join`, `chan`, `send`, `recv`, `sleep`, `task_yield`, …),
-and the twenty-five tensor primitives (`zeros`, `ones`, `matmul`,
-`reshape`, `transpose`, `astype`, …), plus the Python-style `dict()` and
-`set()` collection constructors. They are not values (`f = print` is an
-error — there is no closure to hand out) and cannot be redefined.
-
-A builtin exists only when it cannot be written in Emerald: allocation-level
-(`append`, `slice`, `len`, `range`), formatting (`str`, `print`), foreign
-(`read_file`, `argv`, `run`), privileged (`gc_stats`), or a tensor shape
-obligation (`matmul`, `reshape`). `append` is the load-bearing core one —
-without amortized in-place growth, every list built in a loop is quadratic.
-The authoritative list is [`include/builtins.def`](include/builtins.def), the
-one table the checker and codegen share. See [`docs/builtins.md`](docs/builtins.md),
-[`docs/tensors.md`](docs/tensors.md), and [`docs/shapes.md`](docs/shapes.md).
-
-## Green threads
-
-`spawn` starts a cooperative task, `chan` connects tasks, `join` waits for one.
-One task runs at a time and control changes hands only at a channel operation,
-a `sleep`, a `join`, or an explicit `task_yield()` — so nothing is interrupted
-mid-statement and the language needs no locks.
-
-```rald
-jobs: Chan[int] = chan(8)
-w = spawn(() => worker("w0"))
-for n in range(2, 40) { send(jobs, n) }
-chan_close(jobs)              # receivers drain, then recv() gives None
-print("handled", join(w))
-```
-
-`Chan[T]` and `Task[T]` are checked at both ends: `send` must carry a `T`,
-`recv` yields `T | None` (the closed channel is in the type), and `join` hands
-back what the task returned. Blocking forever is reported as a deadlock rather
-than hanging. See [`docs/concurrency.md`](docs/concurrency.md) and
-[`examples/tasks.rald`](examples/tasks.rald).
-
-## Standard library
-
-Everything else is ordinary Emerald in [`stdlib/`](stdlib/), resolved with no
-flags:
-
-```
-import strings
-from result import Result, unwrap_or
-
-def parse_flag(arg: str) -> Result[{ name: str, val: str }, str] {
-    p = strings.partition(arg, "=")
-    if p.found == False { return { ok: False, err: "expected name=value" } }
-    return { ok: True, val: { name: p.before, val: p.after } }
-}
-```
-
-Eleven modules: `result` (errors as values — there are no exceptions), `chars`,
-`strings`, `builder`, `lists`, `sort`, `math` (including `exp`/`log`/`sin`
-written in Emerald), `io`, `sys`, `path`, and `fmt`. Dictionaries and sets are
-builtin runtime values constructed with `dict()` and `set()`.
-
-Its shape is Python's; its signatures are not, because there are no methods and
-no exceptions. It is scoped to the compiler, runtime, examples, and tests. See
-[`stdlib/SPEC.md`](stdlib/SPEC.md) for the maintained module inventory and
-conventions.
-
-## Modules
-
-A program can span several files. A `.rald` file is a module, and `import`
-names code in another one:
-
-```
-import strings                    # module object: strings.split(...)
-import text.strings as ts         # dotted paths map to directories
-from strings import split, join   # names lifted into this module
-```
-
-Module paths resolve against the importing file's directory, then the project's
-`src/` root, then each `-I <dir>` in the order given, then the standard library
-— first hit wins, so a project can shadow a stdlib module with its own. A leading
-underscore makes a top-level name private; everything else is exported. The
-compiler loads the whole import graph and links it into one program, mangling
-each imported module's top-level names to `<module>__<name>`, so two packages
-can both define `parse`.
-
-The `-I` / `-o` command line (see [Pipeline](#pipeline)) is the whole contract
-between `emeraldc` and any package manager driving it. See
-[`docs/modules.md`](docs/modules.md).
-
-## Diagnostics
-
-Errors are **structured diagnostics** with a stable machine-readable code, a
-precise `file:line:column`, the offending source line with a caret, and — for
-type mismatches — the expected and actual types as separate fields.
-
-```
-error[E_TYPE_RETURN]: returning str from a function declared to return int
-  --> foo.rald:3:5
-    |
- 3 |     return y
-   |     ^
-   = expected: int
-   = actual:   str
-```
-
-Pass `--json` to any mode to emit the same diagnostics as JSON (one object per
-error, with `kind`, `code`, `line`, `column`, `message`, `expected`, `actual`,
-and `source_line`). This is designed to be fed back to a tool — or an LLM —
-that fixes the program and re-runs. Runtime errors in compiled programs also
-report their source location:
-
-```
-emerald: runtime error: division by zero (at foo.rald:7)
-```
-
-See [`docs/diagnostics.md`](docs/diagnostics.md) for the code reference and the
-JSON schema.
-
----
-
-## Quick start
-
-Requires a C compiler and [go-task](https://taskfile.dev) (`brew install go-task`).
+## Build and test
 
 ```sh
 task                 # build bin/emeraldc
-task test            # golden suite: lexer/parser/check/json/proof/e2e/imports/...
-task bench           # run benchmark workloads with informational timings
-task examples        # compile & run the smoke examples
+task test            # run the complete test suite
+task examples        # compile and run the examples
+task bench           # run benchmark workloads
+task runtime-check   # validate the runtime with strict compiler flags
+```
 
-bin/emeraldc examples/fib.rald && ./examples/fib
+Compile and run a program:
+
+```sh
+bin/emeraldc examples/fib.rald
+./examples/fib
 ```
 
 Install a release build (`PREFIX` defaults to `/usr/local`):
 
 ```sh
-task install PREFIX=/usr/local   # emeraldc -> $PREFIX/bin, stdlib -> $PREFIX/lib/emerald/stdlib
-task dist                        # build emerald-1.0.0.tar.gz (smoke-test before release)
+task install PREFIX=/usr/local
+task dist
 ```
 
-The compiler searches for its stdlib with no `-I` flag: `$EMERALD_STDLIB`
-overrides when set, otherwise it looks next to the executable
-(`../stdlib`, `../lib/emerald/stdlib`, …) and finally the compile-time default.
-`emeraldc --version` prints the version.
+The compiler locates the standard library automatically. Set
+`EMERALD_STDLIB` to override its location.
 
-## Pipeline
+## Type system
 
+Emerald supports structural records, union and intersection types, literal
+types, generic functions and aliases, and flow-sensitive narrowing.
+
+```rald
+type Circle = { kind: "circle", radius: int }
+type Square = { kind: "square", side: int }
+type Shape  = Circle | Square
+
+def area(shape: Shape) -> int {
+    if shape.kind == "circle" { return shape.radius * shape.radius * 3 }
+    if shape.kind == "square" { return shape.side * shape.side }
+    unreachable: never = shape
+    return 0
+}
+
+def head[T](items: list[T]) -> T { return items[0] }
 ```
-foo.rald ─► lexer ─► parser ─► modules ─► type checker ─► C codegen ─► cc ─► ./foo
+
+Assigning `shape` to `never` succeeds only when the preceding branches cover
+every member of the union. Adding another shape therefore produces a compile
+error at each non-exhaustive use site. See
+[`docs/type-system.md`](docs/type-system.md).
+
+## Typed error handling
+
+Fallible functions declare their errors in a `Result` return type. Callers must
+handle or propagate every declared failure.
+
+```rald
+error NotFound { key: str }
+error Malformed { key: str, value: str }
+
+def field(key: str) -> Result[str, NotFound | Malformed] { ... }
+
+def port() -> Result[int, NotFound | Malformed] {
+    const raw = try field("port")
+    return ok(int(raw))
+}
+
+const value = catch port() {
+    NotFound error -> 80
+    Malformed error -> 0 - 1
+}
 ```
 
-Every stage has a driver flag and its own golden test directory under `tests/`.
-No stage is observable only through the stage after it.
+`try` propagates an error to the caller. `catch` is an expression whose arms
+must exhaust the error union. Errors are ordinary tagged records; handling does
+not require stack unwinding or hidden control flow. See
+[`docs/errors.md`](docs/errors.md) and [`stdlib/result.rald`](stdlib/result.rald).
 
+## Totality, purity, and proof mode
+
+Emerald can verify additional program properties:
+
+- Functions are total by default. Recursive calls must make a structurally
+  smaller argument; other functions must be declared `partial`.
+- A `pure` function cannot perform I/O, use randomness, or call an impure
+  function, including indirectly through a higher-order function.
+- `seq[T]` is immutable and covariant. `list[T]` remains mutable and becomes
+  invariant in proof mode.
+- `Eq[a, b]` represents equality between dimension expressions and can justify
+  tensor shape equivalence across function boundaries.
+- `--proof` rejects `any`, `partial`, unsupported recursion, and loops whose
+  termination cannot be established.
+
+```sh
+bin/emeraldc --check --proof program.rald
+bin/emeraldc --check --proof --proof-report program.rald
+bin/emeraldc --check --proof --proof-report --json program.rald
 ```
+
+See [`docs/proofs.md`](docs/proofs.md) and
+[`docs/effects.md`](docs/effects.md).
+
+## Functions and closures
+
+Functions are first-class values. Function types use `(A, B) -> C` notation,
+and nested functions capture variables from their enclosing scope.
+
+```rald
+def make_adder(value: int) -> (int) -> int {
+    def add(input: int) -> int { return input + value }
+    return add
+}
+
+add5 = make_adder(5)
+print(add5(1))
+```
+
+The language also provides immutable `const` bindings, lambdas, `map`,
+`filter`, `reduce`, pipelines (`|>`), function composition (`>>`), exhaustive
+`match` expressions, and thunks. Direct tail calls execute in constant stack
+space. See [`examples/functional/`](examples/functional/).
+
+## Modules and standard library
+
+Each `.rald` file defines a module. Imports support module objects, dotted
+paths, aliases, and selective name imports.
+
+```rald
+import strings
+import text.strings as text_strings
+from result import Result, unwrap_or
+```
+
+Modules are resolved relative to the importing file, followed by the project
+source root, each `-I` directory, and the standard library. Top-level names
+beginning with `_` are private; all others are exported.
+
+The standard library provides `result`, `chars`, `strings`, `builder`, `lists`,
+`sort`, `math`, `io`, `sys`, `path`, and `fmt`. See
+[`docs/modules.md`](docs/modules.md) and [`stdlib/SPEC.md`](stdlib/SPEC.md).
+
+## Built-in operations
+
+Built-ins provide functionality requiring runtime, allocation, foreign-system,
+or type-checker support. They include core collection and conversion operations,
+file and process I/O, cooperative tasks, channels, tensors, and the `dict()` and
+`set()` constructors.
+
+Built-ins are not first-class function values and cannot be redefined. Their
+authoritative definition is [`include/builtins.def`](include/builtins.def). See
+[`docs/builtins.md`](docs/builtins.md), [`docs/tensors.md`](docs/tensors.md),
+and [`docs/shapes.md`](docs/shapes.md).
+
+## Concurrency
+
+Emerald provides cooperative tasks and typed channels. One task executes at a
+time; scheduling occurs at channel operations, `sleep`, `join`, or an explicit
+`task_yield()` call.
+
+```rald
+jobs: Chan[int] = chan(8)
+worker_task = spawn(() => worker("worker-0"))
+for value in range(2, 40) { send(jobs, value) }
+chan_close(jobs)
+print("handled", join(worker_task))
+```
+
+`Chan[T]` validates transmitted values, `recv` returns `T | None` for a closed
+channel, and `Task[T]` preserves the task's return type. The runtime reports
+deadlocks instead of waiting indefinitely. See
+[`docs/concurrency.md`](docs/concurrency.md).
+
+## REPL
+
+Start an interactive session with `bin/emeraldc --repl`. The REPL records each
+successful entry as source, recompiles the complete session, and displays the
+latest entry's output. It therefore uses the same parser, checker, and compiler
+as file-based programs. `:list`, `:undo`, and `:save FILE` manage the session.
+See [`docs/repl.md`](docs/repl.md).
+
+## Diagnostics
+
+Compiler diagnostics contain a stable code, source location, excerpt, and
+structured expected and actual values when applicable.
+
+```text
+error[E_TYPE_RETURN]: returning str from a function declared to return int
+  --> example.rald:3:5
+    |
+ 3 |     return value
+   |     ^
+   = expected: int
+   = actual:   str
+```
+
+Pass `--json` to emit one JSON object per diagnostic for editor, CI, and other
+tooling integrations. Runtime errors also include their Emerald source
+location. See [`docs/diagnostics.md`](docs/diagnostics.md).
+
+## Compiler pipeline
+
+```text
+source -> lexer -> parser -> modules -> type checker -> C codegen -> cc -> executable
+```
+
+Each stage has a corresponding command-line mode and golden test suite:
+
+```text
 emeraldc [--emit-tokens|--emit-ast|--emit-shapes|--check|--emit-c]
-         [--json] [--proof] [--shape-report] [--keep-c] [-I DIR]... [-o OUT] file.rald
+         [--json] [--proof] [--shape-report] [--keep-c]
+         [-I DIR]... [-o OUT] file.rald
 ```
 
 See [`docs/architecture.md`](docs/architecture.md).
 
-## Language status
+## Language semantics
 
-The Python-shaped expression layer now includes tuples, list/set/dict
-comprehensions, dynamic dict and set literals, slicing (including omitted
-bounds and steps), default and keyword arguments, f-strings, and integer
-bitwise operators. Records remain available with their existing structural
-syntax; `{name: value}` is a record field when the key is an identifier, while
-quoted or computed keys form dictionaries. `>>` remains function composition
-for function values and is also numeric right shift for integer operands.
+The expression syntax includes tuples, lists, dictionaries, sets,
+comprehensions, slicing, default and keyword arguments, f-strings, and integer
+bitwise operators. Important runtime semantics include:
 
-Two semantic choices worth knowing before you rely on them:
+- `int` is a signed 64-bit two's-complement value; arithmetic overflow wraps.
+- `float` uses IEEE-754 double precision.
+- Dictionaries use string keys.
+- Set operations use `|`, `&`, `-`, and `^`.
+- `>>` composes functions or shifts integers, depending on its operands.
 
-- **Integer arithmetic wraps.** `9223372036854775807 + 1` is
-  `-9223372036854775808`, with no diagnostic: `int` is fixed-width
-  two's-complement (64-bit), `float` is IEEE-754 double.
-- **`dict`/`set` are builtin runtime values.** Use Python-style `dict()` and
-  `set()` constructors, indexing/assignment for dictionaries, `in` for
-  membership, and `|`, `&`, `-`, or `^` for set operations. Dictionaries remain
-  string-keyed because there is no general "hashable key" constraint to hang
-  a `dict[K, V]` on.
+See [`docs/grammar.md`](docs/grammar.md).
 
----
+## Research example: proof-carrying ray tracer
 
-## The experiment: a proof-carrying ray tracer
+[`examples/ray_tracer/`](examples/ray_tracer/) implements *Ray Tracing in One
+Weekend* to evaluate which domain invariants Emerald can verify. It contains a
+direct implementation and a typed, 13-module version encoding exhaustive
+primitive dispatch, valid color channels, hit/miss separation, scatter-result
+validity, and distinct point and direction types. Unit-vector validity uses a
+forgeable brand and is therefore not a complete proof.
 
-The largest Emerald program is a re-implementation of *Ray Tracing in One
-Weekend* — [`examples/ray_tracer/`](examples/ray_tracer/) — and it exists to
-answer a question, not to render an image.
+See [`examples/ray_tracer/typed/README.md`](examples/ray_tracer/typed/README.md)
+for the analysis and [`examples/proofs.rald`](examples/proofs.rald) for runnable
+proof examples.
 
-It comes in two versions. `one_weekend.rald` is a 280-line transliteration that
-uses types as documentation; it renders the book's final image and stresses the
-GC. `typed/` is the same program rewritten across 13 modules, where every
-implicit invariant in the book was first **written down as a proposition**, then
-encoded if the type system could hold it.
+## Repository structure
 
-The scorecard records the properties checked by the typed program:
-
-| | |
+| Path | Description |
 |---|---|
-| **6 provable** | primitive dispatch is exhaustive (`never`); colour channels are exactly `r\|g\|b` (literal unions); a miss can never be read as a hit (`Hit \| None` + narrowing); a failed scatter carries no fake data; points and directions cannot be confused (`padd(p: Pt, d: Dir)` — `padd(p, p)` is a compile error) |
-| **1 partial** | `reflect`/`refract` get unit-length input — the `Unit` brand is checked but forgeable by hand |
+| [`include/`](include/) | Compiler and runtime headers and the built-in definition table |
+| [`src/`](src/) | Compiler pipeline, runtime, diagnostics, and command-line interface |
+| [`stdlib/`](stdlib/) | Standard library implemented in Emerald |
+| [`docs/`](docs/) | Language reference and implementation documentation |
+| [`examples/`](examples/) | Runnable language, concurrency, proof, tensor, and research examples |
+| [`tests/`](tests/) | Golden, integration, runtime, proof, shape, and benchmark tests |
+| [`Taskfile.yml`](Taskfile.yml) | Build, test, benchmark, installation, and distribution tasks |
 
-The type system also catches ordinary mistakes, including a rejection sampler
-that failed to rebind its generator and a defocus disk that was 20× too large.
+Start with the [documentation index](docs/README.md) for detailed references.
 
-Read [`typed/README.md`](examples/ray_tracer/typed/README.md) for the full table,
-the deviations, and the performance cost of the brands (~10%).
+## License
 
-[`docs/proofs.md`](docs/proofs.md) is the general account — proof by exhaustive
-case analysis, by enumeration, by parametricity, by impossibility — with the
-and
-[`examples/proofs.rald`](examples/proofs.rald) is a runnable tour.
-
----
-
-## Layout
-
-| Path | What |
-|---|---|
-| `include/` | compiler headers |
-| `src/` | compiler (`lexer` → `parser` → `module` → `check` → `codegen` → `main`, plus `diag`) and the runtime implementation (Value model + GC, compiled into every program) |
-| `docs/` | **start at [`docs/README.md`](docs/README.md)** — language reference and implementation notes |
-| `stdlib/` | the standard library, in Emerald — **start at [`stdlib/SPEC.md`](stdlib/SPEC.md)** |
-| `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `json`, `proof`, `e2e`, `imports`, `stdlib`, `repl`, `shape`, benchmark regressions, warnings, proof report) + `run_tests.sh` |
-| `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `functional/` (a seven-part tour of the functional core), `modules/` (a multi-file program), `ray_tracer/` (the experiment), `mlp/` (a hand-written MLP trained on XOR, and its `shape_bug` compile error) |
-| `Taskfile.yml` | build / test / examples / install / dist / bless / clean |
+See [`LICENSE`](LICENSE).
