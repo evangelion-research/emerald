@@ -33,7 +33,47 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
+
+/* --- interactive startup ------------------------------------------------ */
+
+static void repl_intro(void) {
+    static const char *const shades[] = { ".:-=", ":-=+", "-=+*", "=+*#" };
+    static const char *const rows[] = {
+        "             %c             ",
+        "          %c%c%c%c%c%c%c          ",
+        "       %c%c%c%c%c%c%c%c%c%c%c%c%c       ",
+        "    %c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c    ",
+        "       %c%c%c%c%c%c%c%c%c%c%c%c%c       ",
+        "          %c%c%c%c%c%c%c          ",
+        "             %c             ",
+    };
+    const size_t nrows = sizeof rows / sizeof rows[0];
+    struct timespec pause = { .tv_sec = 0, .tv_nsec = 55000000L };
+
+    fputs("\x1b[?25l\x1b[38;2;20;220;120m", stdout);
+    for (int frame = 0; frame < 12; frame++) {
+        const char *s = shades[frame % 4];
+        size_t cell = 0;
+        for (size_t row = 0; row < nrows; row++) {
+            for (const char *p = rows[row]; *p; p++) {
+                if (*p == '%' && p[1] == 'c') {
+                    putchar(s[(cell++ + (size_t)frame) % 4]);
+                    p++;
+                } else {
+                    putchar(*p);
+                }
+            }
+            putchar('\n');
+        }
+        fflush(stdout);
+        nanosleep(&pause, NULL);
+        fprintf(stdout, "\x1b[%zuA", nrows);
+    }
+    for (size_t row = 0; row < nrows; row++) fputs("\x1b[2K\n", stdout);
+    fprintf(stdout, "\x1b[%zuA\x1b[0m\x1b[?25h", nrows);
+}
 
 /* --- a growable list of owned lines -------------------------------------- */
 
@@ -324,7 +364,10 @@ int repl_run(const char *self, const char *const *roots, size_t nroots) {
     }
 
     bool tty = isatty(0);
-    if (tty) puts("emerald repl — :help for commands, :quit to leave");
+    if (tty) {
+        repl_intro();
+        puts("emerald repl — :help for commands, :quit to leave");
+    }
 
     Lines entry = {0};
     Scan sc = {0};
