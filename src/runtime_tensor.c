@@ -41,6 +41,12 @@ static void t_set(Obj *t, size_t off, double v) {
     else ((float *)t->as.tensor.data)[off] = (float)v;
 }
 
+/* --- shared with the autograd kernels (runtime_autograd.c) -------------- */
+double tensor_elem_get(const Obj *t, size_t off) { return t_get(t, off); }
+
+void tensor_elem_set(Obj *t, size_t off, double v) { t_set(t, off, v); }
+
+
 static DType parse_dtype(const char *s) {
     if (strcmp(s, "f32") == 0) return DT_F32;
     if (strcmp(s, "f64") == 0) return DT_F64;
@@ -101,6 +107,15 @@ static Value tensor_new(DType dt, uint8_t ndim, const int64_t *dims, double fill
     o->as.tensor.base = NULL;
     obj_charge(o, nel * esz);
     return obj_val(o);
+}
+
+/* --- shared with the autograd kernels (runtime_autograd.c) -------------- */
+int64_t tensor_numel_of(uint8_t ndim, const int64_t *dims) {
+    return t_numel_of(ndim, dims);
+}
+
+Value tensor_new_zeroed(DType dt, uint8_t ndim, const int64_t *dims) {
+    return tensor_new(dt, ndim, dims, 0.0);
 }
 
 /* a zero-copy view over `base` (which owns the data buffer, transitively).
@@ -246,13 +261,29 @@ static Value t_unary(Value tv, double (*f)(double)) {
     return out;
 }
 
-Value em_tensor_exp(Value t)  { return t_unary(t, exp); }
+Value em_tensor_exp(Value t)  {
+    Value r = t_unary(t, exp);
+    tape_rec_unary(TB_EXP, r, t);
+    return r;
+}
 
-Value em_tensor_log(Value t)  { return t_unary(t, log); }
+Value em_tensor_log(Value t)  {
+    Value r = t_unary(t, log);
+    tape_rec_unary(TB_LOG, r, t);
+    return r;
+}
 
-Value em_tensor_tanh(Value t) { return t_unary(t, tanh); }
+Value em_tensor_tanh(Value t) {
+    Value r = t_unary(t, tanh);
+    tape_rec_unary(TB_TANH, r, t);
+    return r;
+}
 
-Value em_tensor_relu(Value t) { return t_unary(t, relu_fn); }
+Value em_tensor_relu(Value t) {
+    Value r = t_unary(t, relu_fn);
+    tape_rec_unary(TB_RELU, r, t);
+    return r;
+}
 
 static double op_add(double a, double b) { return a + b; }
 
@@ -331,13 +362,29 @@ static Value t_binary(Value av, Value bv, double (*f)(double, double)) {
     return em_none();
 }
 
-Value em_tensor_add(Value a, Value b) { return t_binary(a, b, op_add); }
+Value em_tensor_add(Value a, Value b) {
+    Value r = t_binary(a, b, op_add);
+    tape_rec_binary(TB_ADD, r, a, b);
+    return r;
+}
 
-Value em_tensor_sub(Value a, Value b) { return t_binary(a, b, op_sub); }
+Value em_tensor_sub(Value a, Value b) {
+    Value r = t_binary(a, b, op_sub);
+    tape_rec_binary(TB_SUB, r, a, b);
+    return r;
+}
 
-Value em_tensor_mul(Value a, Value b) { return t_binary(a, b, op_mul); }
+Value em_tensor_mul(Value a, Value b) {
+    Value r = t_binary(a, b, op_mul);
+    tape_rec_binary(TB_MUL, r, a, b);
+    return r;
+}
 
-Value em_tensor_div(Value a, Value b) { return t_binary(a, b, op_div); }
+Value em_tensor_div(Value a, Value b) {
+    Value r = t_binary(a, b, op_div);
+    tape_rec_binary(TB_DIV, r, a, b);
+    return r;
+}
 
 /* --- matmul ------------------------------------------------------------- */
 Value em_tensor_matmul(Value av, Value bv) {
@@ -366,6 +413,7 @@ Value em_tensor_matmul(Value av, Value bv) {
 
     Value out = tensor_new(dt, rndim, rdims, 0.0);
     Obj *ro = out.as.o;
+    tape_rec_matmul(out, av, bv);
     int64_t as0 = avec ? 0 : a->as.tensor.strides[0];
     int64_t as1 = avec ? a->as.tensor.strides[0] : a->as.tensor.strides[1];
     int64_t bs0 = bvec ? 0 : b->as.tensor.strides[0];
@@ -456,6 +504,7 @@ Value em_tensor_reshape(Value tv, Value shape) {
     Value out = tensor_new(t->as.tensor.dt, nndim, ndims, 0.0);
     free(ndims);
     Obj *ro = out.as.o;
+    tape_rec_reshape(out, tv);
     size_t nel = (size_t)srcnumel;
     int64_t idx[MAX_TDIM];
     for (size_t i = 0; i < nel; i++) {
@@ -474,7 +523,9 @@ Value em_tensor_transpose(Value tv) {
         ndims[d] = t->as.tensor.dims[ndim - 1 - d];
         nstrides[d] = t->as.tensor.strides[ndim - 1 - d];
     }
-    return tensor_view(t, t->as.tensor.dt, ndim, ndims, nstrides, 0);
+    Value v = tensor_view(t, t->as.tensor.dt, ndim, ndims, nstrides, 0);
+    tape_rec_transpose(v, tv);
+    return v;
 }
 
 Value em_tensor_permute(Value tv, Value perm) {
@@ -487,6 +538,7 @@ Value em_tensor_permute(Value tv, Value perm) {
                  (size_t)t->as.tensor.ndim, n);
     int64_t ndims[MAX_TDIM], nstrides[MAX_TDIM];
     bool seen[MAX_TDIM] = { false };
+    int64_t axes[MAX_TDIM];
     for (size_t i = 0; i < n; i++) {
         Value p = perm.as.o->as.list.items[i];
         if (p.tag != V_INT || p.as.i < 0 || p.as.i >= (int64_t)n)
@@ -494,10 +546,13 @@ Value em_tensor_permute(Value tv, Value perm) {
         int64_t ax = p.as.i;
         if (seen[ax]) rt_fatal("permute() repeats an axis");
         seen[ax] = true;
+        axes[i] = ax;
         ndims[i] = t->as.tensor.dims[ax];
         nstrides[i] = t->as.tensor.strides[ax];
     }
-    return tensor_view(t, t->as.tensor.dt, (uint8_t)n, ndims, nstrides, 0);
+    Value v = tensor_view(t, t->as.tensor.dt, (uint8_t)n, ndims, nstrides, 0);
+    tape_rec_permute(v, tv, axes, (uint8_t)n);
+    return v;
 }
 
 /* broadcast a tensor to `shape` (a view; expanded dims have stride 0) */
@@ -523,11 +578,12 @@ Value em_tensor_expand(Value tv, Value shape) {
     }
     Value v = tensor_view(t, t->as.tensor.dt, nndim, ndims, nstrides, 0);
     free(ndims);
+    tape_rec_expand(v, tv);
     return v;
 }
 
 /* --- reductions (axis required; the axis is dropped) -------------------- */
-static Value t_reduce(Value tv, Value axisv, int kind) {
+static Value t_reduce(Value tv, Value axisv, int kind, int64_t **out_arg) {
     Obj *t = tv.as.o;
     if (axisv.tag != V_INT)
         rt_fatal("reduction axis must be an int");
@@ -546,6 +602,8 @@ static Value t_reduce(Value tv, Value axisv, int kind) {
     Obj *ro = out.as.o;
     size_t rnel = (size_t)t_numel_of(rndim, rdims);
     int64_t axlen = t->as.tensor.dims[ax];
+    int64_t *args = NULL;
+    if (out_arg) args = xmalloc(sizeof(int64_t) * (rnel ? rnel : 1));
     int64_t oidx[MAX_TDIM];
     for (size_t i = 0; i < rnel; i++) {
         t_unravel_of(rndim, rdims, i, oidx);
@@ -561,6 +619,7 @@ static Value t_reduce(Value tv, Value axisv, int kind) {
         for (int64_t k = 0; k < axlen; k++) {
             double v = t_get(t, base + (size_t)(k * t->as.tensor.strides[ax]));
             if (kind == 2 || kind == 3) {
+                /* strict >: the first maximal index wins ties */
                 if (v > acc) { acc = v; arg = k; }
             } else {
                 acc += v;
@@ -568,18 +627,49 @@ static Value t_reduce(Value tv, Value axisv, int kind) {
         }
         if (kind == 1) acc /= (double)axlen; /* mean */
         if (kind == 3) acc = (double)arg;    /* argmax -> index as f32 */
+        if (args) args[i] = arg;
         t_set(ro, i, acc);
     }
+    if (out_arg) *out_arg = args;
     return out;
 }
 
-Value em_tensor_sum(Value t, Value axis)    { return t_reduce(t, axis, 0); }
+Value em_tensor_sum(Value t, Value axis) {
+    Value r = t_reduce(t, axis, 0, NULL);
+    if (tape_recording()) {
+        int64_t ax = axis.as.i < 0 ? axis.as.i + t.as.o->as.tensor.ndim
+                                   : axis.as.i;
+        tape_rec_reduce(TB_SUM, r, t, ax);
+    }
+    return r;
+}
 
-Value em_tensor_mean(Value t, Value axis)   { return t_reduce(t, axis, 1); }
+Value em_tensor_mean(Value t, Value axis) {
+    Value r = t_reduce(t, axis, 1, NULL);
+    if (tape_recording()) {
+        int64_t ax = axis.as.i < 0 ? axis.as.i + t.as.o->as.tensor.ndim
+                                   : axis.as.i;
+        tape_rec_reduce(TB_MEAN, r, t, ax);
+    }
+    return r;
+}
 
-Value em_tensor_max(Value t, Value axis)    { return t_reduce(t, axis, 2); }
+Value em_tensor_max(Value t, Value axis) {
+    int64_t *argidx = NULL;
+    Value r = t_reduce(t, axis, 2, &argidx);
+    if (tape_recording()) {
+        Obj *ro = r.as.o;
+        int64_t ax = axis.as.i < 0 ? axis.as.i + t.as.o->as.tensor.ndim
+                                   : axis.as.i;
+        size_t n = (size_t)t_numel_of(ro->as.tensor.ndim, ro->as.tensor.dims);
+        tape_rec_max(r, t, ax, argidx, n);
+    } else {
+        free(argidx);
+    }
+    return r;
+}
 
-Value em_tensor_argmax(Value t, Value axis) { return t_reduce(t, axis, 3); }
+Value em_tensor_argmax(Value t, Value axis) { return t_reduce(t, axis, 3, NULL); }
 
 /* --- slicing / scalar extraction / introspection ------------------------ */
 Value em_tensor_slice(Value tv, Value axisv, Value lov, Value hiv) {
@@ -600,8 +690,10 @@ Value em_tensor_slice(Value tv, Value axisv, Value lov, Value hiv) {
     int64_t ndims[MAX_TDIM];
     memcpy(ndims, t->as.tensor.dims, sizeof(int64_t) * t->as.tensor.ndim);
     ndims[ax] = hi - lo;
-    return tensor_view(t, t->as.tensor.dt, t->as.tensor.ndim, ndims,
-                       t->as.tensor.strides, (size_t)(lo * t->as.tensor.strides[ax]));
+    Value v = tensor_view(t, t->as.tensor.dt, t->as.tensor.ndim, ndims,
+                          t->as.tensor.strides, (size_t)(lo * t->as.tensor.strides[ax]));
+    tape_rec_slice(v, tv, ax, lo, hi);
+    return v;
 }
 
 Value em_tensor_item(Value tv) {
@@ -634,9 +726,10 @@ Value em_tensor_astype(Value tv, Value dtyp) {
     if (!is_str(dtyp))
         rt_fatal("astype() dtype must be a str");
     DType dt = parse_dtype(str_data(&dtyp));
-    if (t->as.tensor.dt == dt) return tv;
+    if (t->as.tensor.dt == dt) return tv; /* identity: nothing to record */
     Value out = tensor_new(dt, t->as.tensor.ndim, t->as.tensor.dims, 0.0);
     Obj *ro = out.as.o;
+    tape_rec_cast(out, tv);
     size_t nel = (size_t)t_numel_of(t->as.tensor.ndim, t->as.tensor.dims);
     int64_t idx[MAX_TDIM];
     for (size_t i = 0; i < nel; i++) {

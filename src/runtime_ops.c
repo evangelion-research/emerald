@@ -117,6 +117,7 @@ bool value_eq(Value a, Value b) {
     case O_STR:  break; /* unreachable: both-strings handled above */
     case O_FUNC: return x == y; /* functions compare by identity */
     case O_TENSOR: return x == y; /* tensors compare by identity */
+    case O_TAPE: return x == y; /* tapes are internal handles */
     case O_DICT:
         if (x->as.dict.len != y->as.dict.len) return false;
         for (size_t i = 0; i < x->as.dict.len; i++) {
@@ -244,7 +245,7 @@ bool em_truthy(Value v) {
         case O_FUNC: return true; /* functions are always truthy */
         case O_CELL: return em_truthy(v.as.o->as.cell.val);
         case O_TENSOR: return true; /* tensors are always truthy */
-        case O_CHAN: case O_TASK: return true; /* handles are always truthy */
+        case O_CHAN: case O_TASK: case O_TAPE: return true; /* handles are always truthy */
         }
     }
     return true;

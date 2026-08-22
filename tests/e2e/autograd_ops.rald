@@ -1,0 +1,211 @@
+# Finite-difference validation of every differentiable primitive.
+#
+# For each case we compare value_and_grad's analytic gradient against a
+# central finite difference computed through the same function. All base
+# tensors are built from small integers, so they pass through the f32
+# constructor exactly and the comparison runs in f64.
+import math
+
+H: float = 0.001
+
+def read3(t: Tensor[f64, [3]], i: int) -> float pure {
+    return item(tslice(t, 0, i, i + 1))
+}
+
+def shift3(t: Tensor[f64, [3]], k: int, dh: float) -> Tensor[f64, [3]] pure {
+    # a copy of t with position k offset by dh
+    items: list[float] = []
+    for i in range(3) {
+        v = read3(t, i)
+        if i == k { v = v + dh }
+        append(items, v)
+    }
+    return astype(tensor(items), "f64")
+}
+
+# central finite difference vs analytic gradient, compared cellwise
+def check3(name: str, f: (Tensor[f64, [3]]) -> Tensor[f64, []],
+           x: Tensor[f64, [3]], tol: float) -> bool {
+    r = value_and_grad(f, x)
+    ok = True
+    for k in range(3) {
+        num = (item(f(shift3(x, k, H))) -
+               item(f(shift3(x, k, 0.0 - H)))) / (2.0 * H)
+        ana = read3(r.grad, k)
+        if math.abs_f(num - ana) > tol * math.max_f(1.0, math.abs_f(num)) {
+            ok = False
+            print("  ", name, "coord", k, "num", num, "ana", ana)
+        }
+    }
+    print(name, ok)
+    return ok
+}
+
+def read32(t: Tensor[f64, [3, 2]], i: int, j: int) -> float pure {
+    return item(tslice(tslice(t, 0, i, i + 1), 1, j, j + 1))
+}
+
+def shift32(t: Tensor[f64, [3, 2]], pi: int, pj: int,
+            dh: float) -> Tensor[f64, [3, 2]] pure {
+    rows: list[list[float]] = []
+    for i in range(3) {
+        row: list[float] = []
+        for j in range(2) {
+            v = read32(t, i, j)
+            if i == pi and j == pj { v = v + dh }
+            append(row, v)
+        }
+        append(rows, row)
+    }
+    return astype(tensor(rows), "f64")
+}
+
+def check32(name: str, f: (Tensor[f64, [3, 2]]) -> Tensor[f64, []],
+            x: Tensor[f64, [3, 2]], tol: float) -> bool {
+    r = value_and_grad(f, x)
+    ok = True
+    for pi in range(3) {
+        for pj in range(2) {
+            num = (item(f(shift32(x, pi, pj, H))) -
+                   item(f(shift32(x, pi, pj, 0.0 - H)))) / (2.0 * H)
+            ana = read32(r.grad, pi, pj)
+            if math.abs_f(num - ana) > tol * math.max_f(1.0, math.abs_f(num)) {
+                ok = False
+                print("  ", name, "cell", pi, pj, "num", num, "ana", ana)
+            }
+        }
+    }
+    print(name, ok)
+    return ok
+}
+
+def main() -> int {
+    x: Tensor[f64, [3]] = astype(tensor([1.0, 2.0, 3.0]), "f64")
+
+    # --- elementwise arithmetic ------------------------------------------
+    c_add = check3("mul_tt", (t) => sum(t * t, 0), x, 1e-3)
+    c_mix = check3("arith_mixed", (t) => sum(t + 2.0 * t * t - 3.0, 0), x,
+                   1e-3)
+    c_st = check3("sub_st", (t) => sum(3.0 - t * 2.0, 0), x, 1e-3)
+
+    def div_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        return sum(t * t / (t + 4.0), 0)
+    }
+    c_div = check3("div_tt", div_loss, x, 1e-3)
+
+    def div_st_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        return sum(24.0 / (t + 1.0), 0)
+    }
+    c_divst = check3("div_st", div_st_loss, x, 1e-3)
+
+    # --- nonlinearities ----------------------------------------------------
+    c_exp = check3("exp", (t) => sum(exp(t * 0.5), 0), x, 1e-3)
+    c_log = check3("log", (t) => sum(log(t * 2.0), 0), x, 1e-3)
+    c_tanh = check3("tanh", (t) => sum(tanh(t), 0), x, 1e-3)
+    c_relu = check3("relu", (t) => sum(relu(t), 0), x, 1e-3)
+
+    # --- reductions ---------------------------------------------------------
+    c_mean = check3("mean_sq", (t) => mean(t * t, 0), x, 1e-3)
+    c_max = check3("max", (t) => max(t * t * t, 0), x, 1e-3)
+
+    # --- matmul -------------------------------------------------------------
+    m: Tensor[f64, [3, 2]] =
+        astype(tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]), "f64")
+
+    def vv_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        return matmul(t, t)
+    }
+    c_vv = check3("matmul_vv", vv_loss, x, 1e-3)
+
+    def mv_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        return sum(matmul(transpose(m), t), 0)
+    }
+    c_mv = check3("matmul_mv", mv_loss, x, 1e-3)
+
+    def vm_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        return sum(matmul(t, m), 0)
+    }
+    c_vm = check3("matmul_vm", vm_loss, x, 1e-3)
+
+    # --- rank-2 operations -----------------------------------------------------
+    m32: Tensor[f64, [3, 2]] = m
+    b24: Tensor[f64, [2, 4]] =
+        astype(tensor([[1.0, 0.0, 2.0, 1.0], [0.0, 3.0, 1.0, 2.0]]), "f64")
+
+    def mm_loss(a: Tensor[f64, [3, 2]]) -> Tensor[f64, []] pure {
+        return sum(sum(matmul(a, b24), 1), 0)
+    }
+    c_mm = check32("matmul_mm", mm_loss, m32, 1e-3)
+
+    def mtm_loss(a: Tensor[f64, [3, 2]]) -> Tensor[f64, []] pure {
+        return sum(sum(matmul(transpose(a), a), 1), 0)
+    }
+    c_mt = check32("transpose", mtm_loss, m32, 1e-3)
+
+    def pm_loss(a: Tensor[f64, [3, 2]]) -> Tensor[f64, []] pure {
+        return sum(sum(matmul(permute(a, [1, 0]), a), 1), 0)
+    }
+    c_pm = check32("permute", pm_loss, m32, 1e-3)
+
+    # --- vector shape operations ----------------------------------------------
+    def rs_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        q = reshape(t, [1, 3])
+        return sum(sum(matmul(q, transpose(q)), 1), 0)
+    }
+    c_rs = check3("reshape", rs_loss, x, 1e-3)
+
+    def sl_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        # two overlapping slices of the same leaf: exercises accumulation
+        return sum(tslice(t, 0, 1, 3) * tslice(t, 0, 0, 2), 0)
+    }
+    c_sl = check3("slice_overlap", sl_loss, x, 1e-3)
+
+    col: Tensor[f64, [3, 3]] =
+        astype(tensor([[1.0, 0.0, 2.0], [0.0, 1.0, 0.0], [2.0, 0.0, 1.0]]),
+               "f64")
+
+    def ex_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        e = expand(reshape(t, [3, 1]), [3, 3])
+        return sum(sum(e * col, 1), 0)
+    }
+    c_ex = check3("expand", ex_loss, x, 1e-3)
+
+    def cast_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        # compute in f32, differentiate back into the f64 leaf
+        q = astype(t, "f32") * astype(t, "f32")
+        return sum(astype(q, "f64"), 0)
+    }
+    c_cast = check3("astype", cast_loss, x, 1e-2)
+
+    # --- graph shapes --------------------------------------------------------
+    def diamond_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        y = t * t
+        return sum(y * y + y, 0)
+    }
+    c_dm = check3("diamond", diamond_loss, x, 1e-3)
+
+    def branch_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        if 1 < 0 { return sum(t * t * t, 0) }
+        return sum(t + 1.0, 0)
+    }
+    c_br = check3("unused_branch", branch_loss, x, 1e-3)
+
+    # a constant constructed inside the loss gets no gradient
+    def const_loss(t: Tensor[f64, [3]]) -> Tensor[f64, []] pure {
+        z = astype(ones([3]), "f64")
+        return sum(t + z, 0)
+    }
+    c_cn = check3("constant_leaf", const_loss, x, 1e-3)
+
+    cases = [c_add, c_mix, c_st, c_div, c_divst, c_exp, c_log, c_tanh,
+             c_relu, c_mean, c_max, c_vv, c_mv, c_vm, c_mm, c_mt,
+             c_pm, c_rs, c_sl, c_ex, c_cast, c_dm, c_br, c_cn]
+    all_ok = True
+    for c in cases {
+        if not c { all_ok = False }
+    }
+    print("ALL:", all_ok)
+    return 0
+}
+
+main()

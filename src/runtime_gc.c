@@ -118,6 +118,12 @@ void gc_mark_obj(Obj *o, bool minor) {
         gc_mark_value(o->as.task->result, minor);
         gc_mark_value(o->as.task->xfer, minor);
         break;
+    case O_TAPE:
+        /* every recorded tensor (node outputs, saved operands, adjoints) is
+         * listed in the tape's `alive` array; the malloc'd node structs hold
+         * no Values themselves */
+        tape_mark(o->as.tape, minor);
+        break;
     }
 }
 
@@ -150,6 +156,9 @@ static void gc_free_obj(Obj *o) {
     case O_TASK:
         /* only reachable once the task has finished and left the live list */
         free(o->as.task);
+        break;
+    case O_TAPE:
+        tape_free(o->as.tape);
         break;
     }
     /* release the object's bytes from its generation's counter */

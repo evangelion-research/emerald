@@ -23,7 +23,7 @@
 
 typedef enum { V_NONE, V_BOOL, V_INT, V_FLOAT, V_OBJ, V_STR } VTag;
 typedef enum { O_STR, O_LIST, O_TUPLE, O_REC, O_DICT, O_SET,
-               O_FUNC, O_CELL, O_TENSOR, O_CHAN, O_TASK } OTag;
+               O_FUNC, O_CELL, O_TENSOR, O_CHAN, O_TASK, O_TAPE } OTag;
 
 /* Tensor dtypes supported by the runtime. */
 typedef enum {
@@ -34,6 +34,7 @@ typedef enum {
 typedef struct Obj Obj;
 typedef struct Chan Chan;   /* scheduler state in src/runtime_task.c */
 typedef struct Task Task;
+typedef struct Tape Tape;   /* autograd tape state in src/runtime_autograd.c */
 
 typedef struct Value {
     VTag tag;
@@ -99,6 +100,11 @@ struct Obj {
          * the side struct when the handle dies. */
         Chan *chan;
         Task *task;
+        /* O_TAPE: one recording of a differentiable computation (see
+         * docs/autograd.md). Like Chan/Task, the mutable node list lives in a
+         * side struct; the GC traces every tensor the tape references so a
+         * recorded graph stays alive until the tape itself dies. */
+        Tape *tape;
     } as;
 };
 
@@ -305,5 +311,13 @@ Value em_tensor_shape(Value t);
 Value em_tensor_ndim(Value t);
 Value em_tensor_dtype(Value t);
 Value em_tensor_astype(Value t, Value dtype);
+
+/* --- autograd (docs/autograd.md) -----------------------------------------
+ * value_and_grad(f, x): run the pure function `f` once with tape recording
+ * active, then walk the recorded graph backwards from f(x) to produce the
+ * record {value: Tensor, grad: Tensor}. The gradient has x's shape and
+ * dtype. Recording is scoped entirely inside this call: tensors built or
+ * used outside it never carry gradient metadata. */
+Value em_value_and_grad(Value fn, Value x);
 
 #endif

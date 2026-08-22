@@ -118,3 +118,10 @@ EM_BUILTIN(     "shape",         "em_tensor_shape",   1, true)
 EM_BUILTIN(     "ndim",          "em_tensor_ndim",    1, true)
 EM_BUILTIN(     "dtype",         "em_tensor_dtype",   1, true)
 EM_BUILTIN(     "astype",        "em_tensor_astype",  2, true)
+
+/* --- reverse-mode autograd (docs/autograd.md) ---------------------------- */
+/* value_and_grad(f, x): run the pure scalar-loss function f once with tape
+ * recording active, then differentiate it at x. The tape is a local runtime
+ * object scoped entirely inside this call, so the operation itself has no
+ * observable effect and may appear in pure code. */
+EM_BUILTIN(     "value_and_grad", "em_value_and_grad", 2, true)

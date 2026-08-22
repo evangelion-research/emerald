@@ -596,6 +596,102 @@ Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
             return infer_tensor_slice(ck, e, argt);
         }
 
+        /* --- reverse-mode autograd: value_and_grad(f, x) ------------------
+         * f must be a pure unary function from a tensor to a scalar tensor
+         * (Tensor[dt, []]); x must be a tensor of exactly f's parameter type.
+         * The result is {value: Tensor[dt, []], grad: Tensor[dt, S]}. In
+         * proof mode every shape involved must be static: a dynamically
+         * shaped adjoint would silently drop the shape obligation the mode
+         * exists to check (see docs/autograd.md). */
+        if (strcmp(name, "value_and_grad") == 0) {
+            if (!ck_arity(ck, e, dname, 2)) return &t_any;
+            Type *ft = ty_resolve(argt[0]);
+            if (ft->k != TY_FUNC || ft->fun.count < 1) {
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "value_and_grad() expects a unary function as its "
+                         "first argument, got %s", type_str(argt[0]));
+                return &t_any;
+            }
+            if (ft->fun.eff != EFF_PURE)
+                ck_error(ck, "E_TYPE_PURE_CALL", e->line, e->col,
+                         "value_and_grad() requires a pure function; "
+                         "differentiation is defined only for pure "
+                         "computations");
+            Type *ptens = tensor_of(ft->fun.params[0]);
+            Type *rtens = tensor_of(ft->fun.ret);
+            Type *xtens = tensor_of(argt[1]);
+            if (!ptens && ty_resolve(ft->fun.params[0])->k != TY_ANY)
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "the function passed to value_and_grad() must take a "
+                         "tensor, taking %s", type_str(ft->fun.params[0]));
+            if (!rtens && ty_resolve(ft->fun.ret)->k != TY_ANY)
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "the function passed to value_and_grad() must return "
+                         "a scalar tensor (Tensor[dtype, []]), returning %s",
+                         type_str(ft->fun.ret));
+            if (xtens == NULL && ty_resolve(argt[1])->k != TY_ANY)
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "value_and_grad() second argument must be a tensor, "
+                         "got %s", type_str(argt[1]));
+            CDType dt = CDT_F32;
+            Shape *sh = NULL; /* the gradient shape */
+            if (ptens && ptens->tensor.shape && !ptens->tensor.shape->dynamic)
+                sh = ptens->tensor.shape;
+            else if (xtens && xtens->tensor.shape &&
+                     !xtens->tensor.shape->dynamic)
+                sh = xtens->tensor.shape;
+            if (ptens) dt = ptens->tensor.dt;
+            else if (xtens) dt = xtens->tensor.dt;
+            if (ptens && xtens && ptens->tensor.dt != xtens->tensor.dt)
+                ck_error(ck, "E_SHAPE_DTYPE", e->line, e->col,
+                         "value_and_grad() dtype mismatch between the "
+                         "function's parameter and its argument: %s vs %s",
+                         type_str(ft->fun.params[0]), type_str(argt[1]));
+            /* both shapes known statically: they must agree */
+            if (ptens && xtens && !ptens->tensor.shape->dynamic &&
+                !xtens->tensor.shape->dynamic) {
+                Shape *ps = ptens->tensor.shape, *xs = xtens->tensor.shape;
+                bool same = ps->count == xs->count;
+                for (size_t i = 0; same && i < ps->count; i++)
+                    same = dim_eq(ps->dims[i], xs->dims[i]);
+                if (!same)
+                    ck_error(ck, "E_SHAPE_DIM_ARG", e->line, e->col,
+                             "value_and_grad() argument shape %s does not "
+                             "match the function's parameter shape %s",
+                             type_str(argt[1]), type_str(ft->fun.params[0]));
+            }
+            /* the loss must be a scalar tensor: rank 0 */
+            if (rtens && !rtens->tensor.shape->dynamic &&
+                rtens->tensor.shape->count != 0)
+                ck_error(ck, "E_SHAPE_RANK", e->line, e->col,
+                         "value_and_grad() differentiates scalar-loss "
+                         "functions only; the function returns %s",
+                         type_str(ft->fun.ret));
+            bool proof = ck->proof || ck_proof_mode;
+            if (proof) {
+                if (!ptens || !xtens || !rtens ||
+                    ptens->tensor.shape->dynamic ||
+                    rtens->tensor.shape->dynamic ||
+                    (xtens->tensor.shape &&
+                     xtens->tensor.shape->dynamic))
+                    ck_error(ck, "E_PROOF_SHAPE", e->line, e->col,
+                             "proof mode requires statically shaped tensors "
+                             "through value_and_grad(); annotate the function "
+                             "and the input with concrete Tensor shapes");
+            }
+            Type *res = ty_new(TY_REC);
+            res->rec.count = 2;
+            res->rec.names = xmalloc(sizeof(char *) * 2);
+            res->rec.types = xmalloc(sizeof(Type *) * 2);
+            res->rec.names[0] = (char *)"value";
+            res->rec.names[1] = (char *)"grad";
+            res->rec.types[0] =
+                ty_tensor(dt, shape_of(xmalloc(sizeof(DimExpr *)), 0));
+            res->rec.types[1] =
+                ty_tensor(dt, sh ? sh : shape_dynamic());
+            return res;
+        }
+
         if (f) {
             size_t *argpi = xmalloc(sizeof(size_t) * (argc ? argc : 1));
             bool call_ok = map_call_args(ck, e, f, argpi);

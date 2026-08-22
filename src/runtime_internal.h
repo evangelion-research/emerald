@@ -57,6 +57,73 @@
 /* ---------------------------------------------------------------------- */
 #define MAX_TDIM 255
 
+/* ---------------------------------------------------------------------- */
+/* autograd (docs/autograd.md)                                            */
+/* ---------------------------------------------------------------------- */
+/* One node per differentiable primitive executed while a tape records.
+ * Parents are *indices* into the same tape's node array (-1: the operand was
+ * a constant: a scalar, a tensor built outside the recording, or a tensor
+ * constructor, none of which carry gradient). Saved metadata is whatever the
+ * backward rule needs beyond the operands' values: axes, shapes,
+ * permutations, argmax indices. Adjoint buffers are allocated lazily at
+ * backward time, not during recording, so recording itself never allocates
+ * GC objects after the output tensor it is annotating. */
+typedef enum {
+    TB_ADD, TB_SUB, TB_MUL, TB_DIV,
+    TB_EXP, TB_LOG, TB_TANH, TB_RELU,
+    TB_MATMUL_VV, TB_MATMUL_VM, TB_MATMUL_MV, TB_MATMUL_MM,
+    TB_RESHAPE, TB_TRANSPOSE, TB_PERMUTE,
+    TB_SUM, TB_MEAN, TB_MAX,
+    TB_SLICE, TB_EXPAND, TB_CAST,
+} TapeKind;
+
+/* operand layout of an arithmetic node */
+typedef enum { TL_TT, TL_TS, TL_ST } TapeLayout;
+
+typedef struct TapeNode {
+    TapeKind kind;
+    TapeLayout layout;      /* arithmetic nodes: tensor-tensor/tensor-scalar/scalar-tensor */
+    int32_t p0, p1;         /* parent node indices into Tape.nodes, -1 = constant */
+    Obj *out;               /* borrowed: kept alive by Tape.alive */
+    Obj *op0, *op1;         /* operand tensors for backward (borrowed) */
+    double s0, s1;          /* scalar operand values for *_TS / *_ST kinds */
+    int64_t axis;           /* reductions / slices (normalized) */
+    int64_t lo, hi;         /* tslice bounds after clamping */
+    int64_t *dims;          /* malloc'd copy: source shape (reshape/scatter targets) */
+    uint8_t ndim;
+    int64_t *perm;          /* malloc'd copy: permute axes (already normalized) */
+    int64_t *idxs;          /* malloc'd copy: argmax indices for TB_MAX (out numel) */
+} TapeNode;
+
+struct Tape {
+    TapeNode *nodes;
+    size_t len, cap;
+    Value *alive;           /* every Obj the tape references, GC-traced */
+    size_t alen, acap;
+};
+
+void tape_mark(Tape *tp, bool minor);   /* called from gc_mark_obj */
+void tape_free(Tape *tp);               /* called from gc_free_obj */
+
+/* Recording hooks, called by the tensor primitives in runtime_tensor.c.
+ * All are no-ops unless a value_and_grad call is currently recording. */
+bool  tape_recording(void);
+void  tape_end(void);
+void  tape_rec_binary(TapeKind k, Value out, Value a, Value b);
+void  tape_rec_unary(TapeKind k, Value out, Value a);
+void  tape_rec_matmul(Value out, Value a, Value b);
+void  tape_rec_reshape(Value out, Value src);
+void  tape_rec_transpose(Value out, Value src);
+void  tape_rec_permute(Value out, Value src, const int64_t *perm, uint8_t n);
+void  tape_rec_reduce(TapeKind k, Value out, Value src, int64_t axis);
+void  tape_rec_max(Value out, Value src, int64_t axis, const int64_t *idxs,
+                   size_t nidx);
+void  tape_rec_slice(Value out, Value src, int64_t axis, int64_t lo,
+                     int64_t hi);
+void  tape_rec_expand(Value out, Value src);
+void  tape_rec_cast(Value out, Value src);
+
+
 /* A channel is a ring buffer of `cap` slots plus the two wait queues. An
  * unbuffered channel (cap 0) has no slots at all, so a send and a receive
  * have to meet: whichever arrives first parks, and the second one hands the
@@ -154,6 +221,11 @@ void sch_mark(bool minor);
 void sch_init(void);
 Value tensor_view(Obj *base, DType dt, uint8_t ndim, const int64_t *dims,
                          const int64_t *strides, size_t elem_offset);
+/* low-level tensor services shared with the autograd kernels */
+double tensor_elem_get(const Obj *t, size_t off);
+void tensor_elem_set(Obj *t, size_t off, double v);
+int64_t tensor_numel_of(uint8_t ndim, const int64_t *dims);
+Value tensor_new_zeroed(DType dt, uint8_t ndim, const int64_t *dims);
 Value em_tensor_add(Value a, Value b);
 Value em_tensor_mul(Value a, Value b);
 Value em_tensor_div(Value a, Value b);

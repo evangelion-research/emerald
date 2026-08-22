@@ -234,26 +234,31 @@ Type *infer_tensor_matmul(Ck *ck, const Expr *e, Type **argt) {
     Type *b = expect_tensor(ck, e, argt[1], "matmul");
     if (a == &t_any || b == &t_any)
         return ty_tensor(a == &t_any ? (b == &t_any ? CDT_F32 : b->tensor.dt)
-                                       : a->tensor.dt, shape_dynamic());
+                                        : a->tensor.dt, shape_dynamic());
     CDType dt = a->tensor.dt;
     if (a->tensor.dt != b->tensor.dt)
         ck_error(ck, "E_SHAPE_DTYPE", e->line, e->col,
                  "matmul() dtype mismatch: %s and %s", type_str(a), type_str(b));
     Shape *sa = a->tensor.shape, *sb = b->tensor.shape;
     if (sa->dynamic || sb->dynamic) return ty_tensor(dt, shape_dynamic());
-    if (sa->count != 2 || sb->count != 2) {
+    /* rank-1 operands follow the runtime: v.K @ K.N -> N, M.K @ .K -> M,
+     * v.K @ .K -> scalar */
+    if ((sa->count != 1 && sa->count != 2) ||
+        (sb->count != 1 && sb->count != 2)) {
         ck_error(ck, "E_SHAPE_RANK", e->line, e->col,
-                 "matmul() expects rank-2 tensors, got %s and %s",
+                 "matmul() expects rank-1 or rank-2 tensors, got %s and %s",
                  type_str(a), type_str(b));
         return ty_tensor(dt, shape_dynamic());
     }
-    if (!dim_eq(sa->dims[1], sb->dims[0])) {
+    DimExpr *ak = sa->dims[sa->count - 1];
+    DimExpr *bk = sb->dims[0];
+    if (!dim_eq(ak, bk)) {
         /* the exit criterion: both shapes printed, the mismatching axis named */
         Diag *d = diag_add(ck->diags, DIA_TYPE, "E_SHAPE_MATMUL", ck->filename,
                            e->line, e->col, "contracted dimensions do not match");
         diag_note(d, "left", type_str(a));
         diag_note(d, "right", type_str(b));
-        char *ks = dim_str(sa->dims[1]), *ns = dim_str(sb->dims[0]);
+        char *ks = dim_str(ak), *ns = dim_str(bk);
         char mm[256];
         snprintf(mm, sizeof mm, "%s != %s  (contraction axis)", ks, ns);
         free(ks);
@@ -261,6 +266,20 @@ Type *infer_tensor_matmul(Ck *ck, const Expr *e, Type **argt) {
         diag_note(d, "mismatch", mm);
         ck->errors++;
         return ty_tensor(dt, shape_dynamic());
+    }
+    if (sa->count == 1 && sb->count == 1) { /* dot product: scalar shape */
+        DimExpr **nodims = xmalloc(sizeof(DimExpr *));
+        return ty_tensor(dt, shape_of(nodims, 0));
+    }
+    if (sa->count == 1) {                        /* v @ m -> m's columns */
+        DimExpr **dims = xmalloc(sizeof(DimExpr *));
+        dims[0] = sb->dims[1];
+        return ty_tensor(dt, shape_of(dims, 1));
+    }
+    if (sb->count == 1) {                        /* m @ v -> m's rows */
+        DimExpr **dims = xmalloc(sizeof(DimExpr *));
+        dims[0] = sa->dims[0];
+        return ty_tensor(dt, shape_of(dims, 1));
     }
     DimExpr **dims = xmalloc(sizeof(DimExpr *) * 2);
     dims[0] = sa->dims[0];

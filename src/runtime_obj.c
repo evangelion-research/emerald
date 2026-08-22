@@ -182,6 +182,7 @@ const char *type_name(Value v) {
         case O_TENSOR: return "tensor";
         case O_CHAN: return "channel";
         case O_TASK: return "task";
+        case O_TAPE: return "tape";
         }
     }
     return "?";
@@ -330,6 +331,7 @@ void write_value(SB *sb, Value v, bool repr) {
         }
         case O_CHAN: sb_puts(sb, "<channel>"); break;
         case O_TASK: sb_puts(sb, "<task>"); break;
+        case O_TAPE: sb_puts(sb, "<tape>"); break;
         }
         break;
     }

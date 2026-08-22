@@ -1,0 +1,128 @@
+# End-to-end training: gradient descent fits a linear model and a small
+# two-layer MLP, both defined and differentiated entirely in Emerald.
+#
+# Multiple parameters are packed into one leaf tensor and sliced apart
+# inside the loss, so a single value_and_grad call produces the full
+# gradient. Everything runs in f64; randn is seeded so the run is
+# deterministic.
+import math
+
+def at(t: Tensor[f64, []]) -> float pure {
+    return item(t)
+}
+
+def read_w(t: Tensor[f64, [2, 1]], i: int) -> float pure {
+    return item(tslice(tslice(t, 0, i, i + 1), 1, 0, 1))
+}
+
+# --- linear regression ----------------------------------------------------
+# data: x_i = i, target y_i = 3 x_i + 1; features [[1, x_i]] with the bias
+# column held constant so the whole model is one differentiable leaf.
+
+def make_lin_loss(xcol: Tensor[f64, [24, 1]],
+                  y: Tensor[f64, [24, 1]]) -> (Tensor[f64, [2, 1]]) ->
+                  Tensor[f64, []] {
+    def loss(w: Tensor[f64, [2, 1]]) -> Tensor[f64, []] pure {
+        ones_col = expand(reshape(astype(tensor([1.0]), "f64"), [1, 1]),
+                          [24, 1])
+        xt = matmul(ones_col, reshape(tslice(w, 0, 0, 1), [1, 1]))
+        xf = matmul(xcol, reshape(tslice(w, 0, 1, 2), [1, 1]))
+        pred = xt + xf
+        d = pred - y
+        return sum(sum(d * d, 1), 0)
+    }
+    return loss
+}
+
+def train_linear() -> bool {
+    n = 24
+    xs: list[float] = []
+    ys: list[list[float]] = []
+    for i in range(n) {
+        append(xs, float(i))
+        append(ys, [3.0 * float(i) + 1.0])
+    }
+    xcol: Tensor[f64, [24, 1]] =
+        astype(reshape(tensor(xs), [24, 1]), "f64")
+    y: Tensor[f64, [24, 1]] = astype(tensor(ys), "f64")
+    loss_fn = make_lin_loss(xcol, y)
+
+    p: Tensor[f64, [2, 1]] = astype(tensor([[0.0], [0.0]]), "f64")
+    first = 0.0
+    last = 0.0
+    lr = 0.02
+    for step in range(200) {
+        r = value_and_grad(loss_fn, p)
+        if step == 0 { first = at(r.value) }
+        if step == 199 { last = at(r.value) }
+        p = p - (lr * r.grad)
+    }
+    w_ok = math.abs_f(read_w(p, 0) - 1.0) < 0.05
+    m_ok = math.abs_f(read_w(p, 1) - 3.0) < 0.05
+    drop = last < first * 0.001
+    print("linear: loss", first, "->", last)
+    print("linear: w", w_ok, "slope", m_ok, "decreased", drop)
+    return w_ok and m_ok and drop
+}
+
+# --- two-layer MLP ----------------------------------------------------------
+# teacher: y = 0.7 * tanh(2 x) - 0.1; hidden width H. Parameters are packed
+# into one flat leaf: [W1 (H), b1 (H), W2 (H), b2 (1)].
+
+const HID = 6
+const NP = 2 * HID + 1
+
+def make_mlp_loss(x: Tensor[f64, [24, 1]],
+                  y: Tensor[f64, [24, 1]]) -> (Tensor[f64, [NP]]) ->
+                  Tensor[f64, []] {
+    def loss(packed: Tensor[f64, [NP]]) -> Tensor[f64, []] pure {
+        w1 = reshape(tslice(packed, 0, 0, HID), [1, HID])
+        b1 = reshape(tslice(packed, 0, HID, 2 * HID), [1, HID])
+        w2 = reshape(tslice(packed, 0, 2 * HID, 3 * HID), [HID, 1])
+        b2 = reshape(tslice(packed, 0, 3 * HID, 3 * HID + 1), [1, 1])
+        h_pre = matmul(x, w1) + b1
+        h = tanh(h_pre)
+        out = matmul(h, w2) + b2
+        d = out - y
+        return sum(sum(d * d, 1), 0)
+    }
+    return loss
+}
+
+def train_mlp() -> bool {
+    n = 24
+    xs: list[float] = []
+    for i in range(n) {
+        append(xs, 0.0 - 3.0 + 6.0 * float(i) / float(n - 1))
+    }
+    x: Tensor[f64, [24, 1]] = astype(reshape(tensor(xs), [24, 1]), "f64")
+    # teacher curve built once, outside any recording: a frozen constant
+    y: Tensor[f64, [24, 1]] = tanh(x * 2.0) * 0.7 - 0.1
+    loss_fn = make_mlp_loss(x, y)
+
+    base: Tensor[f64, [NP]] = astype(arange(NP), "f64")
+    packed = base * 0.1 - 0.35
+    first = 0.0
+    last = 0.0
+    lr = 0.06
+    for step in range(400) {
+        r = value_and_grad(loss_fn, packed)
+        if step == 0 { first = at(r.value) }
+        if step == 399 { last = at(r.value) }
+        packed = packed - (lr * r.grad)
+    }
+    fit = last < first * 0.02
+    small = last < 0.05
+    print("mlp: loss", first, "->", last)
+    print("mlp: fitted", fit, "small", small)
+    return fit and small
+}
+
+def main() -> int {
+    a = train_linear()
+    b = train_mlp()
+    print("TRAIN:", a and b)
+    return 0
+}
+
+main()
