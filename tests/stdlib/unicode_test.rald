@@ -1,0 +1,34 @@
+# unicode — the UTF-8 code-point layer over byte strings.
+
+import unicode
+
+# length: code points, not bytes
+print(unicode.length(""), unicode.length("hello"), unicode.length("héllo"))
+print(unicode.length("日本語"), unicode.length("a😀b"))
+
+# code / from_code round-trip
+print(unicode.code("A"), unicode.code("é"), unicode.code("日"), unicode.code("😀"))
+print(unicode.code(""))
+print(unicode.from_code(65), unicode.from_code(233), unicode.from_code(26085))
+print(unicode.from_code(128512) == "😀")
+
+# at: positive and negative indexes
+print(unicode.at("héllo", 1), unicode.at("日本語", 2), unicode.at("a😀b", 1))
+print(unicode.at("héllo", -1), unicode.at("héllo", -5))
+
+# substring: code-point slices, clamped, negatives
+print(unicode.substring("héllo", 1, 3), unicode.substring("日本語", 0, 2))
+print(unicode.substring("héllo", -2, 5), unicode.substring("abc", 2, 1))
+print("[" + unicode.substring("héllo", 0, 99) + "]")
+
+# chars: every code point as a list of one-character strings
+print(unicode.chars("héllo"))
+print(unicode.chars(""))
+print(len(unicode.chars("日本語")))
+
+# is_valid: strict UTF-8, lenient elsewhere
+print(unicode.is_valid("héllo"), unicode.is_valid("日本語"), unicode.is_valid(""))
+
+# lenient on invalid UTF-8: chr() builds bytes, so invalid ones can be made
+print(unicode.length(chr(200) + "a"), unicode.is_valid(chr(200) + "a"))
+print(unicode.length(chr(195) + "x"), unicode.is_valid(chr(195) + "x"))

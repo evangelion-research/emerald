@@ -1,0 +1,41 @@
+# unicode — the UTF-8 code-point layer.
+#
+# Emerald strings are bytes: `len` counts bytes, `s[i]` is one byte, and
+# `ord`/`chr` operate on byte values. This module interprets a string as
+# UTF-8 and operates on code points, beside `chars` rather than changing
+# what the byte functions mean — see stdlib/SPEC.md.
+#
+# Every function is total: a byte that cannot begin a valid UTF-8 sequence is
+# read as one "code point" (its own byte value), so any string can be
+# measured, indexed, sliced, and enumerated. `is_valid` is the strict check;
+# `from_code` is the one place an invalid code point is an error.
+
+# Number of code points (not bytes): len_cp("héllo") is 5, len("héllo") is 6.
+def length(s: str) -> int pure { return uc_len(s) }
+
+# Code point of the first character, or -1 for an empty string (like chars.code).
+def code(s: str) -> int pure {
+    if length(s) == 0 { return -1 }
+    return uc_ord(s)
+}
+
+# A code point as its UTF-8 encoding. Valid range 0..0x10FFFF, excluding the
+# surrogate block 0xD800..0xDFFF; anything else is a runtime error.
+def from_code(n: int) -> str pure { return uc_chr(n) }
+
+# The i-th code point as a one-character string; negative indexes count from
+# the end, and an out-of-range index is a runtime error.
+def at(s: str, i: int) -> str pure { return uc_at(s, i) }
+
+# Code-point slice; bounds are clamped, negatives count from the end, and an
+# inverted range is empty — the same shape as the byte-level `slice` builtin.
+def substring(s: str, lo: int, hi: int) -> str pure { return uc_slice(s, lo, hi) }
+
+# Every code point as a one-character string. This is how you iterate by code
+# points: `for c in unicode.chars(s) { ... }`.
+def chars(s: str) -> list[str] pure { return uc_chars(s) }
+
+# Strict UTF-8 validity: every byte belongs to a well-formed sequence (no
+# overlong encodings, no surrogates, nothing above U+10FFFF). The functions
+# above are lenient and never fail on invalid bytes.
+def is_valid(s: str) -> bool pure { return uc_valid(s) }

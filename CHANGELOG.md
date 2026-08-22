@@ -4,6 +4,16 @@ All notable changes to Emerald are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Unicode layer** — the `unicode` standard-library module and its seven
+  `uc_*` builtins (`uc_len`, `uc_ord`, `uc_chr`, `uc_at`, `uc_slice`,
+  `uc_chars`, `uc_valid`): UTF-8 code-point length, indexing, slicing, and
+  iteration over the existing byte-oriented strings, beside rather than
+  replacing the byte semantics.
+
 ## [1.0.0] - 2026-08-19
 
 First release: a compiler written in C11 that emits native binaries through the

@@ -39,7 +39,7 @@ tasks:
   runtime-check:
     desc: Prove the runtime compiles standalone under strict flags
     cmds:
-      - '{{.CC}} {{.CFLAGS}} -fsyntax-only -Iinclude -Isrc src/runtime_gc.c src/runtime_obj.c src/runtime_ops.c src/runtime_builtins.c src/runtime_closure.c src/runtime_task.c src/runtime_tensor.c'
+      - '{{.CC}} {{.CFLAGS}} -fsyntax-only -Iinclude -Isrc src/runtime_gc.c src/runtime_obj.c src/runtime_ops.c src/runtime_builtins.c src/runtime_closure.c src/runtime_task.c src/runtime_tensor.c src/runtime_utf8.c'
 
   test:
     desc: Run all stage test suites, including CLI, shape, warning, and proof-report checks

@@ -1,7 +1,7 @@
 # Emerald standard library
 
 The standard library is ordinary Emerald source in this directory. It contains
-11 maintained modules and is covered by `task test:stdlib`:
+12 maintained modules and is covered by `task test:stdlib`:
 
 | Module | Purpose |
 |---|---|
@@ -16,6 +16,7 @@ The standard library is ordinary Emerald source in this directory. It contains
 | `sys` | Process arguments and exit helpers |
 | `path` | Pure path-component manipulation |
 | `fmt` | Small format-string helpers |
+| `unicode` | UTF-8 code-point layer: length, indexing, slicing, and iteration |
 
 Dictionaries and sets are **not** modules. They are dynamic runtime values
 constructed with the builtin `dict()` and `set()` functions. Dictionaries are
@@ -47,7 +48,9 @@ See [`docs/modules.md`](../docs/modules.md).
   result-oriented wrappers where possible.
 - Functions that do not mutate or perform I/O are marked `pure`.
 - Strings are byte-oriented and character helpers are ASCII-only. `len` counts
-  bytes and `ord`/`chr` operate on byte values.
+  bytes and `ord`/`chr` operate on byte values. The `unicode` module layers
+  UTF-8 code-point operations (`length`, `at`, `substring`, `chars`) beside
+  them without changing the byte semantics.
 - `append` is a builtin because amortized in-place list growth cannot be
   expressed by ordinary module code. Other collection algorithms are library
   functions and use it where needed.

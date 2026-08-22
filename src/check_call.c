@@ -314,6 +314,54 @@ Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
                          "chr() argument must be int, got %s", type_str(argt[0]));
             return &t_str;
         }
+        /* --- the UTF-8 code-point layer (stdlib/unicode.rald) ---------- */
+        if (strcmp(name, "uc_len") == 0 || strcmp(name, "uc_ord") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "%s() argument must be str, got %s", name,
+                         type_str(argt[0]));
+            return &t_int;
+        }
+        if (strcmp(name, "uc_valid") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "uc_valid() argument must be str, got %s", type_str(argt[0]));
+            return &t_bool;
+        }
+        if (strcmp(name, "uc_chr") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_int, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "uc_chr() argument must be int, got %s", type_str(argt[0]));
+            return &t_str;
+        }
+        if (strcmp(name, "uc_at") == 0) {
+            if (!ck_arity(ck, e, dname, 2)) return &t_str;
+            if (!assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "uc_at() argument must be str, got %s", type_str(argt[0]));
+            if (!assignable(&t_int, argt[1]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "uc_at() index must be int, got %s", type_str(argt[1]));
+            return &t_str;
+        }
+        if (strcmp(name, "uc_slice") == 0) {
+            if (!ck_arity(ck, e, dname, 3)) return &t_str;
+            if (!assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "uc_slice() argument must be str, got %s", type_str(argt[0]));
+            for (size_t i = 1; i < 3; i++)
+                if (!assignable(&t_int, argt[i]))
+                    ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                             "uc_slice() bound %zu must be int, got %s", i,
+                             type_str(argt[i]));
+            return &t_str;
+        }
+        if (strcmp(name, "uc_chars") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "uc_chars() argument must be str, got %s", type_str(argt[0]));
+            return ty_list(&t_str);
+        }
         if (strcmp(name, "float") == 0) {
             ck_arity(ck, e, dname, 1);
             return &t_float;

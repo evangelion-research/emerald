@@ -1,8 +1,8 @@
 # Builtins
 
-Emerald has **seventy-seven builtins**, compiled directly into calls on the
+Emerald has **eighty-four builtins**, compiled directly into calls on the
 runtime (`src/runtime_*.c`) rather than resolved through a module. They are
-always in scope in every module: the forty-one core builtins (core,
+always in scope in every module: the forty-eight core builtins (core,
 GC-observability, files-and-process, and the stdlib foundation), the eleven
 [green-thread](#green-threads) builtins, and the twenty-five tensor primitives
 (see the [Tensors](#tensors) section).
@@ -251,6 +251,30 @@ The first byte of a string as 0..255, and back. `ord("")` is a runtime error;
 
 Without these there is no arithmetic on characters, so no hashing, no character
 classes, no escape decoding, and no number parsing written in Emerald.
+
+### `uc_len(s: str) -> int` / `uc_ord(s: str) -> int` / `uc_chr(n: int) -> str`
+
+The UTF-8 code-point layer backing `stdlib/unicode.rald`. Strings stay byte values;
+these builtins interpret them as UTF-8 while the byte operations (`len`, `ord`,
+`chr`, `s[i]`) remain unchanged.
+
+Every function is lenient: a byte that cannot begin a valid UTF-8 sequence is
+read as one code point (its own byte value). `uc_valid` is the strict check.
+
+### `uc_at(s: str, i: int) -> str` / `uc_slice(s: str, lo: int, hi: int) -> str`
+
+Code-point indexing and slicing. `uc_at` takes negative indexes from the end and
+raises a runtime error on out-of-range access. `uc_slice` clamps bounds, accepts
+negatives from the end, and returns an empty string for an inverted range — the
+same shape as the byte-level `slice` builtin.
+
+### `uc_chars(s: str) -> list[str]` / `uc_valid(s: str) -> bool`
+
+`uc_chars` returns every code point as a one-character string, so `for c in
+unicode.chars(s)` iterates by code points. `uc_valid` checks strict UTF-8
+validity: no overlong encodings, no surrogates, nothing above U+10FFFF.
+
+See [`stdlib/unicode.rald`](../stdlib/unicode.rald).
 
 ### `float(x) -> float`
 

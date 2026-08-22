@@ -211,6 +211,16 @@ Value em_freeze(Value xs);           /* list -> seq: a no-op at runtime */
 Value em_thaw(Value xs);             /* seq -> list: a copy, so mutation is isolated */
 Value em_ord(Value c);               /* first byte of a string, 0..255 */
 Value em_chr(Value n);               /* 0..255 as a one-byte string */
+/* UTF-8 code-point layer (stdlib/unicode.rald): strings stay bytes; these
+ * interpret them as UTF-8. Lenient by default (an invalid byte counts as one
+ * code point); em_uc_valid is the strict check. */
+Value em_uc_len(Value s);            /* number of code points */
+Value em_uc_ord(Value s);            /* code point of the first character */
+Value em_uc_chr(Value n);            /* code point -> its UTF-8 bytes */
+Value em_uc_at(Value s, Value i);    /* the i-th code point (negatives count from the end) */
+Value em_uc_slice(Value s, Value lo, Value hi); /* code-point slice, clamped */
+Value em_uc_chars(Value s);          /* every code point as a one-character string */
+Value em_uc_valid(Value s);          /* is the whole string well-formed UTF-8? */
 Value em_float_of(Value v);          /* float(), the counterpart of int() */
 void  em_eprint(size_t n, ...);      /* print(), to stderr */
 Value em_argv(void);                 /* the process's argument vector */
