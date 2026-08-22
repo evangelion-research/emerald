@@ -23,7 +23,7 @@ No monomorphization is added — none is needed.
 
 ```c
 struct {
-    DType dt;              /* f32 or f64 in this phase */
+    DType dt;              /* f32 or f64 */
     uint8_t ndim;
     int64_t *dims;         /* shape: ndim entries */
     int64_t *strides;      /* element strides: ndim entries */
@@ -47,10 +47,7 @@ non-NULL and points into the owner's buffer. Two consequences:
 |---|---|
 | `f32` | implemented |
 | `f64` | implemented |
-| `f16`, `bf16`, `i8`, `i32` | reserved, not implemented — Phase 4 (quantized models) |
-
-Only `f32` and `f64` exist. The tag width is settled now so kernels nobody calls
-are not written yet.
+Only `f32` and `f64` are supported.
 
 ## GC interaction: byte accounting
 
@@ -66,10 +63,9 @@ itself.
 
 ## The primitives
 
-The tensor vocabulary is deliberately small and closed — it is exactly the set
-a Phase 4 source-to-source autodiff transform needs to recognize. The
-*shape-obligation* operations are typed in the checker (`shapes.md`); the rest
-are plain runtime calls.
+The tensor vocabulary is the set of operations implemented by the runtime.
+The *shape-obligation* operations are typed in the checker (`shapes.md`); the
+rest are plain runtime calls.
 
 ### Construction
 
@@ -95,8 +91,7 @@ of the same shape and dtype.
 
 `matmul`, `reshape`, `transpose`/`permute`, `sum`/`mean`/`max`/`argmax` over an
 axis, `tslice` (a strided view), and `expand` (broadcast a size-1 dim,
-zero-copy). `matmul` is the naive C kernel — kept as the correctness oracle even
-after a BLAS/Accelerate backend lands (W6).
+zero-copy). `matmul` uses the runtime's naive C kernel.
 
 ### Introspection and scalars
 

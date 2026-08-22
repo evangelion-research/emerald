@@ -2,8 +2,8 @@
  *
  * Header-only `static inline`, so every translation unit can use it with no
  * link dependency — including src/dim.c, which is unit-tested on its own.
- * (src/runtime.c deliberately keeps its own pair: a program that runs out of
- * memory at run time reports through rt_fatal, with a source location.)
+ * The runtime keeps its own pair so a program that runs out of memory reports
+ * through rt_fatal, with a source location.
  *
  * A zero-byte request allocates one byte, so the result is always a distinct
  * non-NULL pointer and callers never have to special-case an empty array.

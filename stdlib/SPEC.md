@@ -69,14 +69,4 @@ task bless
 ./tests/run_tests.sh stdlib
 ```
 
-Review the complete diff and run the full suite before accepting a change. A
-new helper should be added only when a real compiler, example, or test needs it;
-unused speculative modules belong in a future change, not in this directory.
-
-## Known boundaries
-
-The library intentionally does not provide Unicode text, general hashable-key
-maps, channel selection, class-shaped APIs, or network/process abstractions
-beyond the existing `io`, `sys`, and `run` surfaces. These are language/runtime
-work rather than hidden library gaps; release risks and possible v1.1 work are
-tracked in [`docs/REMAINING_V1.md`](../docs/REMAINING_V1.md).
+Review the complete diff and run the full suite before accepting a change.

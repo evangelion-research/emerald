@@ -300,6 +300,3 @@ block's first statement first, or parenthesize the name.
   the closure. Assigning a name inside a nested function still makes it a
   *local* of that function (as with globals, no `nonlocal`); mutate a
   captured list/record to share state.
-- **Known limitations**: no classes/methods, no exceptions, and comparison
-  chains associate pairwise (`a < b < c` is
-  `(a < b) < c`, unlike Python).

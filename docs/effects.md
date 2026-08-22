@@ -37,14 +37,11 @@ nobody using a higher-order builtin.
 
 - It does not promise the function terminates (that is the totality system,
   `docs/proofs.md`), or that it is deterministic beyond the effect labels.
-- `Alloc` and `NonDet` are tracked-but-not-banned labels reserved for later
-  phases (autodiff, determinism claims); nothing currently rejects them.
+- `Alloc` and `NonDet` are tracked labels. The current surface exposes only
+  the `pure` declaration, which requires the empty effect mask.
 
 ## Scope
 
-The surface syntax is `pure` only. The `-> T !{Rand, Mut}` annotation spelling,
-and full effect-*inference* over the call graph (fixpoint per SCC) with
-effect-polymorphic `map`/`filter`/`reduce`, are planned but not yet landed —
-the mask is currently inferred as the empty mask for `pure` functions and `IO`
-otherwise. The higher-order purity hole is closed and implemented/tested
-(`tests/check/{bad,good}_pure_higher_order.rald`).
+The surface syntax is `pure`. Pure functions have the empty effect mask;
+other functions are effectful. Higher-order purity is checked and covered by
+`tests/check/{bad,good}_pure_higher_order.rald`.

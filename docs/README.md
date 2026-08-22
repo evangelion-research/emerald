@@ -1,7 +1,7 @@
 # Emerald documentation
 
-This directory contains maintained documentation for the compiler that is in
-this repository. Start with the document matching the job you have.
+This directory contains documentation for the compiler and runtime in this
+repository. Start with the document matching the job you have.
 
 ## Use Emerald
 
@@ -22,18 +22,17 @@ this repository. Start with the document matching the job you have.
 |---|---|
 | [`architecture.md`](architecture.md) | Compiler pipeline, generated C boundary, runtime values, driver flags, and tests. |
 | [`gc.md`](gc.md) | Precise two-generation GC, shadow-stack roots, write barriers, and task roots. |
-| [`effects.md`](effects.md) | The implemented purity/effect model and its deliberate limits. |
-| [`proofs.md`](proofs.md) | What proof mode can establish and where the checker remains gradual or incomplete. |
+| [`effects.md`](effects.md) | The implemented purity/effect model and its limits. |
+| [`proofs.md`](proofs.md) | What proof mode establishes and where the checker is gradual. |
 | [`tensors.md`](tensors.md) | Tensor runtime representation, operations, views, dtypes, and GC interaction. |
 | [`shapes.md`](shapes.md) | Dimension expressions, `Fin`, static shape obligations, and dynamic boundaries. |
 
-## Release and maintenance
+## Release surface
 
 | Document | Contents |
 |---|---|
-| [`RELEASE_V1.md`](RELEASE_V1.md) | What is complete for the v1 candidate and the intentional v1 omissions. |
-| [`REMAINING_V1.md`](REMAINING_V1.md) | Adversarial release audit: packaging, security, correctness, testing, and follow-up risks. |
-| [`../stdlib/SPEC.md`](../stdlib/SPEC.md) | Maintained standard-library inventory, conventions, and known limits. |
+| [`RELEASE_V1.md`](RELEASE_V1.md) | The implemented v1 compiler, runtime, standard library, and tooling surface. |
+| [`../stdlib/SPEC.md`](../stdlib/SPEC.md) | Maintained standard-library inventory and conventions. |
 
 ## Setup and verification
 
@@ -46,12 +45,5 @@ task examples        # compile and run the smoke examples
 task runtime-check   # compile src/runtime_*.c standalone
 ```
 
-For installation and archive behavior, use the `install` and `dist` tasks only
-after reading the release audit. In particular, the current archive is a
-packaging task, not yet a clean-machine release guarantee; follow the acceptance
-steps in `REMAINING_V1.md` before calling it relocatable.
-
-The maintained source of truth is the compiler and its tests. Older planning
-memos and research bibliographies were intentionally removed from the v1 tree;
-release decisions belong in `RELEASE_V1.md` and concrete remaining risks belong
-in `REMAINING_V1.md`.
+The compiler and its tests are the source of truth for the behavior documented
+here.

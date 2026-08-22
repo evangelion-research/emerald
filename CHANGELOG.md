@@ -4,8 +4,6 @@ All notable changes to Emerald are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
 ## [1.0.0] - 2026-08-19
 
 First release: a compiler written in C11 that emits native binaries through the
@@ -23,7 +21,7 @@ of a program's meaning as is practical.
 - **Expected errors** — `error` declarations, `Result[T, E]`, `try` propagation,
   and exhaustive `catch`; no exceptions.
 - **Runtime** — a two-generation mark-and-sweep garbage collector with shadow
-  stacks, and 78 builtins compiled straight into runtime calls.
+  stacks, and 77 builtins compiled straight into runtime calls.
 - **Concurrency** — cooperative green threads: `spawn`/`join`/`chan`/`send`/
   `recv`/`sleep`/`task_yield`, with deadlock reporting.
 - **Standard library** — 11 modules in Emerald: `math`, `lists`, `strings`,
@@ -47,12 +45,5 @@ of a program's meaning as is practical.
 - **Tooling** — `--json` diagnostics, `--proof`, `--repl`, `--werror`,
   `-Wno-CODE`, `-I DIR`, `--version`, and a relocatable stdlib search order
   (`$EMERALD_STDLIB`, next to the executable, then the compile-time default).
-- **Release plumbing** — `task install` (into a `PREFIX`),  `task dist` (a release tarball); clean-machine packaging and CI remain release
-  follow-up checks.
-
-### Not in v1
-
-Methods, chained comparisons, channel `select`, Unicode-aware character
-operations, formatter/editor integrations, and a general hashable-key type
-constraint remain follow-up work. Dictionaries are intentionally string-keyed.
-Integer arithmetic wraps silently (fixed-width 64-bit two's-complement).
+- **Release plumbing** — `task install` installs the compiler and standard
+  library under a `PREFIX`; `task dist` builds a release tarball.

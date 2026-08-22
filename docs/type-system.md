@@ -448,15 +448,3 @@ serve as tagged sum types for pattern matching.
   acc + n)` for `n = 10_000_000` is fine. Tail calls inside `if`/`match`
   arms are recognized; mutual recursion is not (it needs a trampoline), and
   a self-call inside a nested `def` belongs to that nested function.
-
-## Deliberate omissions
-
-- **Recursive aliases**: a non-generic alias may reference itself (`type Tree =
-  { v: int, kids: list[Tree] }`), enabling lists-as-cons-cells and inductive
-  data. Recursive *generic* aliases are still rejected.
-- **No bounds on type parameters** (`T extends Comparable`), no variance
-  annotations, no conditional or mapped types.
-- **No dependent types**: `list[T]` cannot carry a length, so statements
-  about sizes are not expressible.
-- **Covariant lists are unsound** by design, matching TypeScript.
-- Narrowing is per-variable and does not survive into a called function.

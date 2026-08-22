@@ -1,11 +1,10 @@
 # Compiler architecture
 
-How `emeraldc` is built: ~12,000 lines of C11, warning-clean under
-`-Wall -Wextra`, no dependencies beyond libc and a C compiler to shell out to.
+How `emeraldc` is built: a C11 compiler with no dependencies beyond libc and
+a C compiler to shell out to.
 
-Everything described here is implemented and covered by `task test`
-(the full 185-case suite across compiler stages, runtime, CLI, and release
-smoke checks).
+Everything described here is implemented and covered by `task test` across the
+compiler stages, runtime, CLI, and standard library.
 
 ## The pipeline
 
@@ -98,7 +97,7 @@ tests/shape/    1 unit + 1 golden  dim solver + shape surface  (unit harness, --
 
 `tests/check/` holds two golden files per case (`.expected` and
 `.json.expected`) so the JSON diagnostic schema is pinned as tightly as the
-human-readable output — including the tensor shape errors
+human-readable output, including the tensor shape errors
 (`bad_shape_matmul`, `bad_fin`), which pin the exit-criterion output. `tests/shape/`
 is different on purpose: `dim_unit.c` is a compiled unit test of the dimension
 solver, and `--emit-shapes` covers the shape surface. `tests/imports/` cases are
@@ -113,7 +112,7 @@ language.
 
 ```
 task              # build bin/emeraldc
-task test         # every suite (185 tests) + runtime-check
+task test         # every suite + runtime-check
 task test:lexer / test:parser / test:check / test:proof / test:e2e / test:imports
 task examples     # compile & run examples/*.rald and examples/*/main.rald
 task bless        # regenerate golden files (review the diff!)
@@ -121,8 +120,8 @@ task clean
 ```
 
 `task runtime-check` compiles `src/runtime_*.c` standalone under strict flags,
-proving the runtime stays independent of the compiler's headers — it is
-compiled into every generated program, not into `emeraldc`.
+proving the runtime stays independent of the compiler's headers. The same
+runtime sources are compiled into every generated program, not into `emeraldc`.
 
 ## Driver usage
 
@@ -141,12 +140,4 @@ emeraldc --emit-c prog.rald      # print generated C to stdout
 
 `$CC` overrides the C compiler. `$EMERALD_SRC` overrides the runtime source
 location baked in at build time (`-DEMERALD_SRC_DIR`), which is how a built
-`emeraldc` finds `runtime.c` to compile alongside your program.
-
-## Follow-up work
-
-The implementation deliberately keeps the compiler small and single-process.
-Packaging, security, correctness hardening, and larger language features are
-tracked with acceptance criteria in [`REMAINING_V1.md`](REMAINING_V1.md), rather
-than in speculative design documents. The architecture above and the test
-harness are the source of truth for the current release.
+`emeraldc` finds the `src/runtime_*.c` files to compile alongside your program.

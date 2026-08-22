@@ -25,17 +25,14 @@ typedef enum { V_NONE, V_BOOL, V_INT, V_FLOAT, V_OBJ, V_STR } VTag;
 typedef enum { O_STR, O_LIST, O_TUPLE, O_REC, O_DICT, O_SET,
                O_FUNC, O_CELL, O_TENSOR, O_CHAN, O_TASK } OTag;
 
-/* Tensor dtypes. Only f32 and f64 are implemented in v1; the other tags
- * are reserved so the tag width is settled before Phase 4 (quantized models)
- * needs them. */
+/* Tensor dtypes supported by the runtime. */
 typedef enum {
-    DT_F32, DT_F64,
-    DT_F16, DT_BF16, DT_I8, DT_I32,   /* reserved, not implemented */
-    DT_COUNT,
+    DT_F32,
+    DT_F64,
 } DType;
 
 typedef struct Obj Obj;
-typedef struct Chan Chan;   /* see the scheduler section of runtime.c */
+typedef struct Chan Chan;   /* scheduler state in src/runtime_task.c */
 typedef struct Task Task;
 
 typedef struct Value {

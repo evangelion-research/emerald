@@ -1,8 +1,6 @@
-# testing — simple test patterns and assertions.
-#
-# Emerald has no dedicated test framework in Phase 2, but tests can be
-# expressed using the language's own mechanisms: `match` for exhaustiveness,
-# `error` for expected failures, and `catch` for graceful handling.
+# testing — simple test patterns and assertions using Emerald's own language
+# mechanisms: `match` for exhaustiveness, `error` for expected failures, and
+# `catch` for graceful handling.
 
 # An assert-like function: matches on bool with a single arm.
 # If `cond` is True, the unit value is returned. If `cond` is False,

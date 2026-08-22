@@ -1,8 +1,8 @@
 # Builtins
 
-Emerald has **seventy-eight builtins**, compiled directly into calls on the
+Emerald has **seventy-seven builtins**, compiled directly into calls on the
 runtime (`src/runtime_*.c`) rather than resolved through a module. They are
-always in scope in every module: the forty core builtins (core,
+always in scope in every module: the forty-one core builtins (core,
 GC-observability, files-and-process, and the stdlib foundation), the eleven
 [green-thread](#green-threads) builtins, and the twenty-five tensor primitives
 (see the [Tensors](#tensors) section).
@@ -290,10 +290,8 @@ Reseeds `rand()`, so the same seed replays the same stream. `0` is not a usable
 xorshift state and maps to the default seed rather than wedging the generator.
 
 Spelled `seed_rand` rather than `seed` because the builtin namespace is flat and
-shared: a builtin named `seed` would make the global `seed = 7` that any
-hand-rolled PRNG writes an `E_TYPE_ASSIGN`. Same reasoning as `io.append_to`
-(see [`stdlib/SPEC.md`](../stdlib/SPEC.md)). A future `random.seed` can wrap
-it under the Python name.
+shared: a builtin named `seed` would make the global `seed = 7` that a
+hand-rolled PRNG writes an `E_TYPE_ASSIGN`.
 
 ### `now() -> float`
 
@@ -444,22 +442,3 @@ closed channel — the same shape as `read_line()`, and the reason a worker loop
 needs no separate "are we done" flag.
 
 None of these are pure: a task is an effect.
-
----
-
-## What is deliberately still missing
-
-No string methods, no `sorted`, no `min`/`max`, no `abs`, no math beyond
-`sqrt`/`tan`.
-
-Those are [`stdlib/`](../stdlib/) modules: `strings`, `sort`, `lists`, and
-`math`. Dictionaries and sets are deliberately not modules: their runtime
-storage, mutation, and collection operators are builtin.
-
-Still genuinely absent, with no library answer:
-
-| Missing | Why it matters |
-|---|---|
-| `select` over channels | a task can only wait on one channel at a time, so fan-in needs a dedicated collector task rather than one loop over several channels |
-| hashable-key constraints | dictionaries are string-keyed because the type system cannot express a general hashability bound |
-| integer division | `/` is float division, so `math.floor_div` rounds through a double and is exact only under 2^53 |

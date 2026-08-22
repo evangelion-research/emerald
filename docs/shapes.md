@@ -45,12 +45,12 @@ still work on top.
 
 ## The solver: a canonical-form normalizer, not SMT
 
-Per D3, each dimension expression is normalized to a **sum-of-products** over
-dim variables and integer literals, then compared syntactically. There is
-deliberately no SMT dependency in this phase.
+Each dimension expression is normalized to a **sum-of-products** over dim
+variables and integer literals, then compared syntactically. The solver has no
+SMT dependency.
 
 - `dim_eq(a, b)` — normalize both, compare term-for-term. Always decidable.
-- `dim_le(a, b)` — the decidable fragment needed by `Fin[n]` (W5): equal normal
+- `dim_le(a, b)` — the decidable fragment needed by `Fin[n]`: equal normal
   forms, literal comparison, and `a <= a + k` for literal `k >= 0`.
 
 Anything `dim_le` cannot decide is **logged** (the escalation log, dumped by
@@ -131,5 +131,4 @@ def bad(xs: Tensor[f32, [N]], i: Fin[N + 1]) -> float {
 
 `Fin[a]` is a subtype of `Fin[b]` exactly when `a <= b` in the decidable
 fragment, and of `int`. Honest scoping: this phase **rejects provably-bad
-indexing**; the runtime bounds check remains, because bounds-check *elimination*
-needs typed codegen (Phase 4).
+indexing**; the runtime bounds check remains as a safety check.

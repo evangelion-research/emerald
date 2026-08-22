@@ -87,9 +87,3 @@ for tuning and tests.
 `examples/gc_stress.rald` and the e2e suite churn millions of short-lived
 strings/lists/records; a 2M-iteration record churn (~8M objects) peaks at
 **~1.6 MB RSS** in ~0.3 s.
-
-## Future work
-
-- Interned long strings (short strings are already inlined via SSO).
-- Age-based tenuring / a remembered-set of fixed size (currently every nursery
-  survivor is promoted immediately and the remembered set is unbounded).

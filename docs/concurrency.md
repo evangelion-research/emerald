@@ -62,10 +62,7 @@ room.
   case is in the type, so the checker makes every receive loop handle it.
 - Both wait queues are FIFO, so the longest-waiting task wins a rendezvous.
 
-Closing is how a producer tells an unknown number of consumers to stop. There
-is no `select` yet: a task waits on one channel at a time, so fan-in from
-several channels is written as one collector task per channel feeding a shared
-result channel.
+Closing is how a producer tells an unknown number of consumers to stop.
 
 ## Deadlock is reported, not hung
 
@@ -102,7 +99,7 @@ parked at a switch point with a consistent shadow stack. Two things changed:
 
 - `rt_roots` is now `_Thread_local`: one shadow stack per task. Each live task
   registers the address of its own head pointer, and `gc_mark_roots` walks all
-  of them (`sch_mark` in `runtime.c`).
+  of them (`sch_mark` in `src/runtime_task.c`).
 - A task's `fn`, `result`, and the value in flight across a rendezvous (`xfer`)
   are marked as roots on every collection, minor ones included, so writing them
   needs no write barrier. A channel's *buffer* is reached through the channel
@@ -141,12 +138,5 @@ variable is one cell shared by all iterations, so
 for id in range(0, 3) { append(ts, spawn(() => worker(id))) }   # every task sees id = 2
 ```
 
-Bind the value in a helper (`def start(id: int) -> Task[None] { return spawn(() => worker(id)) }`)
+Bind the value in a helper (`def start(id: int) -> Task[None] { return spawn(() => worker(id)) }`
 to give each task its own.
-
-## Status
-
-Deliberately absent for now: `select`, timeouts on a receive, cancellation,
-task-local state, and any form of parallelism. Each of those changes what the
-scheduler has to guarantee, and the single-token model is what currently keeps
-the collector and the generated code free of synchronisation.

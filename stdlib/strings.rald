@@ -483,14 +483,18 @@ def is_identifier(s: str) -> bool pure {
 # Python's str.maketrans / str.translate, with the table spelled out as a
 # list[int] of 256 replacements: table[ord(c)] is the byte c becomes, or -1 to
 # delete c. A table is just data, so it can be built once and reused.
-
-def make_trans(from_chars: str, to_chars: str) -> list[int] {
+def _identity_table() -> list[int] {
     table: list[int] = []
     i = 0
     while i < 256 {
         append(table, i)
         i = i + 1
     }
+    return table
+}
+
+def make_trans(from_chars: str, to_chars: str) -> list[int] {
+    table = _identity_table()
     n = len(from_chars)
     if len(to_chars) < n { n = len(to_chars) }
     i = 0
@@ -503,12 +507,7 @@ def make_trans(from_chars: str, to_chars: str) -> list[int] {
 
 # A table that deletes the given bytes, for Python's `maketrans("", "", chars)`.
 def make_delete(chars: str) -> list[int] {
-    table: list[int] = []
-    i = 0
-    while i < 256 {
-        append(table, i)
-        i = i + 1
-    }
+    table = _identity_table()
     for c in chars { table[ord(c)] = -1 }
     return table
 }
@@ -605,9 +604,7 @@ def parse_float(s: str) -> Result[float, str] pure {
 # --- escaping --------------------------------------------------------------
 #
 # The escape set is exactly docs/grammar.md's: \\ \" \' \n \t \r \0. Anything
-# else non-printable is emitted as \xNN, which the lexer does not yet read —
-# escape and unescape are therefore not quite inverses at the edges, and that
-# is a lexer gap rather than a library one.
+# else non-printable is emitted as \xNN.
 
 def escape(s: str) -> str {
     b = builder.new()

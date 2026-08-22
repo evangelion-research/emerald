@@ -1,7 +1,7 @@
 # lists — the sequence operations that are not builtins.
 #
-# `map`, `filter` and `reduce` stay builtins (they are generic in a way user
-# code cannot yet be) and are not shadowed here. `slice` is a builtin too, and
+# `map`, `filter` and `reduce` are generic builtins and are not shadowed here.
+# `slice` is a builtin too, and
 # works on lists as well as strings, so there is no `lists.slice`.
 #
 # Almost nothing here is `pure`: building a list means `append`, and `append`

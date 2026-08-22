@@ -3,10 +3,7 @@
 #include "runtime_internal.h"
 
 static size_t dt_size(DType dt) {
-    switch (dt) {
-    case DT_F64: return 8;
-    default:     return 4; /* f32 and the reserved tags default to 4 bytes */
-    }
+    return dt == DT_F64 ? sizeof(double) : sizeof(float);
 }
 
 static int64_t t_numel_of(uint8_t ndim, const int64_t *dims) {
@@ -123,21 +120,18 @@ Value tensor_view(Obj *base, DType dt, uint8_t ndim, const int64_t *dims,
 }
 
 /* --- construction ------------------------------------------------------- */
-Value em_tensor_zeros(Value shape) {
-    uint8_t ndim; int64_t *dims;
+static Value tensor_from_shape(Value shape, double fill) {
+    uint8_t ndim;
+    int64_t *dims;
     parse_shape(shape, &ndim, &dims);
-    Value t = tensor_new(DT_F32, ndim, dims, 0.0);
+    Value t = tensor_new(DT_F32, ndim, dims, fill);
     free(dims);
     return t;
 }
 
-Value em_tensor_ones(Value shape) {
-    uint8_t ndim; int64_t *dims;
-    parse_shape(shape, &ndim, &dims);
-    Value t = tensor_new(DT_F32, ndim, dims, 1.0);
-    free(dims);
-    return t;
-}
+Value em_tensor_zeros(Value shape) { return tensor_from_shape(shape, 0.0); }
+
+Value em_tensor_ones(Value shape) { return tensor_from_shape(shape, 1.0); }
 
 Value em_tensor_full(Value shape, Value fill) {
     if (!is_num(fill))

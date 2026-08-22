@@ -14,7 +14,7 @@
  * EMERALD_SRC_DIR (set by the build) and can be overridden with $EMERALD_SRC.
  *
  * Everything from --check onwards operates on the *linked* program: the entry
- * file plus every module it imports, resolved by src/module.c. The two earlier
+ * file plus every module it imports, resolved by the module loader. The two earlier
  * stages (--emit-tokens, --emit-ast) are per-file views and never follow an
  * import. This command line is the whole contract between emeraldc and any
  * driver (such as pme) that resolves packages on its behalf:
@@ -80,8 +80,7 @@ static void emit_tokens(const char *src) {
 
 /* --- the shape stage's observable surface (--emit-shapes) --------------- */
 
-/* Walk a type expression, printing every tensor annotation it contains (the
- * dtype + shape surface that W4 later checks). */
+/* Walk a type expression, printing every tensor annotation it contains. */
 static void emit_type_shapes(FILE *out, const TypeExpr *t) {
     if (!t) return;
     switch (t->kind) {
@@ -123,8 +122,6 @@ static void emit_type_shapes(FILE *out, const TypeExpr *t) {
             emit_type_shapes(out, t->args[i]);
         break;
     case TE_LIST:
-        emit_type_shapes(out, t->elem);
-        break;
     case TE_SEQ:
         emit_type_shapes(out, t->elem);
         break;
@@ -460,7 +457,7 @@ int main(int argc, char **argv) {
     }
 
     int errors = 0;
-    /* RELEASE_V1 B3: a copied binary still finds the stdlib relative to itself */
+    /* A copied binary finds the stdlib relative to itself. */
     module_set_exe_stdlib(find_exe_stdlib(argv[0]));
     Program *prog = module_link(file, inc, ninc, &diags, &errors);
     if (!prog) {

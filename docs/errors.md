@@ -240,24 +240,7 @@ The consequence to know: two modules that both declare `error NotFound`
 produce values the runtime cannot tell apart. Errors are structural, like
 everything else in Emerald. If that matters, put the distinction in the name.
 
-## 8. What is deliberately absent
-
-- **No exceptions, and no `throw`.** A failure is a value; the only control
-  flow is `return`.
-- **No `unwrap()` that aborts.** A caller that wants to give up on a failure
-  writes that out — `unwrap_or(r, d)`, or a `catch` arm that calls `exit` —
-  where a reader can see it.
-- **No error channel in the signature *syntax*.** `-> Result[T, E]` names both
-  channels explicitly rather than hiding one behind a `!` or an effect row.
-  The wrapper is visible because the wrapper is real.
-- **No stack traces.** An error carries the fields you gave it. Runtime
-  location reporting is a separate mechanism (`rt_cur_file`/`rt_cur_line`, see
-  [`diagnostics.md`](diagnostics.md#runtime-errors)).
-- **No automatic conversion** between error types on propagation (Rust's
-  `From`). `try` requires the caller's channel to already carry the callee's
-  errors; widen it, or convert explicitly with `map_error`.
-
-## 9. Diagnostics
+## 8. Diagnostics
 
 | code | meaning |
 |---|---|

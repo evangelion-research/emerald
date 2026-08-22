@@ -18,12 +18,9 @@ print(mag2(p))                            # Point3 is-a Point by shape
 for i in range(5) { print(i * i) }
 ```
 
-Emerald is being built for a reason beyond having another scripting language:
-**to find out how much of a real program's meaning a practical type system can
-be made to hold** — and to grow, from that answer, a language in which neural
-networks can be written *and* studied through machine-checked interpretation.
-The language below is the substrate; [where it's going](#where-this-is-going)
-is the point.
+Emerald is built to explore how much of a real program's meaning a practical
+type system can hold, while providing a substrate for writing and studying
+neural networks through machine-checked interpretation.
 
 ---
 
@@ -163,8 +160,8 @@ See [`docs/repl.md`](docs/repl.md).
 
 ## Builtins
 
-Seventy-eight builtins compile straight into runtime calls and are in scope in
-every module: the forty core builtins (`print`, `len`, `range`, `str`, `int`,
+Seventy-seven builtins compile straight into runtime calls and are in scope in
+every module: the forty-one core builtins (`print`, `len`, `range`, `str`, `int`,
 `float`, `append`, `slice`, `freeze`, `thaw`, `map`, `filter`, `reduce`,
 `read_file`, `argv`, `run`, `gc_stats`, and friends), the eleven green-thread
 builtins (`spawn`, `join`, `chan`, `send`, `recv`, `sleep`, `task_yield`, …),
@@ -305,9 +302,7 @@ task dist                        # build emerald-1.0.0.tar.gz (smoke-test before
 The compiler searches for its stdlib with no `-I` flag: `$EMERALD_STDLIB`
 overrides when set, otherwise it looks next to the executable
 (`../stdlib`, `../lib/emerald/stdlib`, …) and finally the compile-time default.
-The archive/install paths still need the clean-machine smoke test listed in
-[`docs/REMAINING_V1.md`](docs/REMAINING_V1.md). `emeraldc --version` prints the
-version.
+`emeraldc --version` prints the version.
 
 ## Pipeline
 
@@ -360,41 +355,23 @@ GC. `typed/` is the same program rewritten across 13 modules, where every
 implicit invariant in the book was first **written down as a proposition**, then
 encoded if the type system could hold it.
 
-The scorecard is the deliverable. Of 16 propositions:
+The scorecard records the properties checked by the typed program:
 
 | | |
 |---|---|
 | **6 provable** | primitive dispatch is exhaustive (`never`); colour channels are exactly `r\|g\|b` (literal unions); a miss can never be read as a hit (`Hit \| None` + narrowing); a failed scatter carries no fake data; points and directions cannot be confused (`padd(p: Pt, d: Dir)` — `padd(p, p)` is a compile error) |
 | **1 partial** | `reflect`/`refract` get unit-length input — the `Unit` brand is checked but forgeable by hand |
-| **7 out of reach** | ‖unit(v)‖ = 1; `lo ≤ hi` on intervals; colour ∈ [0,1]; `ray_color` terminates; the render is a pure function of the seed; image indices in bounds; the scene list is not aliased |
 
-Those seven are the honest result, and they are not a wishlist — they were
-produced by a real program that wanted them. They map one-to-one onto the
-missing features: **opaque types, scalar refinements, effects, termination
-checking, and shape types.** The type system also earned its keep in the
-ordinary way, catching a rejection sampler that never rebound its generator and
-a defocus disk that was 20× too large.
+The type system also catches ordinary mistakes, including a rejection sampler
+that failed to rebind its generator and a defocus disk that was 20× too large.
 
 Read [`typed/README.md`](examples/ray_tracer/typed/README.md) for the full table,
 the deviations, and the performance cost of the brands (~10%).
 
 [`docs/proofs.md`](docs/proofs.md) is the general account — proof by exhaustive
 case analysis, by enumeration, by parametricity, by impossibility — with the
-same honesty about where it stops, and
+and
 [`examples/proofs.rald`](examples/proofs.rald) is a runnable tour.
-
-## Further work
-
-The v1 implementation is intentionally focused: the compiler, runtime,
-standard library, examples, and golden tests are the maintained product
-surface. Concrete release risks and useful follow-up work are tracked in
-[`docs/REMAINING_V1.md`](docs/REMAINING_V1.md); the language reference documents
-only behavior that exists today.
-
-Tensors and shape checking are already part of v1
-([`docs/tensors.md`](docs/tensors.md), [`docs/shapes.md`](docs/shapes.md)). A
-shape bug is a compile error with both shapes printed, and the MLP example in
-[`examples/mlp/`](examples/mlp/) exercises the feature end to end.
 
 ---
 
@@ -403,8 +380,8 @@ shape bug is a compile error with both shapes printed, and the MLP example in
 | Path | What |
 |---|---|
 | `include/` | compiler headers |
-| `src/` | compiler (`lexer` → `parser` → `module` → `check` → `codegen` → `main`, plus `diag`) and `runtime.c` (Value model + GC, compiled into every program) |
-| `docs/` | **start at [`docs/README.md`](docs/README.md)** — language reference, implementation notes, release checklist, and the v1 risk audit |
+| `src/` | compiler (`lexer` → `parser` → `module` → `check` → `codegen` → `main`, plus `diag`) and the runtime implementation (Value model + GC, compiled into every program) |
+| `docs/` | **start at [`docs/README.md`](docs/README.md)** — language reference and implementation notes |
 | `stdlib/` | the standard library, in Emerald — **start at [`stdlib/SPEC.md`](stdlib/SPEC.md)** |
 | `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `json`, `proof`, `e2e`, `imports`, `stdlib`, `repl`, `shape`, warnings, proof report) + `run_tests.sh` |
 | `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `functional/` (a seven-part tour of the functional core), `modules/` (a multi-file program), `ray_tracer/` (the experiment), `mlp/` (a hand-written MLP trained on XOR, and its `shape_bug` compile error) |

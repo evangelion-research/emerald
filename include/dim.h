@@ -5,9 +5,9 @@
  * integer literals, built from `+` and `*`. The solver normalizes each
  * expression to a sum-of-products canonical form and compares structurally,
  * deliberately avoiding an SMT dependency. `dim_le` implements the decidable
- * fragment needed for `Fin[n]` (W5): equal normal forms, literal comparison,
- * and `a <= a + k` for literal `k >= 0`. Anything else is reported as
- * *unresolved* so future solver improvements can be guided by real programs.
+ * fragment needed for `Fin[n]`: equal normal forms, literal comparison, and
+ * `a <= a + k` for literal `k >= 0`. Anything else is reported as
+ * *unresolved*.
  *
  * This file is standalone: it depends on nothing from the compiler, so it can
  * be unit-tested directly (tests/shape/dim_unit.c).

@@ -161,9 +161,8 @@ written name in another. The consequence is structural, like the rest of the
 language: two modules that both declare `error NotFound` produce values nothing
 can tell apart. See [`errors.md`](errors.md) §7.
 
-Modules are concatenated into one translation unit, which preserves the existing
-GC shadow-stack setup and avoids designing a linking story on day one. Splitting
-into separate `.gen.c` files is a later change, when compile times justify it.
+Modules are concatenated into one translation unit, which preserves the GC
+shadow-stack setup.
 
 Module initialization follows the same order: an imported module's top-level
 statements run before those of the module that imported it.
