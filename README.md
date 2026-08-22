@@ -1,8 +1,12 @@
-# Emerald
-
 <p align="center">
-  <img src="assets/emerald.gif" alt="Emerald programming language logo" width="704">
+  <img
+    src="assets/emerald.gif"
+    alt="Emerald programming language logo"
+    width="704"
+  />
 </p>
+
+# Emerald
 
 Emerald is a statically typed programming language with Python-inspired syntax,
 brace-delimited blocks, and TypeScript-style structural typing. Its C11 compiler

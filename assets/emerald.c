@@ -2,10 +2,16 @@
 #include <string.h>
 #include <math.h>
 #include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
 
-#define WIDTH 80
-#define HEIGHT 30
+#define WIDTH 64
+#define HEIGHT 18
 #define SIZE (WIDTH * HEIGHT)
+
+/* Fits the 960x540 VHS terminal at 18px without wrapping or scrolling. */
+#define SCALE_X 85.0f
+#define SCALE_Y 25.0f
 
 typedef struct {
     float x, y, z;
@@ -164,11 +170,11 @@ static void draw_sample(Vec3 p, float luminance)
     */
     int screen_x =
         WIDTH / 2 +
-        (int)(45.0f * p.x * inv_z);
+        (int)(SCALE_X * p.x * inv_z);
 
     int screen_y =
         HEIGHT / 2 -
-        (int)(22.0f * p.y * inv_z);
+        (int)(SCALE_Y * p.y * inv_z);
 
     if (screen_x < 0 ||
         screen_x >= WIDTH ||
@@ -228,13 +234,17 @@ static void render_triangle(
         -1.0f
     });
 
-    float luminance = dot(normal, light);
-
-    /*
-        Back-facing / unlit surfaces aren't useful.
-    */
-    if (luminance <= 0.0f)
+    /* The camera looks along +Z, so only outward faces toward -Z are visible. */
+    if (normal.z >= 0.0f)
         return;
+
+    /* Keep shadowed facets visible instead of cutting holes in the gem. */
+    float diffuse = dot(normal, light);
+
+    if (diffuse < 0.0f)
+        diffuse = 0.0f;
+
+    float luminance = 0.18f + 0.82f * diffuse;
 
     /*
         Sample points across the triangle using barycentric coordinates.
@@ -246,7 +256,8 @@ static void render_triangle(
             v >= 0
             u + v <= 1
     */
-    const float step = 0.025f;
+    /* Dense sampling keeps the enlarged facets solid instead of speckled. */
+    const float step = 0.0125f;
 
     for (float u = 0.0f; u <= 1.0f; u += step) {
 
@@ -313,6 +324,14 @@ static void render(float A, float B, float C)
     }
 }
 
+static void cleanup(int sig){
+    printf("\x1b[0m");
+    printf("\x1b[?25h");
+    fflush(stdout);
+
+    exit(0);
+}
+
 static void print_frame(void)
 {
     /*
@@ -344,6 +363,8 @@ static void print_frame(void)
 
 int main(void)
 {
+    signal(SIGINT, cleanup);
+    signal(SIGTERM, cleanup);
     float A = 0.3f;
     float B = 0.0f;
     float C = 0.0f;
