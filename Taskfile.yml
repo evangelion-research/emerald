@@ -15,7 +15,7 @@ vars:
     sh: echo "$PWD/src"
   STDLIBDIR:
     sh: echo "$PWD/stdlib"
-  COMPILER_SRCS: src/lexer.c src/ast.c src/parser_util.c src/parser_expr.c src/parser_stmt.c src/module_resolve.c src/module_rename.c src/module_load.c src/check_type.c src/check_ctx.c src/check_infer.c src/check_call.c src/check_expr.c src/check_flow.c src/check_stmt.c src/check_pass.c src/codegen_ctx.c src/codegen_expr.c src/codegen_stmt.c src/codegen_close.c src/codegen_prog.c src/diag.c src/dim.c src/repl.c src/main.c
+  COMPILER_SRCS: src/lexer.c src/ast.c src/parser_util.c src/parser_expr.c src/parser_stmt.c src/module_resolve.c src/module_rename.c src/module_load.c src/check_type.c src/check_ctx.c src/check_infer.c src/check_call.c src/check_expr.c src/check_flow.c src/check_stmt.c src/check_pass.c src/codegen_ctx.c src/codegen_expr.c src/codegen_stmt.c src/codegen_close.c src/codegen_prog.c src/diag.c src/dim.c src/repl.c src/shape_report.c src/main.c
 
 tasks:
   default:
@@ -39,7 +39,7 @@ tasks:
   runtime-check:
     desc: Prove the runtime compiles standalone under strict flags
     cmds:
-      - '{{.CC}} {{.CFLAGS}} -fsyntax-only -Iinclude -Isrc src/runtime_gc.c src/runtime_obj.c src/runtime_ops.c src/runtime_builtins.c src/runtime_task.c src/runtime_tensor.c'
+      - '{{.CC}} {{.CFLAGS}} -fsyntax-only -Iinclude -Isrc src/runtime_gc.c src/runtime_obj.c src/runtime_ops.c src/runtime_builtins.c src/runtime_closure.c src/runtime_task.c src/runtime_tensor.c'
 
   test:
     desc: Run all stage test suites, including CLI, shape, warning, and proof-report checks
@@ -107,6 +107,18 @@ tasks:
     deps: [build]
     cmds:
       - ./tests/run_tests.sh shape
+
+  test:bench:
+    desc: Deterministic regression checks for benchmark workloads
+    deps: [build]
+    cmds:
+      - ./tests/run_tests.sh bench
+
+  bench:
+    desc: Run end-to-end benchmark workloads and print informational timings
+    deps: [build]
+    cmds:
+      - bash tests/run_benchmarks.sh
 
   examples:
     desc: Compile and run every example program

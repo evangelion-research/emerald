@@ -40,4 +40,6 @@ task examples
 ```
 
 The test runner covers compiler stages, runtime behavior, modules, the standard
-library, the REPL, shape checking, warnings, proof reports, and CLI behavior.
+library, the REPL, shape checking, benchmark regressions, warnings, proof
+reports, and CLI behavior. `task bench` reports end-to-end timings without
+performance thresholds.

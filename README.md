@@ -287,6 +287,7 @@ Requires a C compiler and [go-task](https://taskfile.dev) (`brew install go-task
 ```sh
 task                 # build bin/emeraldc
 task test            # golden suite: lexer/parser/check/json/proof/e2e/imports/...
+task bench           # run benchmark workloads with informational timings
 task examples        # compile & run the smoke examples
 
 bin/emeraldc examples/fib.rald && ./examples/fib
@@ -383,6 +384,6 @@ and
 | `src/` | compiler (`lexer` → `parser` → `module` → `check` → `codegen` → `main`, plus `diag`) and the runtime implementation (Value model + GC, compiled into every program) |
 | `docs/` | **start at [`docs/README.md`](docs/README.md)** — language reference and implementation notes |
 | `stdlib/` | the standard library, in Emerald — **start at [`stdlib/SPEC.md`](stdlib/SPEC.md)** |
-| `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `json`, `proof`, `e2e`, `imports`, `stdlib`, `repl`, `shape`, warnings, proof report) + `run_tests.sh` |
+| `tests/` | golden tests per stage (`lexer`, `parser`, `check`, `json`, `proof`, `e2e`, `imports`, `stdlib`, `repl`, `shape`, benchmark regressions, warnings, proof report) + `run_tests.sh` |
 | `examples/` | runnable programs — `shapes.rald` (structural typing), `proofs.rald` (proof features), `gc_stress.rald` (the collector), `functional/` (a seven-part tour of the functional core), `modules/` (a multi-file program), `ray_tracer/` (the experiment), `mlp/` (a hand-written MLP trained on XOR, and its `shape_bug` compile error) |
 | `Taskfile.yml` | build / test / examples / install / dist / bless / clean |

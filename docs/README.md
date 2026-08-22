@@ -40,7 +40,8 @@ From the repository root:
 
 ```sh
 task                 # build bin/emeraldc
-task test            # compiler, runtime, stdlib, REPL, shape, warning, report, and CLI tests
+task test            # compiler, runtime, stdlib, REPL, shape, benchmark, warning, report, and CLI tests
+task bench           # benchmark implemented workloads and print timings
 task examples        # compile and run the smoke examples
 task runtime-check   # compile src/runtime_*.c standalone
 ```

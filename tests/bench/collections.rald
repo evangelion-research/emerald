@@ -1,0 +1,5 @@
+# List allocation and higher-order collection workload.
+xs = range(1000)
+doubled = map((x: int) => x * 2, xs)
+selected = filter((x: int) => x % 3 == 0, doubled)
+print(reduce((a: int, b: int) => a + b, 0, selected))

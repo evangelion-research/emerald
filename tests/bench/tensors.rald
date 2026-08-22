@@ -1,0 +1,11 @@
+# Tensor construction and matrix multiplication workload.
+a = ones([16, 16])
+b = ones([16, 16])
+i = 0
+total = 0.0
+while i < 8 {
+    product = matmul(a, b)
+    total = total + item(product[0][0])
+    i = i + 1
+}
+print(total)

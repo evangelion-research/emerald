@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Emerald test runner: golden tests per compiler stage.
 #
-#   tests/run_tests.sh [lexer|parser|check|json|e2e|proof|imports|stdlib|repl|shape|warn|report|cli]...
+#   tests/run_tests.sh [lexer|parser|check|json|e2e|proof|imports|stdlib|repl|shape|bench|warn|report|cli]...
 #                                                                         (default: all stages)
 #
 # Each stage compares tool output against a .expected file:
@@ -145,6 +145,24 @@ run_shape() {
     done
 }
 
+run_bench() {
+    echo "== benchmark regressions"
+    for f in tests/bench/*.rald; do
+        name="${f%.rald}"
+        bin="${name}.bin"
+        if ! "$EMERALDC" -o "$bin" "$f" 2>/tmp/emerald_bench.$$; then
+            FAIL=$((FAIL + 1))
+            echo "  FAIL $f (compilation)"
+            sed 's/^/    /' /tmp/emerald_bench.$$
+            rm -f /tmp/emerald_bench.$$ "$bin"
+            continue
+        fi
+        rm -f /tmp/emerald_bench.$$
+        report "$f" "${f%.rald}.expected" "$("$bin" 2>&1)"
+        rm -f "$bin"
+    done
+}
+
 run_repl() {
     echo "== repl"
     for f in tests/repl/*.in; do
@@ -217,7 +235,7 @@ run_stdlib() {
     done
 }
 
-stages="${*:-lexer parser check json proof e2e imports stdlib repl shape warn report cli}"
+stages="${*:-lexer parser check json proof e2e imports stdlib repl shape bench warn report cli}"
 for s in $stages; do
     case "$s" in
         lexer) run_lexer ;;
@@ -229,6 +247,7 @@ for s in $stages; do
         imports) run_imports ;;
         stdlib) run_stdlib ;;
         repl) run_repl ;;
+        bench) run_bench ;;
         cli) run_cli ;;
         shape) run_shape ;;
         warn) run_warn ;;
