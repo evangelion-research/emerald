@@ -13,6 +13,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `uc_chars`, `uc_valid`): UTF-8 code-point length, indexing, slicing, and
   iteration over the existing byte-oriented strings, beside rather than
   replacing the byte semantics.
+- **Unit testing** — the `test` standard-library module: a suite handle with
+  recording assertions (`eq`, `ne`, `ok`, `fail`, `close_f`), case labeling,
+  empty-case detection, and a reporting `finish` that returns whether the
+  suite is clean, so a failing check is reported rather than fatal.
 
 ## [1.0.0] - 2026-08-19
 

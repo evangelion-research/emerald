@@ -1,7 +1,7 @@
 # Emerald standard library
 
 The standard library is ordinary Emerald source in this directory. It contains
-12 maintained modules and is covered by `task test:stdlib`:
+13 maintained modules and is covered by `task test:stdlib`:
 
 | Module | Purpose |
 |---|---|
@@ -16,6 +16,7 @@ The standard library is ordinary Emerald source in this directory. It contains
 | `sys` | Process arguments and exit helpers |
 | `path` | Pure path-component manipulation |
 | `fmt` | Small format-string helpers |
+| `test` | Unit-test harness: suites, recording assertions, and reports |
 | `unicode` | UTF-8 code-point layer: length, indexing, slicing, and iteration |
 
 Dictionaries and sets are **not** modules. They are dynamic runtime values

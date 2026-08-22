@@ -1,0 +1,128 @@
+# test — unit tests as ordinary Emerald.
+#
+# Emerald has no exceptions, so a failed assertion cannot unwind the stack.
+# The harness leans into that instead of fighting it: an assertion *records*
+# its outcome on a Suite and keeps going, so one run reports every failure
+# rather than only the first. There is deliberately no assert that aborts —
+# a test binary that dies halfway tells you about one bug; a report lists
+# them all.
+#
+# A Suite is an explicit handle passed to every call, like builder.Builder:
+#
+#     t = test.new("arith")
+#     test.case(t, "addition")
+#     test.eq(t, 1 + 1, 2)
+#     if not test.finish(t) { sys.exit_with(1) }
+#
+# `case` only relabels where subsequent failures are reported; assertions are
+# plain statements between one call and the next. A case that runs no
+# assertion at all is reported as failed, because a check nobody wrote is a
+# check that cannot fail. Equality uses `==`, which compares structurally, so
+# `eq` works on ints, strings, lists, and records alike. Floats are the
+# exception: use `close_f`, because `0.1 + 0.2 == 0.3` is False the way it is
+# everywhere else.
+
+type Suite = {
+    name: str,
+    checks: int,
+    failed: int,
+    failures: list[str],
+    current: str,
+    marked: int,
+}
+
+def new(name: str) -> Suite pure {
+    fs: list[str] = []
+    return { name: name, checks: 0, failed: 0, failures: fs, current: "", marked: 0 }
+}
+
+# --- cases -----------------------------------------------------------------
+
+# Label every assertion from here until the next `case` (or `finish`) with
+# `name`. Assertions made outside any case are labeled by the suite alone;
+# that is fine for a suite of one thing.
+def case(t: Suite, name: str) -> None {
+    _close_case(t)
+    t.current = name
+    t.marked = t.checks
+}
+
+# The open case ran nothing: say so before it can pass by doing no work.
+def _close_case(t: Suite) -> None {
+    if t.current != "" and t.marked == t.checks {
+        _record(t, "no assertions ran")
+    }
+}
+
+def _record(t: Suite, why: str) -> None {
+    label = t.name
+    if t.current != "" { label = t.name + "/" + t.current }
+    append(t.failures, "FAIL " + label + ": " + why)
+    t.failed = t.failed + 1
+}
+
+def _ok_check(t: Suite) -> None { t.checks = t.checks + 1 }
+
+# --- assertions ------------------------------------------------------------
+
+def ok(t: Suite, cond: bool) -> None {
+    t.checks = t.checks + 1
+    if cond == False { _record(t, "expected True") }
+}
+
+# For paths the type checker cannot rule out but the program never reaches.
+def fail(t: Suite) -> None {
+    t.checks = t.checks + 1
+    _record(t, "reached a path nothing should reach")
+}
+
+def eq[T](t: Suite, got: T, want: T) -> None {
+    t.checks = t.checks + 1
+    if got != want {
+        _record(t, "expected " + str(want) + ", got " + str(got))
+    }
+}
+
+def ne[T](t: Suite, got: T, other: T) -> None {
+    t.checks = t.checks + 1
+    if got == other {
+        _record(t, "expected anything else, got " + str(got))
+    }
+}
+
+# Float equality with a tolerance, since exact comparison is a coin flip past
+# the twelfth significant digit.
+def close_f(t: Suite, got: float, want: float, tol: float) -> None {
+    t.checks = t.checks + 1
+    d = got - want
+    if d < 0.0 { d = 0.0 - d }
+    if d > tol {
+        _record(t, "expected " + str(want) + " within " + str(tol) + ", got " + str(got))
+    }
+}
+
+# --- results ---------------------------------------------------------------
+
+def checks_run(t: Suite) -> int pure { return t.checks }
+
+def failed_checks(t: Suite) -> int pure { return t.failed }
+
+def passed(t: Suite) -> bool pure { return t.failed == 0 }
+
+def summary(t: Suite) -> str pure {
+    if t.failed == 0 { return t.name + ": all " + str(t.checks) + " checks passed" }
+    return t.name + ": " + str(t.failed) + " of " + str(t.checks) + " checks failed"
+}
+
+# Close the open case, print every failure followed by the summary line, and
+# return whether the suite is clean, so a test main reads:
+#
+#     if not test.finish(t) { sys.exit_with(1) }
+#
+# Printing stays out of the assertions so a suite can also be driven mid-run.
+def finish(t: Suite) -> bool {
+    _close_case(t)
+    for f in t.failures { print(f) }
+    print(summary(t))
+    return t.failed == 0
+}

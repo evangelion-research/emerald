@@ -1,0 +1,28 @@
+import test
+
+def add(a: int, b: int) -> int pure { return a + b }
+
+t = test.new("demo")
+
+test.case(t, "addition")
+test.eq(t, add(2, 3), 5)
+test.eq(t, add(-1, 1), 0)
+
+test.case(t, "records and lists")
+test.eq(t, [1, 2] + [3], [1, 2, 3])
+test.ne(t, { x: 1 }, { x: 2 })
+
+test.case(t, "floats")
+test.close_f(t, 0.1 + 0.2, 0.3, 0.0000001)
+test.close_f(t, 1.5, 1.0, 0.25)
+
+test.case(t, "the failing kind")
+test.ok(t, add(2, 2) == 5)
+test.fail(t)
+test.ne(t, "aa", "aa")
+
+test.case(t, "empty as they come")
+
+print(test.passed(t))
+print(test.summary(t))
+test.finish(t)

@@ -1,0 +1,8 @@
+False
+demo: 4 of 9 checks failed
+FAIL demo/floats: expected 1.0 within 0.25, got 1.5
+FAIL demo/the failing kind: expected True
+FAIL demo/the failing kind: reached a path nothing should reach
+FAIL demo/the failing kind: expected anything else, got aa
+FAIL demo/empty as they come: no assertions ran
+demo: 5 of 9 checks failed
