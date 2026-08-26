@@ -1,0 +1,12 @@
+version: '3'
+
+tasks:
+  build:
+    desc: Build the standalone pme binary.
+    cmds:
+      - GOCACHE="${TMPDIR:-/tmp}/pme-go-cache" go build -mod=vendor -o pme ./cmd/pme
+
+  test:
+    desc: Run the Go test suite.
+    cmds:
+      - GOCACHE="${TMPDIR:-/tmp}/pme-go-cache" go test -mod=vendor ./...

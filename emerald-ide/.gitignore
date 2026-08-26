@@ -1,0 +1,9 @@
+.DS_Store
+.remember/
+*.o
+*.a
+*.out
+*.test
+*.prof
+bin/
+.*.eide.rald
