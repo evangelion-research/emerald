@@ -1,0 +1,18 @@
+{
+  "grammars": [{
+    "name": "emerald",
+    "camelcase": "Emerald",
+    "scope": "source.emerald",
+    "file-types": ["rald"],
+    "injection-regex": "^emerald$",
+    "class-name": "TreeSitterEmerald"
+  }],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Tree-sitter grammar for Emerald"
+  },
+  "bindings": {
+    "go": true
+  }
+}

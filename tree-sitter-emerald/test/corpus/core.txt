@@ -1,0 +1,118 @@
+==================
+definitions and expressions
+==================
+
+from math import sqrt as root
+type Point = { x: float, y: float }
+dim N, M
+const origin: Point = Point { x: 0.0, y: 0.0 }
+pure def magnitude(p: Point) -> float {
+  return root(p.x * p.x + p.y * p.y)
+}
+
+---
+
+(source_file
+  (import_statement
+    (dotted_name
+      (identifier))
+    (import_alias
+      (identifier)
+      (identifier)))
+  (type_definition
+    (identifier)
+    (record_type
+      (field_definition
+        (identifier)
+        (primitive_type))
+      (field_definition
+        (identifier)
+        (primitive_type))))
+  (dimension_definition
+    (identifier)
+    (identifier))
+  (const_declaration
+    (identifier)
+    (identifier)
+    (constructor_expression
+      (identifier)
+      (record_field
+        (identifier)
+        (literal
+          (float)))
+      (record_field
+        (identifier)
+        (literal
+          (float)))))
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier)))
+    (primitive_type)
+    (block
+      (return_statement
+        (call_expression
+          (identifier)
+          (argument
+            (binary_expression
+              (binary_expression
+                (attribute_expression
+                  (identifier)
+                  (identifier))
+                (attribute_expression
+                  (identifier)
+                  (identifier)))
+              (binary_expression
+                (attribute_expression
+                  (identifier)
+                  (identifier))
+                (attribute_expression
+                  (identifier)
+                  (identifier))))))))))
+
+==================
+control flow
+==================
+
+def classify(xs: list[int]) -> str {
+  match len(xs) {
+    0 -> { return "empty" },
+    _ -> { return "many" },
+  }
+}
+
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (generic_type
+          (identifier)
+          (primitive_type))))
+    (primitive_type)
+    (block
+      (match_statement
+        (call_expression
+          (identifier)
+          (argument
+            (identifier)))
+        (match_arm
+          (pattern
+            (literal
+              (integer)))
+          (block
+            (return_statement
+              (literal
+                (string)))))
+        (match_arm
+          (pattern
+            (wildcard))
+          (block
+            (return_statement
+              (literal
+                (string)))))))))
