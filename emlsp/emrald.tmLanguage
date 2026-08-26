@@ -1,0 +1,183 @@
+{
+  "name": "Emerald",
+  "scopeName": "source.emerald",
+  "fileTypes": [
+    "rald"
+  ],
+  "patterns": [
+    {
+      "name": "comment.line.number-sign.emerald",
+      "match": "^#.*$"
+    },
+    {
+      "name": "keyword.control.conditional.emerald",
+      "match": "\\b(if|elif|else)\\b"
+    },
+    {
+      "name": "keyword.control.loop.emerald",
+      "match": "\\b(while|for)\\b"
+    },
+    {
+      "name": "keyword.control.function.emerald",
+      "match": "\\b(def|return)\\b"
+    },
+    {
+      "name": "keyword.control.flow.emerald",
+      "match": "\\b(and|or|not)\\b"
+    },
+    {
+      "name": "keyword.control.import.emerald",
+      "match": "\\b(import|from|as)\\b"
+    },
+    {
+      "name": "keyword.control.type.emerald",
+      "match": "\\b(type|const|pure|partial|match|try|catch|error|break|continue|pass)\\b"
+    },
+    {
+      "name": "keyword.control.dimension.emerald",
+      "match": "\\b(dim)\\b"
+    },
+    {
+      "name": "constant.language.emerald",
+      "match": "\\b(True|False|None)\\b"
+    },
+    {
+      "name": "support.function.builtin.emerald",
+      "match": "\\b(print|eprint|pp_format|pprint|pprint_err|range|len|str|int|float|sqrt|rand|dict|set|append|slice|freeze|thaw|ord|chr|map|filter|reduce|read_line|read_all|input|run|argv|exit|spawn|join|task_done|task_stats|task_yield|sleep|chan|send|recv|chan_close|chan_len|zeros|ones|full|arange|tensor|randn|exp|log|tanh|relu|matmul|reshape|transpose|permute|expand|sum|mean|max|argmax|tslice|item|shape|ndim|dtype|astype|eprint|pp_format|pprint|pprint_err|gc_stats|gc_collect|file_exists|write_file|append_file|write_out|write_err|flush|seed_rand)\\b"
+    },
+    {
+      "name": "support.type.builtin.emerald",
+      "match": "\\b(int|float|str|bool|int8|int16|int32|int64|uint8|uint16|uint32|uint64|f32|f64|char|string|list|seq|dict|set|option|result|error|task|chan)\\b"
+    },
+    {
+      "name": "constant.numeric.emerald",
+      "match": "\\b(0[xX][0-9a-fA-F]+|0[bB][0-1]+|0[0-7]+|[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?)\\b"
+    },
+    {
+      "name": "string.quoted.double.emerald",
+      "begin": "\"",
+      "end": "\"",
+      "inside": [
+        {
+          "name": "string.escape.emerald",
+          "match": "\\\\."
+        }
+      ],
+      "patterns": [
+        {
+          "name": "string.content.emerald",
+          "match": "[^\"\\\\]+"
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.emerald",
+      "begin": "'",
+      "end": "'",
+      "inside": [
+        {
+          "name": "string.escape.emerald",
+          "match": "\\\\."
+        }
+      ],
+      "patterns": [
+        {
+          "name": "string.content.emerald",
+          "match": "[^'\\\\]+"
+        }
+      ]
+    },
+    {
+      "name": "string.interpolated.emerald",
+      "begin": "f\"",
+      "end": "\"",
+      "inside": [
+        {
+          "name": "string.escape.emerald",
+          "match": "\\\\."
+        },
+        {
+          "name": "variable.other.emerald",
+          "begin": "\\{",
+          "end": "\\}",
+          "patterns": [
+            {
+              "name": "source.emerald.embedded",
+              "match": "."
+            }
+          ]
+        }
+      ],
+      "patterns": [
+        {
+          "name": "string.content.emerald",
+          "match": "[^\"\\\\]+"
+        }
+      ]
+    },
+    {
+      "name": "string.interpolated.single.emerald",
+      "begin": "f'",
+      "end": "'",
+      "inside": [
+        {
+          "name": "string.escape.emerald",
+          "match": "\\\\."
+        },
+        {
+          "name": "variable.other.emerald",
+          "begin": "\\{",
+          "end": "\\}",
+          "patterns": [
+            {
+              "name": "source.emerald.embedded",
+              "match": "."
+            }
+          ]
+        }
+      ],
+      "patterns": [
+        {
+          "name": "string.content.emerald",
+          "match": "[^'\\\\]+"
+        }
+      ]
+    },
+    {
+      "name": "punctuation.definition.emerald",
+      "match": "[:,()(}{\\[\\])]"
+    },
+    {
+      "name": "keyword.operator.arrow.emerald",
+      "match": "\\b->\\b"
+    },
+    {
+      "name": "keyword.operator.pipe.emerald",
+      "match": "\\|>"
+    },
+    {
+      "name": "keyword.operator.ne.emerald",
+      "match": "!"
+    },
+    {
+      "name": "operator.arithmetic.emerald",
+      "match": "[+\\-*/%^&|]"
+    },
+    {
+      "name": "keyword.operator.comparison.emerald",
+      "match": "==|!=|<=|>=|<|>"
+    },
+    {
+      "name": "support.constant.emerald",
+      "match": "\\b(True|False)\\b"
+    },
+    {
+      "name": "entity.name.type.emerald",
+      "match": "\\b(type|struct|enum)\\b"
+    },
+    {
+      "name": "invalid.emerald",
+      "match": ".+"
+    }
+  ]
+}

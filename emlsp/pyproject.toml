@@ -1,0 +1,29 @@
+[project]
+name = "emlsp"
+version = "0.1.0"
+description = "A language server for the Emerald programming language"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.13"
+keywords = ["lsp", "language-server", "emerald", "rald"]
+dependencies = [
+    "lsprotocol>=2025.0.0",
+    "pygls>=2.1.1",
+]
+
+[project.scripts]
+emerald-lsp = "emlsp.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["emlsp"]
+
+[dependency-groups]
+dev = ["pytest>=9.1.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

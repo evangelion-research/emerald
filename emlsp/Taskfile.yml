@@ -1,0 +1,102 @@
+version: '3'
+
+vars:
+  BINARY: emerald-lsp
+  LDFLAGS: -s -w
+  PKG: ./...
+  GOPATH:
+    sh: go env GOPATH
+
+tasks:
+  default:
+    desc: Build the single static binary (same as `task build`)
+    cmds:
+      - task: build
+
+  build:
+    desc: Build {{.BINARY}} for the host platform
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BINARY}}"
+    cmds:
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.BINARY}} ./cmd/emerald-lsp
+    status:
+      - test -f {{.BINARY}}
+
+  test:
+    desc: Run Go tests + vet (mirrors CI)
+    deps: [vet]
+    cmds:
+      - go test {{.PKG}}
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet {{.PKG}}
+
+  fmt:
+    desc: Format Go sources
+    cmds:
+      - go fmt {{.PKG}}
+
+  install:
+    desc: Build and install {{.BINARY}} to $GOPATH/bin
+    deps: [build]
+    cmds:
+      - install -m 0755 {{.BINARY}} {{.GOPATH}}/bin/{{.BINARY}}
+      - echo "installed to {{.GOPATH}}/bin/{{.BINARY}}"
+
+  clean:
+    desc: Remove built binaries
+    cmds:
+      - rm -f {{.BINARY}} {{.BINARY}}-*
+
+  cross:
+    desc: Cross-compile for linux/darwin/windows (amd64 + arm64)
+    deps: [cross:linux, cross:darwin, cross:windows]
+
+  cross:linux:
+    desc: Cross-compile for linux/amd64
+    cmds:
+      - GOOS=linux GOARCH=amd64 go build -ldflags="{{.LDFLAGS}}" -o {{.BINARY}}-linux-amd64 ./cmd/emerald-lsp
+
+  cross:darwin:
+    desc: Cross-compile for darwin (arm64 + amd64)
+    cmds:
+      - GOOS=darwin GOARCH=arm64 go build -ldflags="{{.LDFLAGS}}" -o {{.BINARY}}-darwin-arm64 ./cmd/emerald-lsp
+      - GOOS=darwin GOARCH=amd64 go build -ldflags="{{.LDFLAGS}}" -o {{.BINARY}}-darwin-amd64 ./cmd/emerald-lsp
+
+  cross:windows:
+    desc: Cross-compile for windows/amd64
+    cmds:
+      - GOOS=windows GOARCH=amd64 go build -ldflags="{{.LDFLAGS}}" -o {{.BINARY}}-windows-amd64.exe ./cmd/emerald-lsp
+
+  dist:
+    desc: Build cross binaries and create dist/ archives (for goreleaser-less releases)
+    deps: [cross]
+    cmds:
+      - mkdir -p dist
+      - tar -czf dist/{{.BINARY}}-linux-amd64.tar.gz {{.BINARY}}-linux-amd64
+      - tar -czf dist/{{.BINARY}}-darwin-arm64.tar.gz {{.BINARY}}-darwin-arm64
+      - tar -czf dist/{{.BINARY}}-darwin-amd64.tar.gz {{.BINARY}}-darwin-amd64
+      - zip -j dist/{{.BINARY}}-windows-amd64.zip {{.BINARY}}-windows-amd64.exe
+
+  pytest:
+    desc: Run legacy Python suite (until emlsp/ retired)
+    cmds:
+      - uv run pytest -q
+
+  check:
+    desc: 'One-shot checker (same query the LSP makes per keystroke) — usage: task check -- path/to/file.rald'
+    cmds:
+      - ./{{.BINARY}} --check {{.CLI_ARGS}}
+
+  ci:
+    desc: Full CI pipeline (fmt check + vet + test + build)
+    cmds:
+      - task: vet
+      - task: test
+      - task: build
