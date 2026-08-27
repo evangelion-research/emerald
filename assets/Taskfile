@@ -1,0 +1,60 @@
+version: '3'
+
+vars:
+  SOURCE: emerald.c
+  BINARY: ./emerald
+  GIF: emerald.gif
+  TAPE: emerald.tape
+
+tasks:
+  default:
+    desc: Build the binary and record the VHS gif
+    cmds:
+      - task: record
+
+  build:
+    desc: Compile {{.SOURCE}}
+    sources:
+      - "{{.SOURCE}}"
+    generates:
+      - "{{.BINARY}}"
+    cmds:
+      - echo "Compiling {{.SOURCE}}..."
+      - cc -std=gnu11 -O2 "{{.SOURCE}}" -o "{{.BINARY}}" -lm
+
+  tape:
+    desc: Generate the VHS recording script
+    cmds:
+      - echo "Creating VHS recording script..."
+      - |
+        cat > "{{.TAPE}}" <<'EOF'
+        Output emerald.gif
+        Set Shell "bash"
+        Set FontSize 18
+        Set Width 960
+        Set Height 540
+        Set Framerate 30
+        Type "./emerald"
+        Enter
+        Sleep 5s
+        Ctrl+C
+        Sleep 500ms
+        EOF
+
+  record:
+    desc: Compile, record the gif with VHS, and clean up
+    deps:
+      - build
+      - tape
+    cmds:
+      - echo "Recording GIF..."
+      - vhs "{{.TAPE}}"
+      - rm "{{.TAPE}}"
+      - echo
+      - echo "Generated{{":"}}"
+      - echo "  {{.GIF}}"
+
+  clean:
+    desc: Remove build and recording artifacts
+    cmds:
+      - rm -f "{{.BINARY}}" "{{.TAPE}}" "{{.GIF}}"
