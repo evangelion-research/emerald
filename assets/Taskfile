@@ -1,7 +1,7 @@
 version: '3'
 
 vars:
-  SOURCE: emerald.c
+  SOURCE: emerald.go
   BINARY: ./emerald
   GIF: emerald.gif
   TAPE: emerald.tape
@@ -20,7 +20,7 @@ tasks:
       - "{{.BINARY}}"
     cmds:
       - echo "Compiling {{.SOURCE}}..."
-      - cc -std=gnu11 -O2 "{{.SOURCE}}" -o "{{.BINARY}}" -lm
+      - go build -o "{{.BINARY}}" "{{.SOURCE}}"
 
   tape:
     desc: Generate the VHS recording script
