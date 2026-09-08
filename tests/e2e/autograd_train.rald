@@ -50,11 +50,12 @@ def train_linear() -> bool {
     p: Tensor[f64, [2, 1]] = astype(tensor([[0.0], [0.0]]), "f64")
     first = 0.0
     last = 0.0
-    lr = 0.02
-    for step in range(200) {
+    lr = 0.0002  # slope curvature (~8.6e3) caps the stable rate; the bias's
+                 # slow mode (n_eff ~= 6.4) needs ~1200 steps to hit 0.05
+    for step in range(1500) {
         r = value_and_grad(loss_fn, p)
         if step == 0 { first = at(r.value) }
-        if step == 199 { last = at(r.value) }
+        if step == 1499 { last = at(r.value) }
         p = p - (lr * r.grad)
     }
     w_ok = math.abs_f(read_w(p, 0) - 1.0) < 0.05
@@ -68,18 +69,17 @@ def train_linear() -> bool {
 # --- two-layer MLP ----------------------------------------------------------
 # teacher: y = 0.7 * tanh(2 x) - 0.1; hidden width H. Parameters are packed
 # into one flat leaf: [W1 (H), b1 (H), W2 (H), b2 (1)].
-
-const HID = 6
-const NP = 2 * HID + 1
+# HID = 6, NP = 3*HID + 1 = 19 (packed [W1, b1, W2, b2]), inlined: shape
+# positions need `dim`-declared names, not `const` values.
 
 def make_mlp_loss(x: Tensor[f64, [24, 1]],
-                  y: Tensor[f64, [24, 1]]) -> (Tensor[f64, [NP]]) ->
+                  y: Tensor[f64, [24, 1]]) -> (Tensor[f64, [19]]) ->
                   Tensor[f64, []] {
-    def loss(packed: Tensor[f64, [NP]]) -> Tensor[f64, []] pure {
-        w1 = reshape(tslice(packed, 0, 0, HID), [1, HID])
-        b1 = reshape(tslice(packed, 0, HID, 2 * HID), [1, HID])
-        w2 = reshape(tslice(packed, 0, 2 * HID, 3 * HID), [HID, 1])
-        b2 = reshape(tslice(packed, 0, 3 * HID, 3 * HID + 1), [1, 1])
+    def loss(packed: Tensor[f64, [19]]) -> Tensor[f64, []] pure {
+        w1 = reshape(tslice(packed, 0, 0, 6), [1, 6])
+        b1 = reshape(tslice(packed, 0, 6, 12), [1, 6])
+        w2 = reshape(tslice(packed, 0, 12, 18), [6, 1])
+        b2 = reshape(tslice(packed, 0, 18, 19), [1, 1])
         h_pre = matmul(x, w1) + b1
         h = tanh(h_pre)
         out = matmul(h, w2) + b2
@@ -100,15 +100,15 @@ def train_mlp() -> bool {
     y: Tensor[f64, [24, 1]] = tanh(x * 2.0) * 0.7 - 0.1
     loss_fn = make_mlp_loss(x, y)
 
-    base: Tensor[f64, [NP]] = astype(arange(NP), "f64")
+    base: Tensor[f64, [19]] = astype(arange(19), "f64")
     packed = base * 0.1 - 0.35
     first = 0.0
     last = 0.0
-    lr = 0.06
-    for step in range(400) {
+    lr = 0.005  # raw SSE loss: larger rates overshoot the W2 direction
+    for step in range(600) {
         r = value_and_grad(loss_fn, packed)
         if step == 0 { first = at(r.value) }
-        if step == 399 { last = at(r.value) }
+        if step == 599 { last = at(r.value) }
         packed = packed - (lr * r.grad)
     }
     fit = last < first * 0.02

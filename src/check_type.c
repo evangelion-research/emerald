@@ -167,11 +167,12 @@ bool dim_is_one(const DimExpr *e) {
     return e->kind == DE_LIT && e->lit == 1;
 }
 
-/* product of all axes (1 for a scalar/0-d shape) */
+/* product of all axes (1 for a scalar/0-d shape); a fresh, owned tree --
+ * the leaves are cloned so the caller may dim_free() the result */
 DimExpr *shape_prod(const Shape *s) {
     DimExpr *p = dim_lit(1);
     for (size_t i = 0; i < s->count; i++)
-        p = dim_mul(p, s->dims[i]);
+        p = dim_mul(p, dim_clone(s->dims[i]));
     return p;
 }
 
@@ -208,39 +209,31 @@ Shape *literal_shape_of_expr(const Expr *e) {
     return shape_of(dims, e->as.list.count);
 }
 
-/* Record type returned by the gc_stats() builtin (all counters are ints). */
-Type *gc_stats_type(void) {
-    static Type *t;
-    if (!t) {
-        static char *names[] = {"collections", "live", "young", "old",
-                               "threshold", "bytes_young", "bytes_old"};
-        t = ty_new(TY_REC);
-        t->rec.count = 7;
-        t->rec.names = xmalloc(sizeof(char *) * 7);
-        t->rec.types = xmalloc(sizeof(Type *) * 7);
-        for (size_t i = 0; i < 7; i++) {
-            t->rec.names[i] = names[i];
-            t->rec.types[i] = &t_int;
-        }
-    }
+/* Shared helper: cached record type whose fields are all ints. rec.names
+ * points at the caller's static array; these types live for the whole run. */
+static Type *stats_record_type(Type **cache, char **names, size_t n) {
+    if (*cache) return *cache;
+    Type *t = ty_new(TY_REC);
+    t->rec.count = n;
+    t->rec.names = names;
+    t->rec.types = xmalloc(sizeof(Type *) * n);
+    for (size_t i = 0; i < n; i++)
+        t->rec.types[i] = &t_int;
+    *cache = t;
     return t;
 }
 
-/* The record task_stats() returns: three counters, like gc_stats(). */
+Type *gc_stats_type(void) {
+    static Type *t;
+    static char *names[] = {"collections", "live", "young", "old",
+                           "threshold", "bytes_young", "bytes_old"};
+    return stats_record_type(&t, names, 7);
+}
+
 Type *task_stats_type(void) {
     static Type *t;
-    if (!t) {
-        static char *names[] = {"spawned", "alive", "switches"};
-        t = ty_new(TY_REC);
-        t->rec.count = 3;
-        t->rec.names = xmalloc(sizeof(char *) * 3);
-        t->rec.types = xmalloc(sizeof(Type *) * 3);
-        for (size_t i = 0; i < 3; i++) {
-            t->rec.names[i] = names[i];
-            t->rec.types[i] = &t_int;
-        }
-    }
-    return t;
+    static char *names[] = {"spawned", "alive", "switches"};
+    return stats_record_type(&t, names, 3);
 }
 
 static bool eq_seen_sym(const EqVis *v, const Type *a, const Type *b) {

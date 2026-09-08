@@ -253,8 +253,12 @@ Type *ty_fin(DimExpr *bound);
 Type *ty_eq(DimExpr *lhs, DimExpr *rhs);
 Type *tensor_of(Type *t);
 bool dim_is_one(const DimExpr *e);
+/* product of all axes (1 for a scalar/0-d shape); returns a fresh, owned
+ * tree the caller must dim_free() */
 DimExpr *shape_prod(const Shape *s);
 Shape *broadcast_shapes(const Shape *a, const Shape *b);
+/* static shape of an int-literal list argument (e.g. reshape's `[2, 3]`);
+ * returns a fresh, owned tree, or NULL if the argument isn't one */
 Shape *literal_shape_of_expr(const Expr *e);
 Type *gc_stats_type(void);
 Type *task_stats_type(void);

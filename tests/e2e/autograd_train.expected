@@ -1,0 +1,5 @@
+linear: loss 40596.0 -> 0.00200240320597
+linear: w True slope True decreased True
+mlp: loss 533.676076272 -> 0.0281989788676
+mlp: fitted True small True
+TRAIN: True
