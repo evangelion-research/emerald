@@ -31,7 +31,7 @@ c.rald ─┘                                        │
 | Shapes   | `src/dim.c`     | Canonical-form dimension solver (`dim_eq`/`dim_le`), escalation log.   | `--emit-shapes`  |
 | Checker  | `src/check_*.c`   | Structural type checking, flow narrowing, scope/return, error channels, tensor shapes. | `--check` |
 | Codegen  | `src/codegen_*.c` | AST → C with GC-rooted slot frames; short-circuit, `try`/`catch` lowering. | `--emit-c`   |
-| Runtime  | `src/runtime_*.c` | Tagged `Value` model, operators, builtins, generational GC.            | `runtime-check`  |
+| Runtime  | `src/runtime_*.c` | Tagged `Value` model, operators, builtins, tensors, autograd, generational GC. | `runtime-check`  |
 | Diags    | `src/diag.c`    | Structured errors: code, location, caret, expected/actual, JSON.       | `--json`         |
 | Driver   | `src/main.c`    | CLI, file I/O, invokes `cc`, cleanup.                                  | —                |
 
@@ -42,10 +42,10 @@ declaration and tensor annotation from the linked program; the dimension solver
 it exercises (`src/dim.c`) is a standalone component with the project's first
 **unit** test harness (`tests/shape/dim_unit.c`), rather than a golden file.
 
-The checker is the largest stage (`src/check_*.c`, ~4,500 lines across eight
+The checker is the largest stage (`src/check_*.c`, ~4,900 lines across eight
 files sharing `src/check_internal.h`) and it is where the interesting work
 is — see [`type-system.md`](type-system.md), [`tensors.md`](tensors.md),
-and [`shapes.md`](shapes.md).
+[`shapes.md`](shapes.md), and [`autograd.md`](autograd.md).
 
 ## Compilation unit
 
@@ -86,12 +86,12 @@ find them precisely — see [`gc.md`](gc.md).
 
 ```
 tests/lexer/    3 suites   token streams              (--emit-tokens)
-tests/parser/   5 suites   AST dumps                  (--emit-ast)
-tests/check/   21 suites   diagnostics, human + JSON  (--check, --check --json)
-tests/proof/    4 suites   proof mode                 (--check --proof)
-tests/e2e/     18 suites   compile, run, compare stdout
+tests/parser/   7 suites   AST dumps                  (--emit-ast)
+tests/check/   43 suites   diagnostics, human + JSON  (--check, --check --json)
+tests/proof/   12 suites   proof mode                 (--check --proof)
+tests/e2e/     31 suites   compile, run, compare stdout (incl. autograd finite-difference and training)
 tests/imports/ 23 suites   module resolution and linking errors
-tests/stdlib/  12 suites   the standard library        (compile + run)
+tests/stdlib/  15 suites   the standard library        (compile + run)
 tests/shape/    1 unit + 1 golden  dim solver + shape surface  (unit harness, --emit-shapes)
 ```
 

@@ -1,11 +1,12 @@
 # Builtins
 
-Emerald has **eighty-four builtins**, compiled directly into calls on the
+Emerald has **eighty-six builtins**, compiled directly into calls on the
 runtime (`src/runtime_*.c`) rather than resolved through a module. They are
-always in scope in every module: the forty-eight core builtins (core,
-GC-observability, files-and-process, and the stdlib foundation), the eleven
-[green-thread](#green-threads) builtins, and the twenty-five tensor primitives
-(see the [Tensors](#tensors) section).
+always in scope in every module: the forty-nine core builtins (core,
+GC-observability, files-and-process, the stdlib foundation, and the UTF-8
+layer), the eleven [green-thread](#green-threads) builtins, the twenty-five
+tensor primitives, and the [autograd](#autograd) primitive (see the
+[Tensors](#tensors) section).
 
 They are not the standard library — that lives in [`stdlib/`](../stdlib/) and is
 ordinary Emerald. The mutable `dict` and `set` runtime values are the one
@@ -400,10 +401,12 @@ print(reduce((a: int, b: int) => a + b, 0, [1, 2, 3]))   # 6
 `pure` functions (when their function argument is pure too).
 
 The full pure set is `len`, `range`, `str`, `int`, `float`, `sqrt`, `tan`,
-`slice`, `ord`, `chr`, `gc_stats`, `map`, `filter`, `reduce`. Everything else —
-`print`, `eprint`, `rand`, `append`, `exit`, `argv`, and the file and process
-builtins — is impure, and calling one from a `pure` function is
-`E_TYPE_PURE_CALL`.
+`slice`, `ord`, `chr`, `gc_stats`, `pp_format`, the `uc_*` layer, `freeze`,
+`thaw`, `map`, `filter`, `reduce`, the pure tensor primitives, and
+`value_and_grad`. Everything else — `print`, `eprint`, `rand`, `append`,
+`exit`, `argv`, and the file and process builtins — is impure, and calling one
+from a `pure` function is `E_TYPE_PURE_CALL` (with the local-mutation exception
+for `append` described below).
 
 ---
 
@@ -430,7 +433,20 @@ discharged statically.
 `astype`, and `item` (`float`).
 
 All of them except `randn` are **pure** and may be called from a `pure`
-function.
+function. They are also exactly the operations the autograd engine can
+differentiate — see [`autograd.md`](autograd.md) for `value_and_grad` and the
+per-operation backward rules.
+
+## Autograd
+
+`value_and_grad(f, x)` differentiates a pure scalar-loss function `f` at the
+tensor `x` by recording a reverse-mode tape and walking it backwards; it
+returns `{ value, grad }` with `grad` shaped exactly like `x`. The tape is
+scoped inside the call, so the builtin is **pure** and usable from pure code.
+Its typing rules (matching dtypes and static shapes, scalar loss, purity of
+`f`) and its verification are described in [`autograd.md`](autograd.md).
+
+---
 
 ## Green threads
 

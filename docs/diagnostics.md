@@ -155,6 +155,7 @@ the claim that every value is statically typed and every function is total:
 |-------------------------------|------------------------------------------|
 | `E_PROOF_ANY`                 | `any` appears (annotation, signature, or inferred value); banned in proof mode |
 | `E_PROOF_PARTIAL`             | a `partial` function is declared; banned in proof mode |
+| `E_PROOF_SHAPE`               | a dynamically shaped tensor crosses `value_and_grad` in proof mode, where adjoint shapes must be static |
 
 ### Import errors (`E_IMPORT_*`)
 

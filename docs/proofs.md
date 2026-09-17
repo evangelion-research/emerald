@@ -90,9 +90,8 @@ surfaces — unannotated parameters and returns, explicit `any` annotations,
 and any expression whose inferred type is `any`. A clean `--check --proof`
 run is a claim you can defend: every value is statically typed, every
 function terminates structurally, and purity is enforced where declared.
-(The element type of an empty `[]` literal is still `any` underneath, so
-proof mode is a strict first cut rather than a complete soundness
-guarantee.)
+The one known gradual residue is unconstrained generic inference, which can
+still fall back to `any` (see `REMAINING_FEATURES.md` §4 for the full audit).)
 
 ## Proof by exhaustive case analysis
 

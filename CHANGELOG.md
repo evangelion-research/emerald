@@ -50,6 +50,17 @@ of a program's meaning as is practical.
 
 ### Added since 1.0.0
 
+- **Reverse-mode autograd** — the `value_and_grad(f, x)` builtin: a GC-traced
+  tape recorded while the pure scalar-loss function `f` runs, VJP rules for
+  every differentiable tensor primitive (arithmetic with broadcast reduction,
+  `exp`/`log`/`tanh`/`relu`, `matmul` in all four layouts, `reshape`,
+  `transpose`/`permute`, `sum`/`mean`/`max`, `tslice`, `expand`, `astype`),
+  statically checked adjoint shapes (static-only under `--proof`), a
+  documented gradient policy for constants, nondifferentiable operations, and
+  boundary conventions, finite-difference validation of every rule
+  (`tests/e2e/autograd_ops.rald`), and deterministic end-to-end training of a
+  linear model and a two-layer MLP in Emerald (`tests/e2e/autograd_train.rald`).
+  See [`docs/autograd.md`](docs/autograd.md).
 - **Unicode layer** — the `unicode` standard-library module and its seven
   `uc_*` builtins (`uc_len`, `uc_ord`, `uc_chr`, `uc_at`, `uc_slice`,
   `uc_chars`, `uc_valid`): UTF-8 code-point length, indexing, slicing, and

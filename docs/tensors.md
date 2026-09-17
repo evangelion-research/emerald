@@ -47,7 +47,9 @@ non-NULL and points into the owner's buffer. Two consequences:
 |---|---|
 | `f32` | implemented |
 | `f64` | implemented |
-Only `f32` and `f64` are supported.
+
+Only `f32` and `f64` are supported. Constructors produce `f32`; `astype(t,
+"f64")` is how a tensor changes dtype.
 
 ## GC interaction: byte accounting
 
@@ -109,3 +111,12 @@ Tensor[f32, [2, 3]]
 ```
 
 That rendering is the debugging surface for the whole phase.
+
+## Differentiation
+
+Every operation on this page except `randn` and the nondifferentiable
+introspection set (`argmax`, `shape`, `ndim`, `dtype`, and comparisons) has a
+reverse-mode backward rule: `value_and_grad(f, x)` records a tape while a pure
+scalar-loss function runs and returns `{ value, grad }`. The surface, the
+tape's GC integration, and the per-operation rules are in
+[`autograd.md`](autograd.md).

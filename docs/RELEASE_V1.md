@@ -10,9 +10,9 @@ binaries through the system `cc`.
 |---|---|
 | Compiler | Lexer, parser, module loader, checker, C code generator, and CLI |
 | Type system | Structural records, unions/intersections, literals, narrowing, generics, `list`/`seq`, `never`, exhaustiveness, purity, and proof mode |
-| Runtime | Tagged values, closures, tensors, cooperative tasks/channels, and a two-generation precise GC |
+| Runtime | Tagged values, closures, tensors, reverse-mode autograd, cooperative tasks/channels, and a two-generation precise GC |
 | Collections | Dynamic string-keyed `dict()` and `set()` values; indexing, iteration, membership, comprehensions, and set operators |
-| Standard library | 12 Emerald modules covered by `tests/stdlib/` |
+| Standard library | 13 Emerald modules covered by `tests/stdlib/` |
 | Tooling | Stage emission, human/JSON diagnostics, warnings, proof reports, REPL, `--help`, `--version`, installation, and archive tasks |
 | Tests | Golden tests for lexer/parser/check/json/proof/e2e/imports/stdlib/REPL/shape/warnings/reports/CLI |
 
@@ -27,6 +27,8 @@ binaries through the system `cc`.
   assignment, and integer bitwise operators are supported.
 - Dictionaries are string-keyed. Tensor operations support `f32` and `f64` and
   use the dimension and shape checker described in [`shapes.md`](shapes.md).
+  `value_and_grad(f, x)` differentiates a pure scalar-loss function by
+  reverse mode ([`autograd.md`](autograd.md)).
 - Strings are byte-oriented; the `unicode` module provides a UTF-8 code-point
   layer (length, indexing, slicing, and iteration) beside the byte semantics.
 

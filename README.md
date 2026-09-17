@@ -20,6 +20,7 @@ Key capabilities include:
 - Totality and purity checking, with a stricter proof mode
 - First-class functions, closures, pipelines, and tail-call optimization
 - Cooperative tasks, typed channels, and statically checked tensor dimensions
+- Reverse-mode autograd: `value_and_grad` over statically shaped `f32`/`f64` tensors
 - A precise, two-generation mark-and-sweep garbage collector
 - Human-readable and machine-readable diagnostics
 
@@ -201,13 +202,13 @@ The standard library provides `result`, `chars`, `strings`, `builder`, `lists`,
 
 Built-ins provide functionality requiring runtime, allocation, foreign-system,
 or type-checker support. They include core collection and conversion operations,
-file and process I/O, cooperative tasks, channels, tensors, and the `dict()` and
-`set()` constructors.
+file and process I/O, cooperative tasks, channels, tensors, autograd, and the
+`dict()` and `set()` constructors.
 
 Built-ins are not first-class function values and cannot be redefined. Their
 authoritative definition is [`include/builtins.def`](include/builtins.def). See
 [`docs/builtins.md`](docs/builtins.md), [`docs/tensors.md`](docs/tensors.md),
-and [`docs/shapes.md`](docs/shapes.md).
+[`docs/shapes.md`](docs/shapes.md), and [`docs/autograd.md`](docs/autograd.md).
 
 ## Concurrency
 

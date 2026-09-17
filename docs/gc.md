@@ -13,10 +13,13 @@ conservative C-stack scanning, no ref-counting, no leaks-until-exit arena.
   allocate an `Obj` or participate in collection at all.
 - Heap kinds: `O_STR` (strings longer than 7 bytes), `O_LIST`, `O_REC`,
   `O_FUNC` (a first-class function: a C entry point plus its captured env),
-  and `O_CELL` (a mutable box for a captured variable). Every `Obj` sits on
-  one intrusive `gc_next` list for its generation and has `mark`, `gen`, and
-  `remembered` bits. A closure's env is an array of cells; each cell points
-  back at the value it holds, so marking a closure marks its captures.
+  `O_CELL` (a mutable box for a captured variable), `O_TENSOR`, `O_CHAN` and
+  `O_TASK` (green-thread handles), and `O_TAPE` (an autograd recording).
+  Every `Obj` sits on one intrusive `gc_next` list for its generation and has
+  `mark`, `gen`, and `remembered` bits. A closure's env is an array of cells;
+  each cell points back at the value it holds, so marking a closure marks its
+  captures. A tensor view traces only its `base`; a tape traces every tensor
+  listed in its `alive` array.
 - Backing arrays (list items, record fields, string bytes) are plain
   `malloc` memory owned by their `Obj` and freed at sweep. Growing them can
   never trigger a collection — only `rt_obj_new()` can.
@@ -79,8 +82,8 @@ rooted slot before the caller can allocate again.
 ## Observability
 
 `gc_stats()` returns a record of counters — `collections` (total cycles),
-`live` (survivors of the last collection), `young`, `old`, and `threshold` —
-for tuning and tests.
+`live` (survivors of the last collection), `young`, `old`, `threshold`, and
+the byte view `bytes_young` / `bytes_old` — for tuning and tests.
 
 ## Measured
 

@@ -25,6 +25,7 @@ repository. Start with the document matching the job you have.
 | [`effects.md`](effects.md) | The implemented purity/effect model and its limits. |
 | [`proofs.md`](proofs.md) | What proof mode establishes and where the checker is gradual. |
 | [`tensors.md`](tensors.md) | Tensor runtime representation, operations, views, dtypes, and GC interaction. |
+| [`autograd.md`](autograd.md) | `value_and_grad`, the reverse-mode tape, gradient policy, and VJP rules. |
 | [`shapes.md`](shapes.md) | Dimension expressions, `Fin`, static shape obligations, and dynamic boundaries. |
 
 ## Release surface
@@ -32,6 +33,7 @@ repository. Start with the document matching the job you have.
 | Document | Contents |
 |---|---|
 | [`RELEASE_V1.md`](RELEASE_V1.md) | The implemented v1 compiler, runtime, standard library, and tooling surface. |
+| [`REMAINING_FEATURES.md`](REMAINING_FEATURES.md) | What is left before the proof-mode/autograd goal is met, reviewed against the implementation. |
 | [`../stdlib/SPEC.md`](../stdlib/SPEC.md) | Maintained standard-library inventory and conventions. |
 
 ## Setup and verification
