@@ -220,8 +220,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Go
-emerald-lsp
-emerald-lsp-*
+/emerald-lsp
+/emerald-lsp-*
 *.exe
 vendor/
 dist/

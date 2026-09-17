@@ -93,7 +93,7 @@ Milestone 3 is the first genuinely useful build: it needs no registry at all —
 `path` dependencies alone prove the whole `-I` pipeline end to end.
 
 The implementation lives under [`cmd/pme`](cmd/pme). `task build` (or
-`go build -mod=vendor -o pme ./cmd/pme`) produces one executable; no interpreter,
+`go build -o pme ./cmd/pme`) produces one executable; no interpreter,
 virtual environment, or package manager is required at runtime.
 
 ## Compiler contract

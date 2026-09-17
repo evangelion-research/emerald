@@ -4,20 +4,6 @@ All notable changes to Emerald are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- **Unicode layer** — the `unicode` standard-library module and its seven
-  `uc_*` builtins (`uc_len`, `uc_ord`, `uc_chr`, `uc_at`, `uc_slice`,
-  `uc_chars`, `uc_valid`): UTF-8 code-point length, indexing, slicing, and
-  iteration over the existing byte-oriented strings, beside rather than
-  replacing the byte semantics.
-- **Unit testing** — the `test` standard-library module: a suite handle with
-  recording assertions (`eq`, `ne`, `ok`, `fail`, `close_f`), case labeling,
-  empty-case detection, and a reporting `finish` that returns whether the
-  suite is clean, so a failing check is reported rather than fatal.
-
 ## [1.0.0] - 2026-08-19
 
 First release: a compiler written in C11 that emits native binaries through the
@@ -61,3 +47,33 @@ of a program's meaning as is practical.
   (`$EMERALD_STDLIB`, next to the executable, then the compile-time default).
 - **Release plumbing** — `task install` installs the compiler and standard
   library under a `PREFIX`; `task dist` builds a release tarball.
+
+### Added since 1.0.0
+
+- **Unicode layer** — the `unicode` standard-library module and its seven
+  `uc_*` builtins (`uc_len`, `uc_ord`, `uc_chr`, `uc_at`, `uc_slice`,
+  `uc_chars`, `uc_valid`): UTF-8 code-point length, indexing, slicing, and
+  iteration over the existing byte-oriented strings, beside rather than
+  replacing the byte semantics.
+- **Unit testing** — the `test` standard-library module: a suite handle with
+  recording assertions (`eq`, `ne`, `ok`, `fail`, `close_f`), case labeling,
+  empty-case detection, and a reporting `finish` that returns whether the
+  suite is clean, so a failing check is reported rather than fatal.
+- **pme** — the package manager and build system for Emerald: minimal-version
+  resolution, a verified content-addressed store, and incremental builds that
+  drive `emeraldc` through its frozen `-I` contract.
+- **emlsp** — the Emerald language server: diagnostics via `emeraldc --check
+  --json`, semantic tokens, outline symbols, hover, go-to-definition,
+  completion, and workspace symbols over stdio or TCP.
+- **tree-sitter-emerald** — a tree-sitter grammar with highlight queries and
+  corpus tests.
+- **emerald-ide** — a native desktop IDE (Fyne) with proof-session checking
+  panels and a type-checking REPL.
+
+### Fixed
+
+- **emlsp** — restored the missing `cmd/emerald-lsp` entry point: the server
+  binary builds again and exposes `--version`, `--check FILE`, stdio serving,
+  and `--tcp --port N`, matching the README's documented CLI.
+- **pme** — corrected the build instructions (`go build`, not the stale
+  `-mod=vendor` form; the vendoring state never matched `go.mod`).

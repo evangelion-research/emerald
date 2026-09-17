@@ -481,7 +481,9 @@ That needs no language change. A real assertion library can ship later as a pack
 The CLI is a Go module. Its standard-library implementation covers command
 dispatch, HTTP, archive extraction, checksums, process execution, and tests;
 the TOML decoder is linked into the released executable. No interpreter or
-runtime package installation is required.
+runtime package installation is required. (The one vendored dependency,
+`BurntSushi/toml`, is pinned in `go.mod` and fetched by the normal Go
+module proxy — `go build` just works.)
 
 ### 10.1 Layout
 
