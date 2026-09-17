@@ -7,15 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* --- tiny allocation helpers -------------------------------------------- */
-
-static char *xstrdup(const char *s) {
-    size_t n = strlen(s);
-    char *d = xmalloc(n + 1);
-    memcpy(d, s, n + 1);
-    return d;
-}
-
 /* --- constructors ------------------------------------------------------- */
 
 DimExpr *dim_var(const char *name) {

@@ -1,78 +1,28 @@
-# Prerequisites
-*.d
-
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
-
-# Linker output
-*.ilk
-*.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
-
-# debug information files
-*.dwo
-
-.task/
+# Build outputs
 bin/
-
-# Binaries left behind by `task examples` (and e2e tests, on failure):
-# every .rald compiles to an extensionless executable beside it.
+dist/
+*.dSYM/
 examples/*
 !examples/*.rald
 !examples/functional/
 !examples/functional/*.rald
-examples/functional/main
-!examples/ray_tracer/
-!examples/ray_tracer/typed/
-!examples/ray_tracer/typed/*.rald
-!examples/ray_tracer/typed/README.md
-examples/ray_tracer/typed/main
 examples/ray_tracer/out.ppm
 examples/ray_tracer/one_weekend
 tests/e2e/*
 !tests/e2e/*.rald
 !tests/e2e/*.expected
 
+# Generated compiler artifacts left by tests/examples
+examples/*.gen.c
+examples/ray_tracer/typed/main
+tests/e2e/*.gen.c
+tests/imports/*/main.bin*
+tests/stdlib/*.bin
+tests/stdlib/*.gen.c
+examples/.DS_Store
+tests/e2e/*.gen.c
+
+# Go
+.task/
 assets/emerald
+node_modules/

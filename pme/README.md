@@ -16,17 +16,16 @@ pme is two tools with one seam:
 Prior art for both is collected in [`REFERENCES.md`](REFERENCES.md).
 
 **Status:** initial end-to-end implementation. Package resolution, verified storage,
-incremental build driving, run/test/check modes, dependency inspection and updates,
-reproducible publishing, authentication, and yanking are implemented. Remote-cache
-and upstream-dependent per-module compilation remain future work. Its one hard
+incremental build driving, and run/test/check modes are implemented. Registry
+writes (`publish`, `login`, `yank`), `--locked` installs, and remote-cache remain
+future work. Its one hard
 prerequisite — the Emerald module system — shipped at `emerald@1f683be` and
 is still exactly as it shipped: this document tracks the compiler at
 `emerald@1facafe` (HEAD, 2026-08-17), and everything upstream landed since —
 the functional core (lambdas, thunks, closures, tail-call optimization),
 proof mode, and the ray-tracer example — left the resolution rules and the
-`-I` contract pme consumes untouched. The implementation is planned in
-**Go**, distributed as one native `pme` binary. Users do not need Python,
-`pipx`, `uv`, or `uvx` installed.
+`-I` contract pme consumes untouched. It is implemented in
+**Go**, distributed as one native `pme` binary.
 
 ## Install
 
@@ -39,21 +38,18 @@ go install github.com/evangelion-research/pme/cmd/pme@latest
 Release archives contain the same standalone `pme` executable. The only runtime
 dependency is `emeraldc` when compiling an Emerald project.
 
-## Planned CLI
+## CLI
 
 | command | behavior |
 |---|---|
 | `pme init [name]` | scaffold `emerald.toml`, `src/main.rald`, `.gitignore` |
-| `pme add <pkg>[@ver]` | resolve latest (or given), edit manifest preserving comments, update lock |
-| `pme remove <pkg>` | inverse of add |
-| `pme install [--locked]` | resolve + fetch + verify; writes `emerald.lock` |
+| `pme install` | resolve + fetch + verify; writes `emerald.lock` |
 | `pme build` | compute `-I` roots from the lock, exec `emeraldc` |
-| `pme run [-- args]` | build, then exec the binary |
-| `pme test` | compile and run `tests/*.rald` with dev-deps |
-| `pme update [pkg]` | raise minimums to latest compatible; re-resolve |
+| `pme check` / `pme emit-c` | typecheck / emit generated C for the linked program |
+| `pme run` | build, then exec the binary |
+| `pme test` | compile and run `tests/*.rald` |
 | `pme tree` / `pme why <pkg>` | dependency tree / every root→package path |
-| `pme publish` / `pme login` / `pme yank` | registry writes |
-| `pme verify` / `pme clean` | re-hash the store / remove `target/` (and prune) |
+| `pme verify` / `pme clean` | check the store / remove `target/` |
 
 Every command takes `--json` and `-q`. Exit codes: `0` ok, `1` user/build
 error, `2` bad usage, `3` network/registry error.
@@ -90,7 +86,7 @@ expanded from the pme spec's §10–§11. Milestones:
 | 2 | MVS resolver | ✅ done |
 | 3 | store + build (path deps only, no network) | ✅ done |
 | 4 | registry reads (`add` / `install` / `tree` / `why`) | ✅ done |
-| 5 | registry writes (reproducible tarball, `publish`, Stage-1 index) | ✅ client done |
+| 5 | registry writes (reproducible tarball, `publish`, Stage-1 index) | not started |
 | 6 | polish (`test`, `update`, `--json` everywhere, docs) | ✅ initial pass |
 
 Milestone 3 is the first genuinely useful build: it needs no registry at all —

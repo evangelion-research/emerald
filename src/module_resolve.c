@@ -1,13 +1,6 @@
 /* Modules: name sets, path handling, module records, and import resolution. */
 #include "module_internal.h"
 
-char *xstrdup(const char *s) {
-    size_t n = strlen(s) + 1;
-    char *p = xmalloc(n);
-    memcpy(p, s, n);
-    return p;
-}
-
 /* sprintf into a fresh buffer */
 char *xasprintf(const char *fmt, ...) {
     va_list ap, ap2;

@@ -102,7 +102,6 @@ typedef struct {
 
 typedef struct { Names *bound; const Names *globals; } LocalCtx;
 
-char *xstrdup(const char *s);
 char *xasprintf(const char *fmt, ...);
 bool names_has(const Names *ns, const char *name);
 void mod_names_add(Names *ns, const char *name);

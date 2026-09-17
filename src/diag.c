@@ -11,13 +11,6 @@ void diag_init(DiagList *dl, const char *src) {
     dl->src = src;
 }
 
-static char *xstrdup(const char *s) {
-    size_t n = strlen(s) + 1;
-    char *p = xmalloc(n);
-    memcpy(p, s, n);
-    return p;
-}
-
 void diag_add_source(DiagList *dl, const char *file, const char *src) {
     if (!file || !src) return;
     for (size_t i = 0; i < dl->source_count; i++)

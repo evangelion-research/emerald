@@ -1,6 +1,7 @@
 # pme — the Package Manager for Emerald
 
-**Status:** design. Nothing in pme itself is implemented yet — but its one hard
+**Status:** implemented (Go). Registry writes (`publish`, `login`, `yank`) and
+remote-cache remain future work — but its one hard
 prerequisite, the Emerald module system, has shipped (see §0).
 **Target language:** Go (distributed as a single native binary; pme is I/O-bound).
 **Distribution model:** central registry.
@@ -544,46 +545,46 @@ through exactly the `-I` pipeline pme will drive.
 
 ### 11.1 Detailed implementation route
 
-The build-system half is `BUILD.md` §11 (steps B1–B6). The package-manager half:
+The build-system half is `BUILD.md` §11 (steps B1–B6). The package-manager half,
+shipped in `cmd/pme/main.go`:
 
-**M1 — manifest + lockfile + semver** *(current front of work)*
-1. `semver.py`: parse/compare, prerelease rules, constraint set (`==`, `>=`, `^`, `~`, bare minimum). Property-test against the SemVer spec cases.
+**M1 — manifest + lockfile + semver** *(done)*
+1. Semver: parse/compare, prerelease rules, constraint set (`==`, `>=`, `^`, `~`, bare minimum).
 2. Manifest parsing and validation: name regex, semver, `[lib]`/`[[bin]]` exclusivity, and path-dependency detection.
-3. `lockfile.py`: deterministic TOML emit/parse; round-trip stability.
-4. `pme init` scaffolding (click subcommand).
+3. Lockfile: deterministic TOML emit/parse; round-trip stability.
+4. `pme init` scaffolding.
 
-*Gate:* round-trip parse/write stable; `pme init` scaffolds a valid project; Hypothesis finds no semver parse/compare bugs.
+*Gate:* round-trip parse/write stable; `pme init` scaffolds a valid project.
 
-**M2 — MVS resolver**
+**M2 — MVS resolver** *(done)*
 1. Implement §4's fixed-point over an in-memory index (`name → sorted versions + deps`).
 2. Encode the failure cases (`E_RESOLVE_NOT_FOUND`, `NO_VERSION`, `MAJOR_CONFLICT`, `COMPILER`) in the §8 shape.
-3. Property-test against a brute-force checker; golden tests for `why` paths.
+3. Golden tests for `why` paths.
 
 *Gate:* resolves against the fake index; conflict messages print both dependency paths.
 
-**M3 — store + build (path deps, offline)** — see `BUILD.md` B1–B5
-1. `store.py`: content-addressed layout, atomic extract (tmp+rename), sha256 verify, flock.
-2. `plan.py` + `build.py`: plan + `emeraldc` exec + diagnostics passthrough.
-3. `fingerprint.py`: no-op detection.
+**M3 — store + build (path deps, offline)** *(done; see `BUILD.md` B1–B5)*
+1. Store: content-addressed layout, atomic extract (tmp+rename), sha256 verify.
+2. Build plan + `emeraldc` exec + diagnostics passthrough.
 
 *Gate:* a two-package path-dep project builds and runs; a second build is a no-op.
 
-**M4 — registry reads**
-1. `registry.py` §7.4: `GET index`, `GET tarball`, verify, extract.
-2. `pme add`/`remove` (manifest edit + re-resolve), `install [--locked]`, `tree`, `why`.
+**M4 — registry reads** *(done)*
+1. Registry reads §7.4: `GET index`, `GET tarball`, verify, extract.
+2. `pme install`, `tree`, `why`.
 
-*Gate:* `pme add strings` from a local stub index resolves, downloads, extracts, locks; `install --locked` fails on drift.
+*Gate:* `pme install` from a stub index resolves, downloads, extracts, locks.
 
-**M5 — registry writes**
+**M5 — registry writes** *(not started)*
 1. Reproducible tarball builder (sorted entries, fixed mtime/uid/gid/mode) + `.pmeignore`.
 2. `pme publish` validation (name/semver/license/no-path-deps/`[lib]`, no `a/b.rald`+`a.b.rald` ambiguity) + dry-run compile.
 3. `pme login`/`yank`; Stage-1 NDJSON index (git repo + HTTPS).
 
 *Gate:* publish produces byte-identical tarballs across runs; re-publish of an existing version is rejected; a yanked version stays downloadable but unselectable.
 
-**M6 — polish**
-1. `pme test` (compile+run `tests/*.rald`, §9), `pme update`, `pme verify`, `--json` everywhere.
-2. Docs + `target/build-plan.json` hand-off to `emerald-lsp` (§12 Q3).
+**M6 — polish** *(initial pass)*
+1. `pme test` (compile+run `tests/*.rald`, §9), `pme verify`, `--json`/`-q` everywhere.
+2. Docs.
 
 *Gate:* full CLI surface green on path and registry deps; every command accepts `--json`/`-q`; exit codes match §6.
 

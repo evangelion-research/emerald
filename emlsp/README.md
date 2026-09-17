@@ -1,6 +1,7 @@
 # Emerald LSP
 
-A language server for the Emerald programming language. The working document is
+A language server for the Emerald programming language, implemented as a
+single static Go binary. The working document is
 [`DESIGN.md`](DESIGN.md), which lays out what it takes to get from `emeraldc`
 (7,000+ lines of C11: `lexer → parser → module link → check → codegen`, plus a
 mark-and-sweep runtime) to a working language server.
@@ -12,8 +13,7 @@ side-table, a symbol table — do not exist yet and all live in the compiler.
 
 ## Status
 
-**v0.1 — a working server, running ahead of the compiler surgery — now a single Go binary.**
-`cmd/emerald-lsp` (Go, stdlib JSON-RPC) replaces the original `emlsp/` Python + `pygls` package (retained for reference). It answers the whole
+**v0.1 — a working server, running ahead of the compiler surgery.**
 protocol lifecycle today, in two layers with very different reach:
 
 | Feature | How it works | Limit |
@@ -62,8 +62,6 @@ task build
 ./emerald-lsp --help
 task cross                  # or: GOOS=linux GOARCH=amd64 go build -o emerald-lsp-linux ./cmd/emerald-lsp
 ```
-
-> The previous Python distribution (`uv tool install emerald-lsp` / `pipx`) is retained for reference in `emlsp/` but is no longer the release artifact. `emlsp/` will be removed once the Go port reaches parity (it already does).
 
 The server needs `emeraldc` on `PATH` for compiler diagnostics — set
 `emerald.compilerPath` or `$EMERALDC` if it lives elsewhere. Without it,
@@ -136,9 +134,6 @@ task clean
 # equivalents without Task (if you prefer plain go):
 go test ./... && go vet ./...
 go build -o emerald-lsp ./cmd/emerald-lsp && ./emerald-lsp --version
-
-# legacy Python suite still runs until emlsp/ is retired:
-task pytest                 # or: uv run pytest -q
 ```
 
 The suite covers the lexer, the outline, position encoding, the diagnostic
@@ -163,12 +158,9 @@ internal/server               JSON-RPC stdio/TCP, debounce, diagnostics fan-out
 internal/language             builtins / keywords / type atoms
 ```
 
-Python layout (retained, deprecated) is under `emlsp/` — same module names, kept for diffing.
-
 ## pme — the package manager
 
-`pme` — the package manager for Emerald, in design as a Python driver over the
-same `-I` seam — is designed alongside this server. The two share one rule:
+`pme` — the package manager for Emerald — is designed alongside this server. The two share one rule:
 
 > **pme resolves, the LSP consumes.** The server reads `emerald.lock` and
 > applies pme's frozen `-I` rule (each locked package's `src/` under

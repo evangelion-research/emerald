@@ -7,18 +7,9 @@ import (
 	"github.com/evangelion-research/emlsp/internal/positions"
 )
 
-// LSP SymbolKind values
+// LSP SymbolKind values actually used by the outline
 const (
-	SymbolKindFile          = 1
 	SymbolKindModule        = 2
-	SymbolKindNamespace     = 3
-	SymbolKindPackage       = 4
-	SymbolKindClass         = 5
-	SymbolKindMethod        = 6
-	SymbolKindProperty      = 7
-	SymbolKindField         = 8
-	SymbolKindConstructor   = 9
-	SymbolKindEnum          = 10
 	SymbolKindInterface     = 11
 	SymbolKindFunction      = 12
 	SymbolKindVariable      = 13
@@ -28,13 +19,9 @@ const (
 	SymbolKindBoolean       = 17
 	SymbolKindArray         = 18
 	SymbolKindObject        = 19
-	SymbolKindKey           = 20
-	SymbolKindNull          = 21
 	SymbolKindEnumMember    = 22
 	SymbolKindStruct        = 23
-	SymbolKindEvent         = 24
-	SymbolKindOperator      = 25
-	SymbolKindTypeParameter = 26
+	SymbolKindTypeParameter = 25
 )
 
 type Definition struct {

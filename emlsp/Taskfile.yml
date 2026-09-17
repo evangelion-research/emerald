@@ -84,11 +84,6 @@ tasks:
       - tar -czf dist/{{.BINARY}}-darwin-amd64.tar.gz {{.BINARY}}-darwin-amd64
       - zip -j dist/{{.BINARY}}-windows-amd64.zip {{.BINARY}}-windows-amd64.exe
 
-  pytest:
-    desc: Run legacy Python suite (until emlsp/ retired)
-    cmds:
-      - uv run pytest -q
-
   check:
     desc: 'One-shot checker (same query the LSP makes per keystroke) — usage: task check -- path/to/file.rald'
     cmds:

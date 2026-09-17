@@ -14,6 +14,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static inline void xoom(void) {
     fputs("emeraldc: out of memory\n", stderr);
@@ -36,6 +37,13 @@ static inline void *xrealloc(void *p, size_t n) {
     void *q = realloc(p, n ? n : 1);
     if (!q) xoom();
     return q;
+}
+
+static inline char *xstrdup(const char *s) {
+    size_t n = strlen(s) + 1;
+    char *p = xmalloc(n);
+    memcpy(p, s, n);
+    return p;
 }
 
 #endif
