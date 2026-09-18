@@ -1,0 +1,90 @@
+# Emerald IDE build pipeline (go-task, taskfile.dev).
+#
+#   task            build bin/emerald-ide (default)
+#   task run        build and launch the GUI editor
+#   task test       go vet + go test ./...
+#   task package    produce a native app bundle (macOS .app, Linux .tar.xz, ...)
+#   task clean      remove build outputs
+#
+# Fyne links against the platform graphics stack, so the build needs cgo and a
+# host toolchain (Xcode Command Line Tools on macOS). Cross-compiling is not
+# supported here; use `task package` on each target host.
+
+version: '3'
+
+vars:
+  BINARY: emerald-ide
+  BINDIR: bin
+  LDFLAGS: -s -w
+  PKG: ./...
+  GOPATH:
+    sh: go env GOPATH
+
+tasks:
+  default:
+    deps: [build]
+
+  build:
+    desc: Build the GUI editor ({{.BINDIR}}/{{.BINARY}})
+    sources:
+      - "*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BINDIR}}/{{.BINARY}}"
+    cmds:
+      - mkdir -p {{.BINDIR}}
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.BINDIR}}/{{.BINARY}} .
+
+  deps:
+    desc: Download and verify module dependencies
+    cmds:
+      - go mod download
+      - go mod verify
+
+  run:
+    desc: 'Build and launch the editor — usage: task run -- path/to/file.rald'
+    deps: [build]
+    cmds:
+      - ./{{.BINDIR}}/{{.BINARY}} {{.CLI_ARGS}}
+
+  test:
+    desc: Run go vet + the Go test suite
+    deps: [vet]
+    cmds:
+      - go test {{.PKG}}
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet {{.PKG}}
+
+  fmt:
+    desc: Format Go sources
+    cmds:
+      - go fmt {{.PKG}}
+
+  install:
+    desc: Build and install {{.BINARY}} to $GOPATH/bin
+    deps: [build]
+    cmds:
+      - install -m 0755 {{.BINDIR}}/{{.BINARY}} {{.GOPATH}}/bin/{{.BINARY}}
+      - echo "installed to {{.GOPATH}}/bin/{{.BINARY}}"
+
+  package:
+    desc: Bundle the editor for the host OS (macOS .app, Linux .tar.xz); needs network on first run
+    cmds:
+      - go run fyne.io/tools/cmd/fyne@latest package --name "Emerald IDE" --app-id dev.emerald.ide --release
+
+  clean:
+    desc: Remove build outputs
+    cmds:
+      - rm -rf {{.BINDIR}}
+      - rm -rf "Emerald IDE.app" Emerald_IDE*.tar.xz
+
+  ci:
+    desc: Full pipeline (vet + test + build)
+    cmds:
+      - task: vet
+      - task: test
+      - task: build
