@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compiler:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - name: Install task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+      - name: Build
+        run: task build
+      - name: Runtime strict-flags check
+        run: task runtime-check
+      - name: Test suite
+        run: task test
+      - name: Examples
+        run: task examples
+
+  go:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        project: [pme, emlsp, emerald-ide]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - name: Test ${{ matrix.project }}
+        run: go test ./...
+        working-directory: ${{ matrix.project }}

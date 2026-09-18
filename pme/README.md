@@ -16,15 +16,17 @@ pme is two tools with one seam:
 Prior art for both is collected in [`REFERENCES.md`](REFERENCES.md).
 
 **Status:** initial end-to-end implementation. Package resolution, verified storage,
-incremental build driving, and run/test/check modes are implemented. Registry
-writes (`publish`, `login`, `yank`), `--locked` installs, and remote-cache remain
-future work. Its one hard
+incremental build driving, and run/test/check modes are implemented, with I/O and
+exit codes forwarded correctly. Registry reads (`add` / `why`), `update`, and
+`--locked` installs are implemented; registry writes (`publish`, `login`,
+`yank`) and remote-cache remain future work. No registry index is live yet, so
+`add`/`why`/`install` work against path dependencies and any registry endpoint
+set via `PME_REGISTRY`. Its one hard
 prerequisite — the Emerald module system — shipped at `emerald@1f683be` and
 is still exactly as it shipped: this document tracks the compiler at
-`emerald@1facafe` (HEAD, 2026-08-17), and everything upstream landed since —
-the functional core (lambdas, thunks, closures, tail-call optimization),
-proof mode, and the ray-tracer example — left the resolution rules and the
-`-I` contract pme consumes untouched. It is implemented in
+`emerald@1facafe` (2026-08-17) plus the stability policy in
+[`docs/stability.md`](../docs/stability.md); the `-I` contract pme consumes is
+now a frozen contract defined there. It is implemented in
 **Go**, distributed as one native `pme` binary.
 
 ## Install
@@ -43,7 +45,10 @@ dependency is `emeraldc` when compiling an Emerald project.
 | command | behavior |
 |---|---|
 | `pme init [name]` | scaffold `emerald.toml`, `src/main.rald`, `.gitignore` |
+| `pme add <pkg> [constraint]` | add a dependency to `emerald.toml`, resolve, lock, install |
 | `pme install` | resolve + fetch + verify; writes `emerald.lock` |
+| `pme install --locked` | install strictly from the existing lockfile (fails if stale) |
+| `pme update` | re-resolve and refresh the lockfile |
 | `pme build` | compute `-I` roots from the lock, exec `emeraldc` |
 | `pme check` / `pme emit-c` | typecheck / emit generated C for the linked program |
 | `pme run` | build, then exec the binary |
@@ -81,11 +86,11 @@ expanded from the pme spec's §10–§11. Milestones:
 
 | # | milestone | status |
 |---|---|---|
-| 0 | imports in emerald (`-I` contract frozen) | ✅ done — re-verified at `emerald@1facafe` |
+| 0 | imports in emerald (`-I` contract frozen, see `docs/stability.md`) | ✅ done |
 | 1 | manifest + lockfile + semver | ✅ done |
 | 2 | MVS resolver | ✅ done |
 | 3 | store + build (path deps only, no network) | ✅ done |
-| 4 | registry reads (`add` / `install` / `tree` / `why`) | ✅ done |
+| 4 | registry reads (`add` / `install` / `tree` / `why`) | ✅ code done — no live index yet |
 | 5 | registry writes (reproducible tarball, `publish`, Stage-1 index) | not started |
 | 6 | polish (`test`, `update`, `--json` everywhere, docs) | ✅ initial pass |
 

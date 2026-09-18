@@ -104,6 +104,7 @@ etc.
 | `E_TYPE_INDEX`                | bad index type or not indexable          |
 | `E_TYPE_IMMUTABLE`            | assigning into a string                  |
 | `E_TYPE_OPERAND`              | unsupported operator operands (incl. unary) |
+| `E_TYPE_DICT_KEY`             | dict literal / comprehension key must be str |
 | `E_TYPE_ORDER`                | `<`/`>` on unordered types               |
 | `E_TYPE_NO_LEN`               | `len()` on a type without a length       |
 | `E_TYPE_ITER`                 | `for` over a non-iterable                |

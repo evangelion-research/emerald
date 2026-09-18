@@ -426,6 +426,24 @@ Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
                          type_str(argt[0]));
             return &t_bool;
         }
+        if (strcmp(name, "getenv") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "getenv() name must be str, got %s", type_str(argt[0]));
+            return ty_join(&t_str, &t_none);
+        }
+        if (strcmp(name, "mkdir_all") == 0 || strcmp(name, "remove") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "%s() path must be str, got %s", name, type_str(argt[0]));
+            return &t_bool;
+        }
+        if (strcmp(name, "listdir") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "listdir() path must be str, got %s", type_str(argt[0]));
+            return ty_list(&t_str);
+        }
 
         /* --- green threads and channels (docs/concurrency.md) ----------
          * The handle types carry the element type so a channel's traffic is

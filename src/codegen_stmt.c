@@ -175,6 +175,17 @@ static void gen_stmt(Cg *cg, const Stmt *s) {
         emit(cg, "rt_cur_line = %d;", s->line);
     }
 
+    /* and keep the C compiler's idea of the source position in sync, so
+     * lldb/gdb/perf report Emerald lines instead of generated-C lines */
+    if (s->file && (s->file != cg->emit_file || s->line != cg->emit_line)) {
+        cg->emit_file = s->file;
+        cg->emit_line = s->line;
+        SB f = {0};
+        sb_c_string(&f, s->file);
+        emit(cg, "#line %d %s", s->line, f.buf);
+        free(f.buf);
+    }
+
     switch (s->kind) {
     case S_EXPR:
         gen_expr(cg, s->as.expr);

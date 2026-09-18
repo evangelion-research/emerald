@@ -9,9 +9,10 @@
  *   emeraldc --emit-c f.rald        print the generated C (codegen stage)
  *   emeraldc --keep-c ...           keep the intermediate .gen.c next to the binary
  *
- * The generated C is compiled together with the runtime by the system C
- * compiler ($CC, default "cc"). The runtime location defaults to the macro
- * EMERALD_SRC_DIR (set by the build) and can be overridden with $EMERALD_SRC.
+ * The generated C is linked against the precompiled runtime (libemerald.a)
+ * by the system C compiler ($CC, default "cc"). The runtime is located
+ * relative to the emeraldc executable (build tree, prefix layouts), then the
+ * compile-time default EMERALD_LIB_DIR; $EMERALD_LIB overrides everything.
  *
  * Everything from --check onwards operates on the *linked* program: the entry
  * file plus every module it imports, resolved by the module loader. The two earlier
@@ -31,15 +32,18 @@
 #include "repl.h"
 #include "shape_report.h"
 
+#include <errno.h>
 #include <libgen.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
-#ifndef EMERALD_SRC_DIR
-#define EMERALD_SRC_DIR "src"
+#ifndef EMERALD_LIB_DIR
+#define EMERALD_LIB_DIR "lib/emerald"
 #endif
 
 #ifndef EMERALD_VERSION
@@ -90,6 +94,15 @@ static char *default_output(const char *path) {
     return out;
 }
 
+/* "a" + "b" in a fresh malloc'd buffer. */
+static char *path_join(const char *a, const char *b) {
+    size_t n = strlen(a) + strlen(b) + 1;
+    char *p = malloc(n);
+    if (!p) exit(1);
+    snprintf(p, n, "%s%s", a, b);
+    return p;
+}
+
 /* A stdlib root guessed from the executable's location: <exe_dir>/stdlib, then
  * <exe_dir>/../stdlib (the `prefix/bin` + `prefix/stdlib` layout). Returns a
  * malloc'd path or NULL. */
@@ -108,14 +121,94 @@ static char *find_exe_stdlib(const char *argv0) {
         "/../share/emerald/stdlib",
     };
     for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
-        char *cand = malloc(strlen(dir) + strlen(suffixes[i]) + 1);
+        char *cand = path_join(dir, suffixes[i]);
         if (!cand) break;
-        sprintf(cand, "%s%s", dir, suffixes[i]);
         if (access(cand, F_OK) == 0) { free(copy); return cand; }
         free(cand);
     }
     free(copy);
     return NULL;
+}
+
+/* Locate the precompiled runtime: a directory holding libemerald.a and
+ * include/runtime.h. $EMERALD_LIB wins outright; otherwise the same ladder the
+ * stdlib uses, relative to the executable: a sibling (build tree: bin/),
+ * then the prefix layouts, then the compile-time default. */
+static bool find_runtime(const char *argv0, char **libout, char **incout) {
+    const char *env = getenv("EMERALD_LIB");
+    if (env && *env) {
+        char *l = path_join(env, "/libemerald.a");
+        char *h = path_join(env, "/include/runtime.h");
+        bool ok = access(l, R_OK) == 0 && access(h, R_OK) == 0;
+        free(l);
+        free(h);
+        if (ok) {
+            *libout = strdup(env);
+            *incout = path_join(env, "/include");
+            return true;
+        }
+    }
+    char real[PATH_MAX];
+    char *exedir = NULL;
+    char *copy = NULL;
+    if (argv0 && *argv0 && realpath(argv0, real)) {
+        copy = strdup(real);
+        if (copy) exedir = dirname(copy); /* keeps `copy` alive */
+    }
+    static const char *suffixes[] = {"", "/../lib/emerald", "/../share/emerald"};
+    for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]) + 1; i++) {
+        char *dir = (i < sizeof(suffixes) / sizeof(suffixes[0]) && exedir)
+                        ? path_join(exedir, suffixes[i])
+                        : strdup(EMERALD_LIB_DIR);
+        if (!dir) break;
+        char *l = path_join(dir, "/libemerald.a");
+        bool has_lib = access(l, R_OK) == 0;
+        free(l);
+        if (has_lib) {
+            char *h = path_join(dir, "/include/runtime.h");
+            bool has_hdr = access(h, R_OK) == 0;
+            free(h);
+            if (has_hdr) {
+                *libout = dir;
+                *incout = path_join(dir, "/include");
+                free(copy);
+                return true;
+            }
+            /* build tree: the library sits in bin/, the headers in ../include */
+            if (exedir) {
+                char *alt = path_join(exedir, "/../include");
+                h = path_join(alt, "/runtime.h");
+                has_hdr = access(h, R_OK) == 0;
+                free(h);
+                if (has_hdr) {
+                    *libout = dir;
+                    *incout = alt;
+                    free(copy);
+                    return true;
+                }
+                free(alt);
+            }
+        }
+        free(dir);
+    }
+    free(copy);
+    return false;
+}
+
+/* Run argv in a child process and return its exit status. No shell and no
+ * string interpolation anywhere: a path containing quotes or semicolons is
+ * just a path (the old system()-based invocation executed it). */
+static int run_cc(char **argv) {
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        execvp(argv[0], argv);
+        fprintf(stderr, "emeraldc: cannot exec '%s'\n", argv[0]);
+        _exit(127);
+    }
+    int st;
+    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+    return WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
 }
 
 static void print_help(void) {
@@ -333,22 +426,44 @@ int main(int argc, char **argv) {
     codegen_program(cf, prog, file);
     fclose(cf);
 
-    const char *srcdir = getenv("EMERALD_SRC");
-    if (!srcdir || !*srcdir) srcdir = EMERALD_SRC_DIR;
+    char *libdir, *incdir;
+    if (!find_runtime(argv[0], &libdir, &incdir)) {
+        fprintf(stderr, "emeraldc: cannot locate the Emerald runtime "
+                        "(libemerald.a + include/runtime.h); set $EMERALD_LIB\n");
+        if (!keep_c) remove(cfile);
+        return 1;
+    }
+
     const char *cc = getenv("CC");
     if (!cc || !*cc) cc = "cc";
 
-    size_t cmdlen = strlen(cc) + strlen(cfile) + strlen(out) + 3 * strlen(srcdir) + 256;
-    char *cmd = malloc(cmdlen);
-    char *srcroot = strdup(srcdir);
-    char *lastslash = strrchr(srcroot, '/');
-    if (lastslash && !strcmp(lastslash, "/src")) *lastslash = '\0';
-    snprintf(cmd, cmdlen,
-             "%s -std=c11 -O2 -pthread -I '%s' -I '%s/include' -o '%s' '%s' '%s'/runtime_*.c",
-             cc, srcdir, srcroot, out, cfile, srcdir);
-    int rc = system(cmd);
+    /* $CC may be several words ("ccache cc"); split on whitespace. */
+    char *ccbuf = strdup(cc);
+    char *ccargv[8];
+    size_t ncc = 0;
+    for (char *t = strtok(ccbuf, " \t"); t && ncc < 7; t = strtok(NULL, " \t"))
+        ccargv[ncc++] = t;
+
+    char *iflag = path_join("-I", incdir);
+    char *lib = path_join(libdir, "/libemerald.a");
+    char *cc_argv[16];
+    size_t na = 0;
+    for (size_t i = 0; i < ncc; i++) cc_argv[na++] = ccargv[i];
+    cc_argv[na++] = "-std=c11";
+    cc_argv[na++] = "-O2";
+    cc_argv[na++] = "-pthread";
+    cc_argv[na++] = "-lm";
+    cc_argv[na++] = iflag;
+    cc_argv[na++] = "-o";
+    cc_argv[na++] = out;
+    cc_argv[na++] = cfile;
+    cc_argv[na++] = lib;
+    cc_argv[na] = NULL;
+
+    int rc = run_cc(cc_argv);
     if (rc != 0) {
-        fprintf(stderr, "emeraldc: C compilation failed (%s)\n", cmd);
+        fprintf(stderr, "emeraldc: C compilation failed (exit %d)\n", rc);
+        if (!keep_c) remove(cfile);
         return 1;
     }
     if (!keep_c) remove(cfile);

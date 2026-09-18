@@ -47,7 +47,10 @@ research, particularly type-driven verification and machine-checked numerical
 software. This repository contains the compiler, runtime, standard library,
 documentation, examples, and regression tests.
 
-The current release version is `1.0.0`. See
+Emerald is pre-release: there is no tagged version yet and nothing here should
+be assumed stable. The version is tracked in the `VERSION` file; the changelog
+keeps everything under `[Unreleased]` until a real release is cut. See
+[`docs/stability.md`](docs/stability.md) for the compatibility policy and
 [`docs/RELEASE_V1.md`](docs/RELEASE_V1.md) for the implemented language and
 tooling surface.
 
@@ -80,8 +83,15 @@ task install PREFIX=/usr/local
 task dist
 ```
 
-The compiler locates the standard library automatically. Set
-`EMERALD_STDLIB` to override its location.
+The compiler locates the standard library and the precompiled runtime archive
+(`libemerald.a`) automatically, relative to the executable. Set `EMERALD_STDLIB`
+or `EMERALD_LIB` to override their locations.
+
+## Platform support
+
+macOS (arm64, x86-64) and Linux (x86-64, arm64) are supported and tested in CI.
+**Windows is not supported.** The compiler and runtime are POSIX C11; porting
+would require replacing `fork`/`execvp`, `pthread`, and the POSIX file APIs.
 
 ## Type system
 

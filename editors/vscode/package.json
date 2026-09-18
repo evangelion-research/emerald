@@ -1,0 +1,50 @@
+{
+  "name": "emerald-lang",
+  "displayName": "Emerald Language",
+  "description": "Syntax highlighting and LSP support for the Emerald programming language",
+  "version": "0.1.0",
+  "publisher": "evangelion-research",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:emerald"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "emerald",
+        "aliases": [
+          "Emerald",
+          "emerald"
+        ],
+        "extensions": [
+          ".rald"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "emerald",
+        "scopeName": "source.emerald",
+        "path": "./syntaxes/emerald.tmLanguage.json"
+      }
+    ]
+  },
+  "main": "./clients/extension.js",
+  "scripts": {
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0"
+  }
+}

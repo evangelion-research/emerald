@@ -1,4 +1,4 @@
-Emerald compiler 1.0.0
+Emerald compiler 0.1.0
 
 Usage:
   emeraldc [OPTIONS] file.rald

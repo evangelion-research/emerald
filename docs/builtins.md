@@ -176,6 +176,28 @@ Combined with `write_file`/`read_file` it is enough to shell out and read the
 result back from a temp file, which is how the compiler's own examples drive
 external tools.
 
+### `getenv(name: str) -> str | None`
+
+The environment variable's value, or `None` when unset. There is no `setenv`:
+a process can read its environment but not change what it passes to children
+(`run` inherits the parent environment unchanged).
+
+### `mkdir_all(path: str) -> bool`
+
+Creates `path` and every missing parent, like `mkdir -p`. `True` when the
+directory exists afterward (including because it already did), `False` on
+failure.
+
+### `remove(path: str) -> bool`
+
+Unlinks a file, or removes an empty directory. `False` on failure (missing,
+non-empty directory, no permission).
+
+### `listdir(path: str) -> list[str]`
+
+The entry names of a directory, excluding `.` and `..`, in unspecified order
+(sort them explicitly). An unreadable directory is a runtime error.
+
 ## Introspection
 
 ### `gc_stats() -> { collections: int, live: int, young: int, old: int, threshold: int, bytes_young: int, bytes_old: int }`

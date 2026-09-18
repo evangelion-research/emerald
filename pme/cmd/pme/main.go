@@ -15,7 +15,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -642,6 +644,150 @@ func roots(m Manifest, lock map[string]locked) ([]string, error) {
 	}
 	return out, nil
 }
+// runForward execs a built program with the parent's stdio and propagates its
+// exit code. (pme run/test used to swallow both: no Stdout/Stderr wiring, exit
+// status dropped — a failing suite reported nothing and a passing program
+// printed nothing.)
+func runForward(path string) error {
+	c := exec.Command(path)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if e := c.Run(); e != nil {
+		var ee *exec.ExitError
+		if errors.As(e, &ee) {
+			return fail("E_RUN_FAILED", path+" exited with code "+strconv.Itoa(ee.ExitCode()), ee.ExitCode())
+		}
+		return e
+	}
+	return nil
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for n := range m {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// addDep resolves a constraint for `name` (defaulting to the newest published
+// version as ^X.Y.Z), records it under [dependencies] in emerald.toml, then
+// re-resolves, locks, and installs.
+func addDep(m Manifest, args []string) error {
+	name := args[0]
+	if !nameOK(name) {
+		return fail("E_MANIFEST_NAME", "invalid package name `"+name+"`")
+	}
+	constraint := ""
+	if len(args) > 1 {
+		if _, e := parseConstraint(args[1]); e != nil {
+			return fail("E_MANIFEST_VERSION", e.Error())
+		}
+		constraint = args[1]
+	} else {
+		rs, e := releases(name)
+		if e != nil {
+			return e
+		}
+		var best *release
+		for i := range rs {
+			if rs[i].Yanked {
+				continue
+			}
+			if best == nil || cmp(mustVersion(rs[i].Version), mustVersion(best.Version)) > 0 {
+				best = &rs[i]
+			}
+		}
+		if best == nil {
+			return fail("E_RESOLVE_NOT_FOUND", "no published version of `"+name+"`")
+		}
+		constraint = "^" + best.Version
+	}
+	raw, err := os.ReadFile(m.Path)
+	if err != nil {
+		return err
+	}
+	s := string(raw)
+	line := name + " = " + strconv.Quote(constraint)
+	edited := false
+	if start := strings.Index(s, "[dependencies]"); start >= 0 {
+		secStart := start
+		secEnd := len(s)
+		if j := strings.Index(s[secStart:], "\n["); j >= 0 {
+			secEnd = secStart + j
+		}
+		sec := s[secStart:secEnd]
+		re := regexp.MustCompile(`(?m)^\s*` + name + `\s*=.*$`)
+		if re.MatchString(sec) {
+			s = s[:secStart] + re.ReplaceAllString(sec, line) + s[secEnd:]
+		} else {
+			s = s[:secEnd] + line + "\n" + s[secEnd:]
+		}
+		edited = true
+	}
+	if !edited {
+		s += "\n[dependencies]\n" + line + "\n"
+	}
+	if err := os.WriteFile(m.Path, []byte(s), 0644); err != nil {
+		return err
+	}
+	m2, e := loadManifest(m.Path)
+	if e != nil {
+		return e
+	}
+	lock, e := resolve(m2.Dependencies)
+	if e != nil {
+		return e
+	}
+	if e = writeLock(filepath.Join(m2.Root, "emerald.lock"), lock); e != nil {
+		return e
+	}
+	if e = install(lock); e != nil {
+		return e
+	}
+	return emit(false, false, "added "+name+" "+constraint, map[string]any{"package": name, "version": constraint})
+}
+
+// why prints every dependency chain from a root of the manifest to `target`.
+func why(m Manifest, lock map[string]locked, target string) error {
+	children := func(name string) []string {
+		if p, ok := lock[name]; ok {
+			return p.Deps
+		}
+		if d, ok := m.Dependencies[name]; ok && d.Path != "" {
+			child, e := loadManifest(filepath.Join(d.Path, "emerald.toml"))
+			if e == nil {
+				return sortedKeys(child.Dependencies)
+			}
+		}
+		return nil
+	}
+	found := false
+	var visit func(name string, path []string, seen map[string]bool)
+	visit = func(name string, path []string, seen map[string]bool) {
+		if seen[name] {
+			return
+		}
+		seen[name] = true
+		path = append(path, name)
+		if name == target {
+			found = true
+			fmt.Println(strings.Join(path, " -> "))
+			return
+		}
+		for _, d := range children(name) {
+			visit(d, path, seen)
+		}
+	}
+	for _, n := range sortedKeys(m.Dependencies) {
+		visit(n, nil, map[string]bool{})
+	}
+	if !found {
+		return fail("E_WHY_NOT_FOUND", "nothing in the dependency graph reaches `"+target+"`")
+	}
+	return nil
+}
+
 func build(m Manifest, lock map[string]locked, selected, mode string, proof, keep bool, jsonOut bool) error {
 	rs, e := roots(m, lock)
 	if e != nil {
@@ -703,7 +849,7 @@ func build(m Manifest, lock map[string]locked, selected, mode string, proof, kee
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: pme [--json] [-q] <init|install|build|check|emit-c|run|test|tree|why|clean|verify> [args]")
+	fmt.Fprintln(os.Stderr, "usage: pme [--json] [-q] <init|add|install|update|build|check|emit-c|run|test|tree|why|clean|verify> [args]")
 }
 func main() {
 	args := os.Args[1:]
@@ -762,9 +908,11 @@ func run(a []string, jsonOut, quiet bool) error {
 			return err
 		}
 		if _, err := os.Stat(filepath.Join("src", "main.rald")); os.IsNotExist(err) {
-			return os.WriteFile(filepath.Join("src", "main.rald"), []byte("# Welcome to Emerald.\nprint(\"Hello, world!\")\n"), 0644)
+			if err := os.WriteFile(filepath.Join("src", "main.rald"), []byte("# Welcome to Emerald.\nprint(\"Hello, world!\")\n"), 0644); err != nil {
+				return err
+			}
 		}
-		return nil
+		return os.WriteFile(".gitignore", []byte("/target/\n"), 0644)
 	}
 	p, e := findManifest()
 	if e != nil {
@@ -776,7 +924,27 @@ func run(a []string, jsonOut, quiet bool) error {
 	}
 	lockPath := filepath.Join(m.Root, "emerald.lock")
 	lock := map[string]locked{}
+	if cmd == "update" {
+		cmd = "install" // update is install without reuse: resolve re-fetches the index
+	}
 	if cmd == "install" {
+		if contains(a, "--locked") {
+			lock, e = loadLock(lockPath)
+			if e != nil {
+				return e
+			}
+			for name, dep := range m.Dependencies {
+				if dep.Constraint == nil {
+					continue
+				}
+				pkg, ok := lock[name]
+				version, parseErr := parseVersion(pkg.Version)
+				if !ok || parseErr != nil || !dep.Constraint.allows(version) {
+					return fail("E_LOCK_STALE", "emerald.lock does not satisfy `"+name+"`; run `pme update`")
+				}
+			}
+			return emit(jsonOut, quiet, "locked", map[string]any{"packages": len(lock)})
+		}
 		lock, e = resolve(m.Dependencies)
 		if e != nil {
 			return e
@@ -806,6 +974,16 @@ func run(a []string, jsonOut, quiet bool) error {
 		}
 	}
 	switch cmd {
+	case "add":
+		if len(a) < 2 || strings.HasPrefix(a[1], "-") {
+			return fail("E_USAGE", "add requires a package name", 2)
+		}
+		return addDep(m, a[1:])
+	case "why":
+		if len(a) < 2 || strings.HasPrefix(a[1], "-") {
+			return fail("E_USAGE", "why requires a package name", 2)
+		}
+		return why(m, lock, a[1])
 	case "build", "check", "emit-c":
 		selected := ""
 		if len(a) > 1 && !strings.HasPrefix(a[1], "-") {
@@ -830,7 +1008,7 @@ func run(a []string, jsonOut, quiet bool) error {
 		if e = build(m, lock, selected, "build", false, false, jsonOut); e != nil {
 			return e
 		}
-		return exec.Command(filepath.Join(m.Root, "target", "debug", selected)).Run()
+		return runForward(filepath.Join(m.Root, "target", "debug", selected))
 	case "tree":
 		names := make([]string, 0, len(lock))
 		for name := range lock {
@@ -854,8 +1032,13 @@ func run(a []string, jsonOut, quiet bool) error {
 			if err := build(copy, lock, name, "build", false, false, jsonOut); err != nil {
 				return err
 			}
-			if err := exec.Command(copy.Targets[0].Output).Run(); err != nil {
-				return fail("E_TEST_FAILED", "test `"+filepath.Base(entry)+"` failed")
+			if err := runForward(copy.Targets[0].Output); err != nil {
+				code := 1
+				var pe *pmeError
+				if errors.As(err, &pe) {
+					code = pe.Exit
+				}
+				return fail("E_TEST_FAILED", "test `"+filepath.Base(entry)+"` failed", code)
 			}
 		}
 		return emit(jsonOut, quiet, fmt.Sprintf("passed %d test(s)", len(files)), map[string]any{"tests": len(files)})

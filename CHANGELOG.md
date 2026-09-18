@@ -4,7 +4,11 @@ All notable changes to Emerald are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2026-08-19
+## [Unreleased]
+
+Nothing here has been tagged or released yet. When the project cuts its first
+release, this section becomes that release's entry (see
+[`docs/stability.md`](docs/stability.md) for the versioning policy).
 
 First release: a compiler written in C11 that emits native binaries through the
 system `cc`, and a language that uses a structural type system to hold as much
@@ -43,12 +47,17 @@ of a program's meaning as is practical.
 - **Operators** — floor division `//`, exponentiation `**`, compound
   assignment `+= -= *= /=`, and numeric shifts.
 - **Tooling** — `--json` diagnostics, `--proof`, `--repl`, `--werror`,
-  `-Wno-CODE`, `-I DIR`, `--version`, and a relocatable stdlib search order
-  (`$EMERALD_STDLIB`, next to the executable, then the compile-time default).
-- **Release plumbing** — `task install` installs the compiler and standard
-  library under a `PREFIX`; `task dist` builds a release tarball.
+  `-Wno-CODE`, `-I DIR`, `--version`, and relocatable runtime/stdlib search
+  orders (`$EMERALD_LIB` / `$EMERALD_STDLIB`, then relative to the executable,
+  then the compile-time default).
+- **Release plumbing** — `task install` installs the compiler, the precompiled
+  runtime archive (`libemerald.a`), headers, and the standard library under a
+  `PREFIX`; `task dist` builds a release tarball; `task dist:verify` smoke-tests
+  the tarball outside the checkout (hello-world must compile and run).
+- **Debugging** — the generated C carries `#line` directives, so lldb/gdb and
+  profilers report Emerald source lines instead of generated-C lines.
 
-### Added since 1.0.0
+### Added
 
 - **Reverse-mode autograd** — the `value_and_grad(f, x)` builtin: a GC-traced
   tape recorded while the pure scalar-loss function `f` runs, VJP rules for
@@ -72,7 +81,8 @@ of a program's meaning as is practical.
   suite is clean, so a failing check is reported rather than fatal.
 - **pme** — the package manager and build system for Emerald: minimal-version
   resolution, a verified content-addressed store, and incremental builds that
-  drive `emeraldc` through its frozen `-I` contract.
+  drive `emeraldc` through its `-I` contract (see
+  [`docs/stability.md`](docs/stability.md) for what is frozen).
 - **emlsp** — the Emerald language server: diagnostics via `emeraldc --check
   --json`, semantic tokens, outline symbols, hover, go-to-definition,
   completion, and workspace symbols over stdio or TCP.

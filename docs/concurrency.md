@@ -91,6 +91,12 @@ debugger — at the cost of ~1 MiB of address space per task and a mutex
 handoff per switch. Switching costs a condvar broadcast, which is the reason
 the switch points are channel-granular rather than per-statement.
 
+The practical consequence of the threads-not-contexts choice: the number of
+live tasks is bounded by the OS thread limit (thousands, not millions), and
+every `spawn` pays full thread creation. If a workload needs cheap
+million-task concurrency, the implementation has to move to stack switching
+first — the task semantics above would not change.
+
 ### What the GC had to learn
 
 The collector stays precise and lock-free, because only the token holder can

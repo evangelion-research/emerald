@@ -1,6 +1,10 @@
 /* Runtime: the builtin library -- math, console and file I/O, list growth,
  * slicing, characters, and first-class functions. */
 #include "runtime_internal.h"
+#include <dirent.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 Value em_len(Value v) {
     if (is_str(v)) return em_int((int64_t)str_len(&v));
@@ -234,6 +238,57 @@ void em_append_file(Value path, Value content) {
 Value em_run(Value cmd) {
     if (!is_str(cmd)) rt_fatal("run() command must be str, not %s", type_name(cmd));
     return em_int(system(str_data(&cmd)));
+}
+
+Value em_getenv(Value name) {
+    if (!is_str(name)) rt_fatal("getenv() name must be str, not %s", type_name(name));
+    const char *v = getenv(str_data(&name));
+    if (!v) return em_none();
+    return em_str_new(v);
+}
+
+/* mkdir -p: create `path` and every missing parent. False on failure. */
+Value em_mkdir_all(Value path) {
+    if (!is_str(path)) rt_fatal("mkdir_all() path must be str, not %s", type_name(path));
+    const char *p = str_data(&path);
+    size_t n = strlen(p);
+    char *buf = xmalloc(n + 1);
+    memcpy(buf, p, n + 1);
+    for (char *q = buf + 1; *q; q++) {
+        if (*q == '/') {
+            *q = '\0';
+            if (buf[0]) mkdir(buf, 0777); /* EEXIST is fine; the final call decides */
+            *q = '/';
+        }
+    }
+    bool ok = buf[0] && (mkdir(buf, 0777) == 0 || errno == EEXIST);
+    free(buf);
+    return em_bool(ok);
+}
+
+Value em_remove(Value path) {
+    if (!is_str(path)) rt_fatal("remove() path must be str, not %s", type_name(path));
+    /* POSIX remove() unlinks files and rmdir()s empty directories. */
+    return em_bool(remove(str_data(&path)) == 0);
+}
+
+Value em_listdir(Value path) {
+    if (!is_str(path)) rt_fatal("listdir() path must be str, not %s", type_name(path));
+    DIR *d = opendir(str_data(&path));
+    if (!d) rt_fatal("cannot open directory '%s'", str_data(&path));
+    Value lst = obj_val(list_new(0));
+    RootFrame fr;
+    rt_push_frame(&fr, &lst, 1);
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+        Value s = em_str_new(ent->d_name);
+        /* str_copy may collect; the list is rooted, so append after */
+        em_append(lst, s);
+    }
+    closedir(d);
+    rt_pop_frame();
+    return lst;
 }
 
 /* read_file() aborts on a missing file, which is right for a script and wrong

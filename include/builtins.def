@@ -51,6 +51,10 @@ EM_BUILTIN_VOID("append_file",   "em_append_file",    2, false)
 EM_BUILTIN(     "run",           "em_run",            1, false)
 EM_BUILTIN(     "argv",          "em_argv",           0, false)
 EM_BUILTIN_VOID("exit",          "em_exit",           1, false)
+EM_BUILTIN(     "getenv",        "em_getenv",         1, false)
+EM_BUILTIN(     "mkdir_all",     "em_mkdir_all",      1, false)
+EM_BUILTIN(     "remove",        "em_remove",         1, false)
+EM_BUILTIN(     "listdir",       "em_listdir",        1, false)
 
 /* --- the stdlib foundation (the standard-library builtin boundary) ------------------------- */
 EM_BUILTIN_VOID("append",        "em_append",         2, false)

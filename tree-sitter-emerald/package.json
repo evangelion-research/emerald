@@ -1,8 +1,29 @@
 {
   "name": "tree-sitter-emerald",
   "version": "0.1.0",
-  "private": true,
-  "description": "Tree-sitter grammar for Emerald",
+  "description": "Tree-sitter grammar for the Emerald programming language",
+  "license": "MIT",
+  "main": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "emerald",
+    "incremental",
+    "parsing"
+  ],
+  "files": [
+    "grammar.js",
+    "queries",
+    "src"
+  ],
+  "tree-sitter": [
+    {
+      "scope": "source.emerald",
+      "file-types": [
+        "rald"
+      ],
+      "injection-regex": "^emerald$"
+    }
+  ],
   "scripts": {
     "generate": "tree-sitter generate",
     "test": "tree-sitter test"

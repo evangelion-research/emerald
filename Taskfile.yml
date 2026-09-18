@@ -10,19 +10,31 @@ version: '3'
 vars:
   CC: '{{default "cc" .CC}}'
   CFLAGS: -std=c11 -Wall -Wextra -O2 -g -Iinclude
-  VERSION: 1.0.0
-  SRCDIR:
-    sh: echo "$PWD/src"
-  STDLIBDIR:
-    sh: echo "$PWD/stdlib"
+  VERSION:
+    sh: cat VERSION
+  RUNTIME_SRCS: src/runtime_gc.c src/runtime_obj.c src/runtime_ops.c src/runtime_builtins.c src/runtime_closure.c src/runtime_task.c src/runtime_tensor.c src/runtime_autograd.c src/runtime_utf8.c
   COMPILER_SRCS: src/lexer.c src/ast.c src/parser_util.c src/parser_expr.c src/parser_stmt.c src/module_resolve.c src/module_rename.c src/module_load.c src/check_type.c src/check_ctx.c src/check_infer.c src/check_call.c src/check_expr.c src/check_flow.c src/check_stmt.c src/check_pass.c src/codegen_ctx.c src/codegen_expr.c src/codegen_stmt.c src/codegen_close.c src/codegen_prog.c src/diag.c src/dim.c src/repl.c src/shape_report.c src/main.c
 
 tasks:
   default:
     deps: [build]
 
+  libemerald:
+    desc: Build the runtime archive (bin/libemerald.a) that compiled programs link against
+    sources:
+      - src/runtime_*.c
+      - include/*.h
+    generates:
+      - bin/libemerald.a
+    cmds:
+      - mkdir -p bin
+      - '{{.CC}} {{.CFLAGS}} -c {{.RUNTIME_SRCS}}'
+      - 'ar rc bin/libemerald.a runtime_gc.o runtime_obj.o runtime_ops.o runtime_builtins.o runtime_closure.o runtime_task.o runtime_tensor.o runtime_autograd.o runtime_utf8.o'
+      - rm -f runtime_*.o
+
   build:
-    desc: Build the Emerald compiler (bin/emeraldc)
+    desc: Build the Emerald compiler (bin/emeraldc) and the runtime archive it links with
+    deps: [libemerald]
     sources:
       - src/*.c
       - include/*.h
@@ -32,8 +44,6 @@ tasks:
       - mkdir -p bin
       - >-
         {{.CC}} {{.CFLAGS}} -DEMERALD_VERSION='"{{.VERSION}}"'
-        -DEMERALD_SRC_DIR='"{{.SRCDIR}}"'
-        -DEMERALD_STDLIB_DIR='"{{.STDLIBDIR}}"'
         -o bin/emeraldc {{.COMPILER_SRCS}}
 
   runtime-check:
@@ -42,11 +52,12 @@ tasks:
       - '{{.CC}} {{.CFLAGS}} -fsyntax-only -Iinclude -Isrc src/runtime_gc.c src/runtime_obj.c src/runtime_ops.c src/runtime_builtins.c src/runtime_closure.c src/runtime_task.c src/runtime_tensor.c src/runtime_autograd.c src/runtime_utf8.c'
 
   test:
-    desc: Run all stage test suites, including CLI, shape, warning, and proof-report checks
+    desc: Run all stage test suites, including CLI, shape, warning, proof-report checks, and the examples
     deps: [build]
     cmds:
       - task: runtime-check
       - ./tests/run_tests.sh
+      - task: examples
 
   test:lexer:
     desc: Golden tests for the lexer (--emit-tokens)
@@ -180,26 +191,54 @@ tasks:
         done
 
   install:
-    desc: Install emeraldc and the stdlib under PREFIX (default /usr/local)
+    desc: Install emeraldc, the runtime archive, headers, and stdlib under PREFIX (default /usr/local)
     deps: [build]
     vars:
       PREFIX: '{{default "/usr/local" .PREFIX}}'
     cmds:
-      - mkdir -p "{{.PREFIX}}/bin" "{{.PREFIX}}/lib/emerald/stdlib"
+      - mkdir -p "{{.PREFIX}}/bin" "{{.PREFIX}}/lib/emerald/stdlib" "{{.PREFIX}}/lib/emerald/include"
       - install -m 0755 bin/emeraldc "{{.PREFIX}}/bin/emeraldc"
+      - install -m 0644 bin/libemerald.a "{{.PREFIX}}/lib/emerald/libemerald.a"
+      - install -m 0644 include/*.h "{{.PREFIX}}/lib/emerald/include/"
       - install -m 0644 stdlib/*.rald "{{.PREFIX}}/lib/emerald/stdlib/"
 
   dist:
-    desc: Build a release tarball (smoke-test it outside the checkout before release)
+    desc: Build a release tarball
     deps: [build]
     cmds:
+      - task: dist:pack
+
+  dist:pack:
+    internal: true
+    cmds:
       - rm -rf dist emerald-{{.VERSION}}.tar.gz
-      - mkdir -p dist/emerald/bin dist/emerald/lib/emerald/stdlib
+      - mkdir -p dist/emerald/bin dist/emerald/lib/emerald/stdlib dist/emerald/lib/emerald/include
       - cp bin/emeraldc dist/emerald/bin/emeraldc
+      - cp bin/libemerald.a dist/emerald/lib/emerald/libemerald.a
+      - cp include/*.h dist/emerald/lib/emerald/include/
       - cp stdlib/*.rald dist/emerald/lib/emerald/stdlib/
       - cp README.md CHANGELOG.md dist/emerald/ 2>/dev/null || cp README.md dist/emerald/
       - tar -C dist -czf emerald-{{.VERSION}}.tar.gz emerald
       - rm -rf dist
+
+  dist:verify:
+    desc: Smoke-test the release tarball outside the checkout (hello-world must compile and run)
+    deps: [dist]
+    cmds:
+      - |
+        set -e
+        tmp="$(mktemp -d)"
+        trap 'rm -rf "$tmp"' EXIT
+        tar -xzf emerald-{{.VERSION}}.tar.gz -C "$tmp"
+        cat > "$tmp/hello.rald" <<'EOF'
+        print("hello, release")
+        EOF
+        # Compile from the unpacked tarball with the checkout out of reach:
+        # no EMERALD_LIB, no cwd tricks, binary found by absolute path.
+        env -u EMERALD_LIB "$tmp/emerald/bin/emeraldc" -o "$tmp/hello" "$tmp/hello.rald"
+        out="$("$tmp/hello")"
+        [ "$out" = "hello, release" ] || { echo "dist:verify: wrong output: $out"; exit 1; }
+        echo "dist:verify: ok"
 
   clean:
     desc: Remove build outputs and generated C

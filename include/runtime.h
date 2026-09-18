@@ -206,6 +206,10 @@ Value em_read_file(Value path);   /* contents of a file as a string */
 void  em_write_file(Value path, Value content); /* write a string to a file */
 void  em_append_file(Value path, Value content); /* append a string to a file */
 Value em_run(Value cmd);          /* run a shell command; returns exit status */
+Value em_getenv(Value name);      /* environment variable, or None if unset */
+Value em_mkdir_all(Value path);   /* mkdir -p; false on failure */
+Value em_remove(Value path);      /* unlink a file / rmdir an empty dir; false on failure */
+Value em_listdir(Value path);     /* directory entry names (no . / ..); fatal if unreadable */
 Value em_read_file_opt(Value path); /* contents, or None if unreadable */
 Value em_file_exists(Value path);   /* is the path openable for reading? */
 

@@ -1,0 +1,15 @@
+# Filesystem and environment builtins: mkdir_all, listdir, remove, getenv.
+# Paths are relative to the CWD the test runner uses (the repo root), and
+# everything this creates is removed again before it prints.
+d = "fs_env_tmp/inner"
+print(mkdir_all(d))
+print(mkdir_all(d))            # idempotent
+print(file_exists(d))
+write_file("fs_env_tmp/note.txt", "hi")
+print(len(listdir("fs_env_tmp")) == 2)
+print(remove("fs_env_tmp/note.txt"))
+print(remove("fs_env_tmp/inner"))
+print(remove("fs_env_tmp"))
+print(remove("fs_env_tmp"))    # already gone: false
+print(getenv("EMERALD_NO_SUCH_VAR_KLJ") == None)
+print(len(listdir(".")) > 0)

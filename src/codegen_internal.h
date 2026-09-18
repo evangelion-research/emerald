@@ -77,6 +77,9 @@ typedef struct {
     bool in_tco;         /* function body is wrapped in a tail-call loop */
     int last_line;       /* last emitted source line (for rt_cur_line) */
     const char *last_file; /* last emitted source file (linked programs span several) */
+    int emit_line;       /* source position the generated C currently maps to
+                            via #line directives (debugger/profiler view) */
+    const char *emit_file;
 } Cg;
 
 /* --- name resolution ----------------------------------------------------- */

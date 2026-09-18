@@ -136,11 +136,11 @@ go test ./... && go vet ./...
 go build -o emerald-lsp ./cmd/emerald-lsp && ./emerald-lsp --version
 ```
 
-The suite covers the lexer, the outline, position encoding, the diagnostic
-mapping, the lockfile `-I` rule, and the features — plus two kinds of test the
-design calls out: a truncation fuzz over every prefix of several samples, and
-end-to-end sessions that drive the real server process over stdio with a stub
-compiler.
+The suite currently covers the lexer and position encoding only (`go test
+./...`). The server lifecycle, diagnostic mapping, outline, features, and
+semantic layers have **no tests yet**, and neither the truncation fuzz nor the
+end-to-end stdio session tests that the design calls for exist. Treat the
+server as v0-quality until they do.
 
 Layout (Go, single binary):
 

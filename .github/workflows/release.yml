@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  dist:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest        # arm64
+          - os: macos-13            # x86-64
+          - os: ubuntu-latest       # x86-64
+          - os: ubuntu-24.04-arm    # arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - name: Install task
+        run: go install github.com/go-task/task/v3/cmd/task@latest
+      - name: Build and test
+        run: |
+          task build
+          task test
+      - name: Pack tarball
+        run: task dist
+      # The P0.1 gate: a tarball that cannot compile hello-world does not ship.
+      - name: Verify tarball outside the checkout
+        run: task dist:verify
+      - name: Rename with platform
+        run: mv emerald-*.tar.gz "emerald-${GITHUB_REF_NAME#v}-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m).tar.gz"
+      - name: Checksums
+        run: |
+          mkdir -p dist
+          shasum -a 256 emerald-*.tar.gz | tee dist/checksums.txt
+      - name: Upload to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            emerald-*.tar.gz
+            dist/checksums.txt
