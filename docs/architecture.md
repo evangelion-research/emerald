@@ -138,6 +138,7 @@ emeraldc --keep-c prog.rald      # keep prog.gen.c for inspection
 emeraldc --emit-c prog.rald      # print generated C to stdout
 ```
 
-`$CC` overrides the C compiler. `$EMERALD_SRC` overrides the runtime source
-location baked in at build time (`-DEMERALD_SRC_DIR`), which is how a built
-`emeraldc` finds the `src/runtime_*.c` files to compile alongside your program.
+`$CC` overrides the C compiler. The generated C is linked against the
+precompiled runtime archive `libemerald.a` plus `include/runtime.h`, located
+via `$EMERALD_LIB`, then relative to the executable (build tree and prefix
+layouts), then the compile-time default.

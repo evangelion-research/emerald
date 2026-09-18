@@ -50,9 +50,8 @@ documentation, examples, and regression tests.
 Emerald is pre-release: there is no tagged version yet and nothing here should
 be assumed stable. The version is tracked in the `VERSION` file; the changelog
 keeps everything under `[Unreleased]` until a real release is cut. See
-[`docs/stability.md`](docs/stability.md) for the compatibility policy and
-[`docs/RELEASE_V1.md`](docs/RELEASE_V1.md) for the implemented language and
-tooling surface.
+[`docs/stability.md`](docs/stability.md) for the compatibility policy; the
+[documentation index](docs/README.md) lists the full surface.
 
 ## Requirements
 

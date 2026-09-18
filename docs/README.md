@@ -32,7 +32,7 @@ repository. Start with the document matching the job you have.
 
 | Document | Contents |
 |---|---|
-| [`RELEASE_V1.md`](RELEASE_V1.md) | The implemented v1 compiler, runtime, standard library, and tooling surface. |
+| [`stability.md`](stability.md) | The versioning policy, what is frozen at 1.0, and the FFI decision. |
 | [`REMAINING_FEATURES.md`](REMAINING_FEATURES.md) | What is left before the proof-mode/autograd goal is met, reviewed against the implementation. |
 | [`../stdlib/SPEC.md`](../stdlib/SPEC.md) | Maintained standard-library inventory and conventions. |
 

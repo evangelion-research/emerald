@@ -198,9 +198,9 @@ static char *resolve_in_root(const char *root, const char *dotted,
 }
 
 /* The standard library's root, searched last so a project can shadow a stdlib
- * module with one of its own. $EMERALD_STDLIB overrides the built-in path the
- * same way $EMERALD_SRC overrides the runtime's; next a path relative to the
- * executable (set by main), then the compile-time default. */
+ * module with one of its own. $EMERALD_STDLIB overrides the built-in path;
+ * next a path relative to the executable (set by main), then the
+ * compile-time default. */
 static const char *exe_stdlib = NULL;
 
 void module_set_exe_stdlib(const char *path) { exe_stdlib = path; }

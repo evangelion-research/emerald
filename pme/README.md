@@ -21,12 +21,9 @@ exit codes forwarded correctly. Registry reads (`add` / `why`), `update`, and
 `--locked` installs are implemented; registry writes (`publish`, `login`,
 `yank`) and remote-cache remain future work. No registry index is live yet, so
 `add`/`why`/`install` work against path dependencies and any registry endpoint
-set via `PME_REGISTRY`. Its one hard
-prerequisite — the Emerald module system — shipped at `emerald@1f683be` and
-is still exactly as it shipped: this document tracks the compiler at
-`emerald@1facafe` (2026-08-17) plus the stability policy in
-[`docs/stability.md`](../docs/stability.md); the `-I` contract pme consumes is
-now a frozen contract defined there. It is implemented in
+set via `PME_REGISTRY`. The compiler contract pme consumes — the `-I` flag set —
+is frozen in [`docs/stability.md`](../docs/stability.md); the lockfile and store
+formats are pme's own and versioned in its lockfile header. It is implemented in
 **Go**, distributed as one native `pme` binary.
 
 ## Install
@@ -103,13 +100,13 @@ virtual environment, or package manager is required at runtime.
 
 ## Compiler contract
 
-`emeraldc [-I <dir>]... [--json] [-o OUT] <entry>.rald` — re-verified at
-`emerald@1facafe`. The full driver flag set is now `--emit-tokens`,
-`--emit-ast`, `--check`, `--emit-c`, `--proof` (proof mode), `--keep-c`, `-I`,
-`-o`, `--json`; `-I` is repeatable and order-preserving, and `--check`,
-`--emit-c`, and a full build operate on the linked program. pme's job is to
-compute the ordered `-I` list and exec. The LSP consumes the same lockfile and
-the same rule (see the "Package management" section of the LSP design) — pme
+`emeraldc [-I <dir>]... [--json] [-o OUT] <entry>.rald` — frozen in
+[`docs/stability.md`](../docs/stability.md). The full driver flag set is
+`--emit-tokens`, `--emit-ast`, `--check`, `--emit-c`, `--proof` (proof mode),
+`--keep-c`, `-I`, `-o`, `--json`; `-I` is repeatable and order-preserving, and
+`--check`, `--emit-c`, and a full build operate on the linked program. pme's job
+is to compute the ordered `-I` list and exec. The LSP consumes the same lockfile
+and the same rule (see the "Package management" section of the LSP design) — pme
 never does analysis, the LSP never does resolution.
 
 ## Links

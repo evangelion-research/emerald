@@ -34,7 +34,7 @@ root **in this order**:
 4. the standard library.
 
 The stdlib root is baked in at build time and overridable with
-`$EMERALD_STDLIB`, the way `$EMERALD_SRC` overrides the runtime's location. It
+`$EMERALD_STDLIB`. It
 is searched **last** deliberately: a project that defines its own `strings.rald`
 shadows the stdlib one, which is the same "first hit wins" precedence the `-I`
 roots already follow. In diagnostics it prints as `<stdlib>` rather than an
