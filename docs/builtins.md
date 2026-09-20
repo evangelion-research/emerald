@@ -504,3 +504,21 @@ closed channel — the same shape as `read_line()`, and the reason a worker loop
 needs no separate "are we done" flag.
 
 None of these are pure: a task is an effect.
+
+---
+
+## Time, hashing, and JSON
+
+`time_now()` returns monotonic seconds for elapsed-time measurements;
+`unix_time()` returns wall-clock Unix seconds. `utc_date(seconds)` converts Unix
+seconds to a UTC record with `year`, `month`, `day`, `hour`, `minute`, and
+`second` fields.
+
+`fnv1a(text)` returns a stable 64-bit FNV-1a digest as an `int`.
+`sha256(text)` returns the lowercase hexadecimal SHA-256 digest. Both are pure
+and require no external crypto library.
+
+`json_parse(text)` parses JSON into Emerald values: objects become string-keyed
+dicts, arrays become lists, and JSON `null` becomes `None`. `json_stringify(value)`
+serializes strings, numbers, booleans, `None`, lists, tuples, and dicts as compact
+JSON. Malformed or unsupported values are runtime errors.

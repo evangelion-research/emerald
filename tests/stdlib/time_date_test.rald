@@ -1,0 +1,9 @@
+import time
+import date
+
+u = time.utc(0.0)
+print(u.year, u.month, u.day, u.hour, u.minute, u.second)
+print(date.is_leap(2000), date.is_leap(1900), date.days_in_month(2024, 2))
+print(date.valid(2024, 2, 29), date.valid(2023, 2, 29))
+print(date.day_of_year(2024, 3, 1), date.days_between(2024, 1, 1, 2024, 3, 1))
+print(time.monotonic() >= 0.0, time.unix() > 0.0)

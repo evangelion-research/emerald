@@ -12,7 +12,7 @@ vars:
   CFLAGS: -std=c11 -Wall -Wextra -O2 -g -Iinclude
   VERSION:
     sh: cat VERSION
-  RUNTIME_SRCS: src/runtime_gc.c src/runtime_obj.c src/runtime_ops.c src/runtime_builtins.c src/runtime_closure.c src/runtime_task.c src/runtime_tensor.c src/runtime_autograd.c src/runtime_utf8.c
+  RUNTIME_SRCS: src/runtime_gc.c src/runtime_obj.c src/runtime_ops.c src/runtime_builtins.c src/runtime_closure.c src/runtime_task.c src/runtime_tensor.c src/runtime_autograd.c src/runtime_utf8.c src/runtime_json.c
   COMPILER_SRCS: src/lexer.c src/ast.c src/parser_util.c src/parser_expr.c src/parser_stmt.c src/module_resolve.c src/module_rename.c src/module_load.c src/check_type.c src/check_ctx.c src/check_infer.c src/check_call.c src/check_expr.c src/check_flow.c src/check_stmt.c src/check_pass.c src/codegen_ctx.c src/codegen_expr.c src/codegen_stmt.c src/codegen_close.c src/codegen_prog.c src/diag.c src/dim.c src/repl.c src/shape_report.c src/main.c
 
 tasks:
@@ -29,7 +29,7 @@ tasks:
     cmds:
       - mkdir -p bin
       - '{{.CC}} {{.CFLAGS}} -c {{.RUNTIME_SRCS}}'
-      - 'ar rc bin/libemerald.a runtime_gc.o runtime_obj.o runtime_ops.o runtime_builtins.o runtime_closure.o runtime_task.o runtime_tensor.o runtime_autograd.o runtime_utf8.o'
+      - 'ar rc bin/libemerald.a runtime_gc.o runtime_obj.o runtime_ops.o runtime_builtins.o runtime_closure.o runtime_task.o runtime_tensor.o runtime_autograd.o runtime_utf8.o runtime_json.o'
       - rm -f runtime_*.o
 
   build:
@@ -49,7 +49,7 @@ tasks:
   runtime-check:
     desc: Prove the runtime compiles standalone under strict flags
     cmds:
-      - '{{.CC}} {{.CFLAGS}} -fsyntax-only -Iinclude -Isrc src/runtime_gc.c src/runtime_obj.c src/runtime_ops.c src/runtime_builtins.c src/runtime_closure.c src/runtime_task.c src/runtime_tensor.c src/runtime_autograd.c src/runtime_utf8.c'
+      - '{{.CC}} {{.CFLAGS}} -fsyntax-only -Iinclude -Isrc {{.RUNTIME_SRCS}}'
 
   test:
     desc: Run all stage test suites, including CLI, shape, warning, proof-report checks, and the examples

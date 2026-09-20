@@ -1,0 +1,33 @@
+# date — Gregorian calendar helpers for UTC date records.
+
+def is_leap(year: int) -> bool pure {
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+}
+
+def days_in_month(year: int, month: int) -> int pure {
+    if month == 2 { if is_leap(year) { return 29 } return 28 }
+    if month == 4 or month == 6 or month == 9 or month == 11 { return 30 }
+    return 31
+}
+
+def valid(year: int, month: int, day: int) -> bool pure {
+    return month >= 1 and month <= 12 and day >= 1 and day <= days_in_month(year, month)
+}
+
+def day_of_year(year: int, month: int, day: int) -> int pure {
+    total = day
+    m = 1
+    while m < month { total = total + days_in_month(year, m); m = m + 1 }
+    return total
+}
+
+def days_before_year(year: int) -> int pure {
+    y = year - 1
+    return 365 * y + y // 4 - y // 100 + y // 400
+}
+
+def days_between(a_year: int, a_month: int, a_day: int,
+                 b_year: int, b_month: int, b_day: int) -> int pure {
+    return (days_before_year(b_year) + day_of_year(b_year, b_month, b_day)) -
+           (days_before_year(a_year) + day_of_year(a_year, a_month, a_day))
+}

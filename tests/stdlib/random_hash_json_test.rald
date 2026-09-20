@@ -1,0 +1,15 @@
+import random
+import hash
+import json
+
+r = random.seed(7)
+a = random.next_int(r)
+b = random.next_int(a.rng)
+r2 = random.seed(7)
+a2 = random.next_int(r2)
+print(a.value == a2.value, b.value != a.value)
+print(hash.text_sha256("abc"), hash.text_fnv1a("abc") != 0)
+value = { "name": "emerald", "ok": True, "items": [1, 2, None] }
+text = json.stringify(value)
+print(text)
+print(json.stringify(json.parse(text)) == text)

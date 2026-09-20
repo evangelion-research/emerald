@@ -244,6 +244,12 @@ void  em_pprint(Value v);            /* pretty print to stdout, newline */
 void  em_pprint_err(Value v);        /* pretty print to stderr, newline */
 Value em_pp_format(Value v);         /* the pretty rendering, as a string */
 Value em_now(void);                  /* monotonic seconds; only diffs mean anything */
+Value em_unix_time(void);             /* wall-clock Unix seconds */
+Value em_utc_date(Value seconds);      /* UTC calendar record from Unix seconds */
+Value em_fnv1a(Value text);            /* 64-bit FNV-1a as an int */
+Value em_sha256(Value text);           /* lowercase hexadecimal digest */
+Value em_json_parse(Value text);       /* JSON value, fatal on malformed input */
+Value em_json_stringify(Value value);  /* compact JSON */
 void  em_seed(Value n);              /* reseed the PRNG for reproducibility */
 void  em_exit(Value code);           /* terminate with an exit status */
 void  rt_set_args(int argc, char **argv); /* called by main() before anything */

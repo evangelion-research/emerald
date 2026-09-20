@@ -1,0 +1,34 @@
+# random — deterministic random values with explicit state.
+#
+# Every draw returns both the value and the next state. No ambient generator is
+# used, so the same seed and sequence of calls always produce the same result.
+
+type Rng = { state: int }
+type Draw[T] = { value: T, rng: Rng }
+
+const MOD: int = 2147483647
+const MUL: int = 16807
+
+def seed(value: int) -> Rng {
+    state = value % MOD
+    if state <= 0 { state = state + MOD - 1 }
+    return { state: state }
+}
+
+def next_int(rng: Rng) -> Draw[int] {
+    state = (rng.state * MUL) % MOD
+    next = { state: state }
+    return { value: state, rng: next }
+}
+
+def next_float(rng: Rng) -> Draw[float] {
+    draw = next_int(rng)
+    return { value: (draw.value - 1) / 2147483646.0, rng: draw.rng }
+}
+
+def int_range(rng: Rng, lo: int, hi: int) -> Draw[int] {
+    draw = next_int(rng)
+    width = hi - lo
+    if width <= 0 { return { value: lo, rng: draw.rng } }
+    return { value: lo + (draw.value % width), rng: draw.rng }
+}

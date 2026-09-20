@@ -43,7 +43,7 @@
     },
     {
       "name": "support.function.builtin.emerald",
-      "match": "\\b(print|eprint|pp_format|pprint|pprint_err|range|len|str|int|float|sqrt|rand|dict|set|append|slice|freeze|thaw|ord|chr|map|filter|reduce|read_line|read_all|input|run|argv|exit|spawn|join|task_done|task_stats|task_yield|sleep|chan|send|recv|chan_close|chan_len|zeros|ones|full|arange|tensor|randn|exp|log|tanh|relu|matmul|reshape|transpose|permute|expand|sum|mean|max|argmax|tslice|item|shape|ndim|dtype|astype|eprint|pp_format|pprint|pprint_err|gc_stats|gc_collect|file_exists|write_file|append_file|write_out|write_err|flush|seed_rand)\\b"
+      "match": "\\b(print|eprint|pp_format|pprint|pprint_err|range|len|str|int|float|sqrt|rand|dict|set|append|slice|freeze|thaw|ord|chr|map|filter|reduce|read_line|read_all|input|run|argv|exit|spawn|join|task_done|task_stats|task_yield|sleep|chan|send|recv|chan_close|chan_len|zeros|ones|full|arange|tensor|randn|exp|log|tanh|relu|matmul|reshape|transpose|permute|expand|sum|mean|max|argmax|tslice|item|shape|ndim|dtype|astype|eprint|pp_format|pprint|pprint_err|gc_stats|gc_collect|file_exists|write_file|append_file|write_out|write_err|flush|seed_rand|time_now|unix_time|utc_date|fnv1a|sha256|json_parse|json_stringify)\\b"
     },
     {
       "name": "support.type.builtin.emerald",

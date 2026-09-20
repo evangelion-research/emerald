@@ -37,6 +37,13 @@ EM_BUILTIN(     "float",         "em_float_of",       1, true)
 EM_BUILTIN(     "sqrt",          "em_sqrt",           1, true)
 EM_BUILTIN(     "tan",           "em_tan",            1, true)
 EM_BUILTIN(     "rand",          "em_rand",           0, false)
+EM_BUILTIN(     "time_now",      "em_now",            0, false)
+EM_BUILTIN(     "unix_time",     "em_unix_time",       0, false)
+EM_BUILTIN(     "utc_date",      "em_utc_date",        1, true)
+EM_BUILTIN(     "fnv1a",         "em_fnv1a",           1, true)
+EM_BUILTIN(     "sha256",        "em_sha256",          1, true)
+EM_BUILTIN(     "json_parse",    "em_json_parse",      1, true)
+EM_BUILTIN(     "json_stringify","em_json_stringify",  1, true)
 
 /* --- GC observability ---------------------------------------------------- */
 EM_BUILTIN(     "gc_stats",      "em_gc_stats",       0, true)

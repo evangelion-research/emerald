@@ -1,0 +1,4 @@
+# hash — stable text digests.
+
+def text_fnv1a(text: str) -> int pure { return fnv1a(text) }
+def text_sha256(text: str) -> str pure { return sha256(text) }

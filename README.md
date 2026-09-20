@@ -204,7 +204,8 @@ source root, each `-I` directory, and the standard library. Top-level names
 beginning with `_` are private; all others are exported.
 
 The standard library provides `result`, `chars`, `strings`, `builder`, `lists`,
-`sort`, `math`, `io`, `sys`, `path`, `fmt`, `unicode`, and `test`. See
+`sort`, `math`, `io`, `sys`, `path`, `fmt`, `unicode`, `time`, `date`,
+`random`, `hash`, `json`, and `test`. See
 [`docs/modules.md`](docs/modules.md) and [`stdlib/SPEC.md`](stdlib/SPEC.md).
 
 ## Built-in operations

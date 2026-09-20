@@ -409,9 +409,51 @@ Type *infer_call(Ck *ck, const Expr *e, Type *expected) {
             ck_arity(ck, e, dname, 0);
             return &t_none;
         }
-        if (strcmp(name, "now") == 0) {
+        if (strcmp(name, "now") == 0 || strcmp(name, "time_now") == 0 ||
+            strcmp(name, "unix_time") == 0) {
             ck_arity(ck, e, dname, 0);
             return &t_float;
+        }
+        if (strcmp(name, "utc_date") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_float, argt[0]) &&
+                !assignable(&t_int, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "utc_date() seconds must be numeric, got %s", type_str(argt[0]));
+            static Type *date_type;
+            if (!date_type) {
+                date_type = ty_new(TY_REC);
+                date_type->rec.count = 6;
+                date_type->rec.names = xmalloc(sizeof(char *) * 6);
+                date_type->rec.types = xmalloc(sizeof(Type *) * 6);
+                static char *names[] = {"year", "month", "day", "hour", "minute", "second"};
+                for (size_t i = 0; i < 6; i++) {
+                    date_type->rec.names[i] = names[i];
+                    date_type->rec.types[i] = &t_int;
+                }
+            }
+            return date_type;
+        }
+        if (strcmp(name, "fnv1a") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "fnv1a() argument must be str, got %s", type_str(argt[0]));
+            return &t_int;
+        }
+        if (strcmp(name, "sha256") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "sha256() argument must be str, got %s", type_str(argt[0]));
+            return &t_str;
+        }
+        if (strcmp(name, "json_parse") == 0) {
+            if (ck_arity(ck, e, dname, 1) && !assignable(&t_str, argt[0]))
+                ck_error(ck, "E_TYPE_ARG", e->line, e->col,
+                         "json_parse() argument must be str, got %s", type_str(argt[0]));
+            return &t_any;
+        }
+        if (strcmp(name, "json_stringify") == 0) {
+            ck_arity(ck, e, dname, 1);
+            return &t_str;
         }
         if (strcmp(name, "seed_rand") == 0) {
             if (ck_arity(ck, e, dname, 1) && !assignable(&t_int, argt[0]))

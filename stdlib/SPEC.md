@@ -1,7 +1,7 @@
 # Emerald standard library
 
 The standard library is ordinary Emerald source in this directory. It contains
-13 maintained modules and is covered by `task test:stdlib`:
+18 maintained modules and is covered by `task test:stdlib`:
 
 | Module | Purpose |
 |---|---|
@@ -18,6 +18,11 @@ The standard library is ordinary Emerald source in this directory. It contains
 | `fmt` | Small format-string helpers |
 | `test` | Unit-test harness: suites, recording assertions, and reports |
 | `unicode` | UTF-8 code-point layer: length, indexing, slicing, and iteration |
+| `time` | Monotonic/Unix clocks and UTC calendar records |
+| `date` | Gregorian leap-year, month, and date arithmetic |
+| `random` | Deterministic RNG with explicit state threading |
+| `hash` | Stable FNV-1a and SHA-256 text digests |
+| `json` | JSON parse/stringify wrappers |
 
 Dictionaries and sets are **not** modules. They are dynamic runtime values
 constructed with the builtin `dict()` and `set()` functions. Dictionaries are

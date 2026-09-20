@@ -1,0 +1,10 @@
+# time — clocks and UTC calendar conversion.
+
+def monotonic() -> float { return time_now() }
+def unix() -> float { return unix_time() }
+def utc(seconds: float) -> { year: int, month: int, day: int, hour: int, minute: int, second: int } pure {
+    return utc_date(seconds)
+}
+def now_utc() -> { year: int, month: int, day: int, hour: int, minute: int, second: int } {
+    return utc(unix())
+}

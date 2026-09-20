@@ -12,7 +12,7 @@
 
 ## Language and stdlib
 
-- [ ] Stdlib breadth beyond filesystem/env: time/date, JSON, hashing, random
+- [x] Stdlib breadth beyond filesystem/env: time/date, JSON, hashing, random
       with explicit RNG state. (Net/crypto/compression are out of scope until
       the FFI decision in [`docs/stability.md`](docs/stability.md) is revisited.)
 - [ ] The proof-mode soundness work, recursive data types, and constrained

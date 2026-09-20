@@ -1,0 +1,4 @@
+# json — compact JSON values backed by dict/list runtime values.
+
+def parse(text: str) { return json_parse(text) }
+def stringify(value: any) -> str { return json_stringify(value) }

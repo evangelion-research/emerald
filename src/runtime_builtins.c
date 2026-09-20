@@ -111,6 +111,10 @@ Value em_now(void) {
     return em_float((double)clock() / (double)CLOCKS_PER_SEC);
 }
 
+Value em_unix_time(void) {
+    return em_float((double)time(NULL));
+}
+
 /* read_line(): one line from stdin without its newline, or None at EOF. The
  * line is read into a growing buffer because stdin has no seekable length. */
 Value em_read_line(void) {
