@@ -25,13 +25,14 @@ of a program's meaning as is practical.
 - **Expected errors** — `error` declarations, `Result[T, E]`, `try` propagation,
   and exhaustive `catch`; no exceptions.
 - **Runtime** — a two-generation mark-and-sweep garbage collector with shadow
-  stacks, and 77 builtins compiled straight into runtime calls.
+  stacks, and 97 builtins compiled straight into runtime calls.
 - **Concurrency** — cooperative green threads: `spawn`/`join`/`chan`/`send`/
   `recv`/`sleep`/`task_yield`, with deadlock reporting.
-- **Standard library** — 11 modules in Emerald: `math`, `lists`, `strings`,
-  `sort`, `io`, `sys`, `path`, `chars`, `fmt`, `result`, and `builder`.
-  Dictionaries and sets are builtin runtime values exposed through
-  Python-style `dict()` and `set()` constructors.
+- **Standard library** — 18 modules in Emerald: `math`, `lists`, `strings`,
+  `sort`, `io`, `sys`, `path`, `chars`, `fmt`, `result`, `builder`, `unicode`,
+  `time`, `date`, `random`, `hash`, `json`, and `test`. Dictionaries and sets
+  are builtin runtime values exposed through Python-style `dict()` and `set()`
+  constructors.
 - **Tensors and shapes** — a `dim` solver, `Tensor[dtype, shape]`, `Fin[n]`,
   and `--shape-report`.
 - **Proof mode** — `--proof` with warning-based taint rejection

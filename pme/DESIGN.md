@@ -10,8 +10,8 @@ prerequisite, the Emerald module system, has shipped (see §0).
 **Tracks emerald at:** `1facafe` (HEAD, 2026-08-17). The module system itself is
 exactly as it shipped at `1f683be`; everything landed since — the functional core
 (lambdas, thunks, closures, tail-call optimization), proof mode (`--proof`), the
-ray-tracer example, and the Phase-2 plan (`docs/SPEC_V2.md`) — left the resolution
-rules and the `-I` contract this design depends on untouched (see §0).
+ray-tracer example, and the Phase-2 plan referenced by the package-manager notes — left the
+resolution rules and the `-I` contract this design depends on untouched (see §0).
 
 pme is to [Emerald](https://github.com/evangelion-research/emerald) what cargo is to Rust:
 it resolves dependencies, materializes them into a local cache, and drives `emeraldc`
@@ -74,11 +74,12 @@ different roots is one module, loaded once. Diamonds in the import graph cost no
 emeraldc [-I <dir>]... [--json] [-o OUT] <entry>.rald
 ```
 
-Confirmed against `src/main.c` at HEAD (`1facafe`): `-I` (both `-I dir` and `-Idir`)
-is repeatable and order-preserving, `-o` sets the output path, `--json` applies to
-any mode. The full flag set is now `--emit-tokens`, `--emit-ast`, `--check`,
-`--emit-c`, `--proof`, `--keep-c` — `--proof` (proof mode, §0.5) was added after
-`1f683be`; nothing pme consumes changed. `--version` still does not exist (§12 Q2).
+Confirmed against the current `src/main.c`: `-I` (both `-I dir` and `-Idir`)
+is repeatable and order-preserving, `-o` sets the output path, and `--json` applies
+to any mode. The current flag set is `--emit-tokens`, `--emit-ast`,
+`--emit-shapes`, `--check`, `--emit-c`, `--proof`, `--proof-report`,
+`--shape-report`, `--werror`, `-Wno-CODE`, `--keep-c`, `--help`, and
+`--version`; nothing pme consumes changed in the module contract.
 
 The full build compiles the generated C itself: `cc -std=c11 -O2 -I <src> …`,
 honoring `$CC` and `$EMERALD_SRC`. There is no debug/release switch to pass through
@@ -541,8 +542,8 @@ Milestone 3 is the first genuinely useful build, and it needs no registry at all
 `path` dependencies alone prove the whole `-I` pipeline end to end. With milestone 0
 landed, **milestone 1 is the current front of work**, and milestone 3 is now unblocked
 by anything upstream. Since `1f683be` the module system has only been exercised
-harder: the typed ray tracer is a 13-module program, and the Phase-2 plan
-(`docs/SPEC_V2.md`) intends `import tensor` as the first real library — both run
+harder: the typed ray tracer is a 13-file program, and the Phase-2 plan
+the roadmap intends `import tensor` as the first real library — both run
 through exactly the `-I` pipeline pme will drive.
 
 ### 11.1 Detailed implementation route
@@ -597,21 +598,20 @@ Read the matching entries in `REFERENCES.md` before each step.
 ## 12. Open questions
 
 1. **Stdlib boundary.** Do `strings`/`json`/`math` ship inside `emeraldc`, or as pme
-   packages? Still open — the compiler still ships no stdlib, just sixteen builtins
-   (`print`, `len`, `range`, `str`, `int`, `sqrt`, `tan`, `rand`, `map`, `filter`,
-   `reduce`, `read_file`, `write_file`, `append_file`, `run`, `gc_stats`) — but
-   upstream has moved toward the recommendation below. The Phase-2 plan
-   (`docs/SPEC_V2.md` §7, "D-open") proposes the split explicitly: tensor primitives
-   that need special typing rules stay builtins, the derived ops become a `tensor`
-   module written in Emerald — a small set compiled in, everything else in
-   modules/packages, and the module system finally dogfooded by a real library.
-   Should still be decided before milestone 5.
+   packages? Still open — the compiler currently ships 18 ordinary stdlib modules and 97 builtins
+   (the authoritative list is `include/builtins.def`) — but upstream may still
+   move package boundaries in a future release. The roadmap in `docs/REMAINING_FEATURES.md` keeps the split open: tensor primitives
+   that need special typing rules stay builtins, while derived operations could
+   become an Emerald module or package. This should still be decided before
+   milestone 5.
 2. **Compiler version pinning.** Should `emerald = ">=0.2.0"` be enforced by pme
-   invoking `emeraldc --version`? Still open — re-verified against `src/main.c` at HEAD
-   (`1facafe`): the driver accepts `--emit-tokens`, `--emit-ast`, `--check`, `--emit-c`,
-   `--json`, `--proof`, `--keep-c`, `-o`, `-I`, and nothing else. `--version` still has
-   to be added upstream before `E_RESOLVE_COMPILER` (§4) can actually fire. (The full
-   build honors `$CC` and `$EMERALD_SRC`, which pme could set if it ever needs to steer
+   invoking `emeraldc --version`? The current compiler reports `0.1.0` and supports
+   `--version`; pme still needs an explicit compatibility policy before
+   `E_RESOLVE_COMPILER` (§4) can enforce package requirements. The driver accepts
+   `--emit-tokens`, `--emit-ast`, `--emit-shapes`, `--check`, `--emit-c`, `--json`,
+   `--proof`, `--proof-report`, `--shape-report`, `--werror`, `-Wno-CODE`,
+   `--keep-c`, `-o`, and `-I`. (The full build honors `$CC`; the standard library
+   and runtime can be redirected with `$EMERALD_STDLIB` and `$EMERALD_LIB`.)
    the C toolchain.)
 3. **`emerald-lsp` integration.** The LSP must read `emerald.lock` and pass the same
    `-I` roots, or cross-package go-to-definition breaks. Worth designing alongside

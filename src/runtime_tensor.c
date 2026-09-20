@@ -446,6 +446,34 @@ Value em_tensor_matmul(Value av, Value bv) {
         }
         return out;
     }
+    if (as0 == ak && as1 == 1 && bs0 == bn_ && bs1 == 1 &&
+        a->as.tensor.dt == b->as.tensor.dt &&
+        a->as.tensor.dt == dt) {
+        if (dt == DT_F64) {
+            const double *ap = a->as.tensor.data;
+            const double *bp = b->as.tensor.data;
+            double *op = ro->as.tensor.data;
+            for (int64_t i = 0; i < am; i++)
+                for (int64_t j = 0; j < bn_; j++) {
+                    double s = 0;
+                    for (int64_t k = 0; k < ak; k++)
+                        s += ap[i * ak + k] * bp[k * bn_ + j];
+                    op[i * bn_ + j] = s;
+                }
+        } else {
+            const float *ap = a->as.tensor.data;
+            const float *bp = b->as.tensor.data;
+            float *op = ro->as.tensor.data;
+            for (int64_t i = 0; i < am; i++)
+                for (int64_t j = 0; j < bn_; j++) {
+                    double s = 0;
+                    for (int64_t k = 0; k < ak; k++)
+                        s += (double)ap[i * ak + k] * bp[k * bn_ + j];
+                    op[i * bn_ + j] = (float)s;
+                }
+        }
+        return out;
+    }
     for (int64_t i = 0; i < am; i++)
         for (int64_t j = 0; j < bn_; j++) {
             double s = 0;

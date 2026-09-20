@@ -1,8 +1,8 @@
 # Stability and versioning policy
 
-Emerald is **pre-release**. There is no tagged version, no published artifact,
-and no stability guarantee of any kind yet: the changelog keeps everything under
-`[Unreleased]`, and the `VERSION` file tracks the working version only.
+Emerald `0.1.0` is **pre-release**. There is no tagged version or published
+artifact, and no stability guarantee yet: the changelog keeps work under
+`[Unreleased]`, while the `VERSION` file tracks the current working version.
 
 This document defines what *will* be promised when the first release is cut, so
 that the promise is written before the freeze rather than after it.
@@ -18,7 +18,7 @@ patch bump.
 ## Inside the stability boundary (frozen at 1.0)
 
 - **Surface syntax.** Everything the parser accepts today (see `src/parser_*.c`
-  and `docs/lang.md`).
+  and [`grammar.md`](grammar.md)).
 - **Standard-library signatures.** Names, parameter orders, and return types of
   `stdlib/*.rald` and the builtin table (`include/builtins.def`).
 - **CLI flags of `emeraldc`** as documented in `emeraldc --help`, and their

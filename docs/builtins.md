@@ -1,12 +1,12 @@
 # Builtins
 
-Emerald has **eighty-six builtins**, compiled directly into calls on the
+Emerald has **ninety-seven builtins**, compiled directly into calls on the
 runtime (`src/runtime_*.c`) rather than resolved through a module. They are
-always in scope in every module: the forty-nine core builtins (core,
-GC-observability, files-and-process, the stdlib foundation, and the UTF-8
-layer), the eleven [green-thread](#green-threads) builtins, the twenty-five
+always in scope in every module: 60 core and standard-library boundary
+builtins, the eleven [green-thread](#green-threads) builtins, the twenty-five
 tensor primitives, and the [autograd](#autograd) primitive (see the
-[Tensors](#tensors) section).
+[Tensors](#tensors) section). The authoritative list is
+[`include/builtins.def`](../include/builtins.def).
 
 They are not the standard library — that lives in [`stdlib/`](../stdlib/) and is
 ordinary Emerald. The mutable `dict` and `set` runtime values are the one
@@ -235,9 +235,10 @@ the numbers mean.
 
 ## The standard library's foundation
 
-Ten builtins exist because [`stdlib/`](../stdlib/) cannot be written without
-them. Nine are ordinary; `append` is the one that changes what the language can
-express at all.
+The standard library boundary currently contains 24 builtins: collection,
+sequence, byte/UTF-8, higher-order, and console primitives that ordinary
+Emerald modules use directly. `append` is the one that changes what the
+language can express at all.
 
 ### `append(xs: list[T], v: T) -> None`
 
@@ -422,13 +423,14 @@ print(reduce((a: int, b: int) => a + b, 0, [1, 2, 3]))   # 6
 `map`, `filter`, and `reduce` are pure builtins, so they may be called from
 `pure` functions (when their function argument is pure too).
 
-The full pure set is `len`, `range`, `str`, `int`, `float`, `sqrt`, `tan`,
-`slice`, `ord`, `chr`, `gc_stats`, `pp_format`, the `uc_*` layer, `freeze`,
-`thaw`, `map`, `filter`, `reduce`, the pure tensor primitives, and
-`value_and_grad`. Everything else — `print`, `eprint`, `rand`, `append`,
-`exit`, `argv`, and the file and process builtins — is impure, and calling one
-from a `pure` function is `E_TYPE_PURE_CALL` (with the local-mutation exception
-for `append` described below).
+The pure set is the builtins marked `true` in
+[`include/builtins.def`](../include/builtins.def): conversions, collection
+constructors, formatting, hashing/JSON, calendar conversion, GC stats,
+sequence helpers, higher-order list functions, tensor operations, and
+`value_and_grad`. Everything else — including output, clocks, randomness,
+mutation, tasks, and file/process operations — is impure, and calling one from
+a `pure` function is `E_TYPE_PURE_CALL` (with the local-mutation exception for
+`append` described below).
 
 ---
 
@@ -512,7 +514,8 @@ None of these are pure: a task is an effect.
 `time_now()` returns monotonic seconds for elapsed-time measurements;
 `unix_time()` returns wall-clock Unix seconds. `utc_date(seconds)` converts Unix
 seconds to a UTC record with `year`, `month`, `day`, `hour`, `minute`, and
-`second` fields.
+`second` fields. The standard-library `time` and `date` modules provide the
+higher-level calendar helpers.
 
 `fnv1a(text)` returns a stable 64-bit FNV-1a digest as an `int`.
 `sha256(text)` returns the lowercase hexadecimal SHA-256 digest. Both are pure

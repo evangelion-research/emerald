@@ -275,7 +275,8 @@ Inference notes:
   (falling off returns `None`). A `while True` with no `break` counts as
   never finishing, which (together with a `partial` function) is the only
   way to inhabit `never` without recursion.
-- `break`/`continue` outside a loop; nested `def` (unsupported).
+- `break`/`continue` outside a loop; nested `def` bodies are supported and
+  capture enclosing locals by shared mutable cells.
 - Redefining or shadowing builtins; using a function name as a value.
 - Non-iterables in `for`, non-indexables under `[]`, `str` item assignment.
 
@@ -364,9 +365,9 @@ Three declarations on a `def` turn the checker from a type checker into a
 *claim* checker, in the sense that matters for [`proofs.md`](proofs.md):
 
 - **`pure`** — `def f(x: int) -> int pure { ... }`. A pure function may only
-  call other pure functions and the pure builtins (`len`, `range`, `str`,
-  `int`, `sqrt`, `tan`, `gc_stats`). Calling `print`, `rand`, or the
-  file/process builtins is a compile error (`E_TYPE_PURE_CALL`), and a
+  call other pure functions and builtins marked pure in
+  [`include/builtins.def`](../include/builtins.def). Calling `print`, `rand`,
+  or the file/process builtins is a compile error (`E_TYPE_PURE_CALL`), and a
   nested `def` inside a pure function must itself be pure
   (`E_TYPE_PURE_NESTED`). "This function is a pure function of its inputs"
   is now statable — the precondition for any proof obligation about a model.

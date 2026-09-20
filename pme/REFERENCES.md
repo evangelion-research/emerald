@@ -85,7 +85,8 @@ pme is a Go module and ships as a single native executable.
 - Compiler repo: https://github.com/evangelion-research/emerald
 - Module system doc (authoritative for §0 of `DESIGN.md`): `emerald/docs/modules.md`
 - Diagnostics contract: `emerald/docs/diagnostics.md`
-- Phase-2 plan (stdlib split, `import tensor`): `emerald/docs/SPEC_V2.md`
+- Standard-library boundary: `emerald/stdlib/SPEC.md`
+- Tensor and proof roadmap: `emerald/docs/REMAINING_FEATURES.md`
 - pme spec companion repo: `evangelion-research/pme` (`DESIGN.md`)
 - Tracked commits (re-verified in `DESIGN.md` §0): module system at `1f683be`; HEAD at `1facafe`.
 

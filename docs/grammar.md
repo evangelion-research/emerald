@@ -23,8 +23,9 @@ comment    = "#" .* to end of line ;
 - Keywords: `def if else elif while for in return and or not
   True False None break continue pass type pure partial import from as
   const match dim error try catch`.
-- Operators/punct: `{ } ( ) [ ] , . : ; = + - * / % == != < <= > >= | & ->
-  => |> >>` (`=>` lambda, `|>` pipe, `>>` compose).
+- Operators/punct: `{ } ( ) [ ] , . : ; = + - * / % // ** == != < <= > >= | & ^ <<
+  >> -> => |>`, plus `>>>` as an unambiguous integer right shift (`=>` lambda,
+  `|>` pipe, `>>` compose or integer shift).
 - Semicolons `;` are optional statement separators.
 
 ## Concrete Syntax (EBNF)
@@ -185,7 +186,7 @@ and           := not ( "and" not )*
 not           := "not" not | comparison
 comparison     := additive ( ("=="|"!="|"<"|"<="|">"|">=") additive )*
 additive       := multiplicative ( ("+"|"-") multiplicative )*
-multiplicative := unary ( ("*"|"/"|"%") unary )*
+multiplicative := unary ( ("*"|"/"|"%"|"//"|"**") unary )*
 unary          := "-" unary | "try" unary | postfix
 postfix        := primary ( "(" [expr ("," expr)*] ")"    (* IDENT callee only *)
                           | "[" expr "]"

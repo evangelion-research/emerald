@@ -96,8 +96,8 @@ error[E_SHAPE_MATMUL]: contracted dimensions do not match
 
 Both shapes printed, the mismatching axis named. Under `--json`, `left`,
 `right`, and `mismatch` are separate structured fields, so the LLM-repair loop
-gets structure rather than prose. See [`examples/mlp/shape_bug.rald`](../examples/mlp/shape_bug.rald)
-and `tests/check/bad_shape_matmul.rald`.
+gets structure rather than prose. See [`tests/check/bad_shape_matmul.rald`](../tests/check/bad_shape_matmul.rald)
+and [`examples/shapes.rald`](../examples/shapes.rald).
 
 ## The gradual boundary, measured
 

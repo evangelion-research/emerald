@@ -42,9 +42,9 @@ declaration and tensor annotation from the linked program; the dimension solver
 it exercises (`src/dim.c`) is a standalone component with the project's first
 **unit** test harness (`tests/shape/dim_unit.c`), rather than a golden file.
 
-The checker is the largest stage (`src/check_*.c`, ~4,900 lines across eight
-files sharing `src/check_internal.h`) and it is where the interesting work
-is — see [`type-system.md`](type-system.md), [`tensors.md`](tensors.md),
+The checker is the largest stage (`src/check_*.c`, sharing
+`src/check_internal.h`) and it is where the interesting work is — see
+[`type-system.md`](type-system.md), [`tensors.md`](tensors.md),
 [`shapes.md`](shapes.md), and [`autograd.md`](autograd.md).
 
 ## Compilation unit
@@ -85,14 +85,14 @@ find them precisely — see [`gc.md`](gc.md).
 ## Tests
 
 ```
-tests/lexer/    3 suites   token streams              (--emit-tokens)
-tests/parser/   7 suites   AST dumps                  (--emit-ast)
-tests/check/   43 suites   diagnostics, human + JSON  (--check, --check --json)
-tests/proof/   12 suites   proof mode                 (--check --proof)
-tests/e2e/     31 suites   compile, run, compare stdout (incl. autograd finite-difference and training)
-tests/imports/ 23 suites   module resolution and linking errors
-tests/stdlib/  15 suites   the standard library        (compile + run)
-tests/shape/    1 unit + 1 golden  dim solver + shape surface  (unit harness, --emit-shapes)
+tests/lexer/    token streams                          (--emit-tokens)
+tests/parser/   AST dumps                              (--emit-ast)
+tests/check/    diagnostics, human + JSON              (--check, --check --json)
+tests/proof/    proof mode                             (--check --proof)
+tests/e2e/      compile, run, compare stdout           (includes autograd)
+tests/imports/  module resolution and linking errors
+tests/stdlib/  the standard library                   (compile + run)
+tests/shape/   dim solver unit + shape surface        (unit harness, --emit-shapes)
 ```
 
 `tests/check/` holds two golden files per case (`.expected` and
@@ -133,7 +133,8 @@ emeraldc -o out prog.rald        # choose output path
 emeraldc --check prog.rald       # typecheck only
 emeraldc --check --proof prog.rald  # proof mode: ban `any` and `partial`
 emeraldc --emit-shapes prog.rald # dump dims + tensor annotations
-emeraldc --shape-report --check prog.rald  # static<->dynamic shape crossings
+emeraldc --shape-report --check prog.rald  # static/dynamic shape crossings
+emeraldc --proof-report --check --proof prog.rald  # proof measurements
 emeraldc --keep-c prog.rald      # keep prog.gen.c for inspection
 emeraldc --emit-c prog.rald      # print generated C to stdout
 ```

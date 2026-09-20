@@ -47,11 +47,11 @@ research, particularly type-driven verification and machine-checked numerical
 software. This repository contains the compiler, runtime, standard library,
 documentation, examples, and regression tests.
 
-Emerald is pre-release: there is no tagged version yet and nothing here should
-be assumed stable. The version is tracked in the `VERSION` file; the changelog
-keeps everything under `[Unreleased]` until a real release is cut. See
+Emerald 0.1.0 is an experimental pre-release: there is no stability guarantee
+for the language surface yet. The version is tracked in the `VERSION` file and
+release notes remain under `[Unreleased]` until a tagged release is cut. See
 [`docs/stability.md`](docs/stability.md) for the compatibility policy; the
-[documentation index](docs/README.md) lists the full surface.
+[documentation index](docs/README.md) lists the current surface.
 
 ## Requirements
 
@@ -84,7 +84,8 @@ task dist
 
 The compiler locates the standard library and the precompiled runtime archive
 (`libemerald.a`) automatically, relative to the executable. Set `EMERALD_STDLIB`
-or `EMERALD_LIB` to override their locations.
+or `EMERALD_LIB` to override their locations. `--help` lists the current CLI
+surface and `--version` reports the value from `VERSION`.
 
 ## Platform support
 
@@ -300,14 +301,15 @@ See [`docs/grammar.md`](docs/grammar.md).
 
 [`examples/ray_tracer/`](examples/ray_tracer/) implements *Ray Tracing in One
 Weekend* to evaluate which domain invariants Emerald can verify. It contains a
-direct implementation and a typed, 13-module version encoding exhaustive
+direct implementation and a typed, 13-file version encoding exhaustive
 primitive dispatch, valid color channels, hit/miss separation, scatter-result
 validity, and distinct point and direction types. Unit-vector validity uses a
 forgeable brand and is therefore not a complete proof.
 
 See [`examples/ray_tracer/typed/README.md`](examples/ray_tracer/typed/README.md)
-for the analysis and [`examples/proofs.rald`](examples/proofs.rald) for runnable
-proof examples.
+for the analysis, [`examples/ray_tracer/typed/main.rald`](examples/ray_tracer/typed/main.rald)
+for the runnable entry point, and [`examples/proofs.rald`](examples/proofs.rald)
+for proof examples.
 
 ## Repository structure
 

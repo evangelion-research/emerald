@@ -15,6 +15,7 @@ repository. Start with the document matching the job you have.
 | [`diagnostics.md`](diagnostics.md) | Human/JSON diagnostic formats, error codes, warnings, and runtime errors. |
 | [`concurrency.md`](concurrency.md) | Cooperative tasks, channels, scheduling, blocking, closing, and deadlocks. |
 | [`repl.md`](repl.md) | REPL behavior, commands, effects, and scratch-session details. |
+| [`examples.md`](examples.md) | Runnable examples grouped by language feature and subsystem. |
 
 ## Understand the implementation
 
@@ -49,4 +50,5 @@ task runtime-check   # compile src/runtime_*.c standalone
 ```
 
 The compiler and its tests are the source of truth for the behavior documented
-here.
+here. The repository currently reports version `0.1.0`; use `emeraldc --version`
+and `emeraldc --help` to confirm the installed binary.
