@@ -1,0 +1,121 @@
+# graph_algorithms.rald — graph algorithms on C5, checked in proof mode.
+#
+# What is actually machine-checked here:
+#   * the algorithms TERMINATE (only bounded `for` loops; no unbounded `while`)
+#   * they are PURE (they mutate only lists they allocate themselves)
+#   * they are TOTAL over the finite vertex set (each `never` obligation below)
+#   * the certified bounds are output-typed (a body returning 3 cannot compile)
+# What is checked at RUNTIME, over the whole finite domain: that the computed
+# results equal the certified tables.
+#
+# Checked with: bin/emeraldc --check --proof graph_algorithms.rald
+
+type Bool = True | False
+type V = 0 | 1 | 2 | 3 | 4
+
+def adj(a: V, b: V) -> Bool pure {
+    if a == 0 { if b == 1 { return True } if b == 4 { return True } return False }
+    if a == 1 { if b == 0 { return True } if b == 2 { return True } return False }
+    if a == 2 { if b == 1 { return True } if b == 3 { return True } return False }
+    if a == 3 { if b == 2 { return True } if b == 4 { return True } return False }
+    if a == 4 { if b == 0 { return True } if b == 3 { return True } return False }
+    impossible: never = a
+    return False
+}
+
+vs: seq[V] = [0, 1, 2, 3, 4]
+
+# ===========================================================================
+# 1. The algorithm. BFS distances from vertex 0 by bounded relaxation.
+#    |V| rounds of relaxation suffice to reach the fixpoint on 5 vertices, so
+#    the loop is statically bounded — it terminates, and it is pure because the
+#    only list it touches is the one it allocated.
+# ===========================================================================
+
+def bfs_from_zero() -> list[int] pure {
+    d: list[int] = [99, 99, 99, 99, 99]
+    d[0] = 0
+    for round in range(5) {
+        for a in vs {
+            for b in vs {
+                if adj(a, b) {
+                    if d[b] + 1 < d[a] { d[a] = d[b] + 1 }
+                }
+            }
+        }
+    }
+    return d
+}
+
+# ===========================================================================
+# 2. The certificate. The diameter bound diam(C5) = 2, stated as an exhaustive
+#    table over the vertex domain. The `never` obligation machine-checks that
+#    all five vertices are covered; the codomain checks the bound is expressible.
+# ===========================================================================
+
+def bfs_bound(t: V) -> 0 | 1 | 2 pure {
+    if t == 0 { return 0 }
+    if t == 1 { return 1 }
+    if t == 4 { return 1 }
+    if t == 2 { return 2 }
+    if t == 3 { return 2 }
+    impossible: never = t
+    return 0
+}
+
+# ===========================================================================
+# 3. The limitation, made explicit.
+#
+#    A certificate CANNOT be derived from the computation: the checker will not
+#    narrow a computed `int` into the literal union `0 | 1 | 2`. Uncommenting
+#    this is a hard error, which is why section 2 is a hand-written table:
+#
+#      def bfs_computed_bound(t: V) -> 0 | 1 | 2 pure {
+#          d = bfs_from_zero()
+#          return d[t]                  # E_TYPE_RETURN: int vs 0 | 1 | 2
+#      }
+#
+#    So the table's VALUES are only as good as the author; the checker certifies
+#    coverage and output type, and the runtime referee below cross-checks the
+#    values against the computed distances.
+# ===========================================================================
+
+# ===========================================================================
+# 4. Reachability fixpoint (C5 is connected).
+# ===========================================================================
+
+def reach_from_zero() -> list[int] pure {
+    seen: list[int] = [0, 0, 0, 0, 0]
+    seen[0] = 1
+    for round in range(5) {
+        for a in vs {
+            for b in vs {
+                if adj(a, b) { if seen[a] == 1 { seen[b] = 1 } }
+            }
+        }
+    }
+    return seen
+}
+
+# ===========================================================================
+# 5. Runtime referees.
+# ===========================================================================
+
+def algorithm_matches_certificate() -> bool pure {
+    d = bfs_from_zero()
+    ok = True
+    for v in vs { if d[v] != bfs_bound(v) { ok = False } }
+    return ok
+}
+
+def all_reachable_from_zero() -> bool pure {
+    seen = reach_from_zero()
+    ok = True
+    for v in vs { if seen[v] != 1 { ok = False } }
+    return ok
+}
+
+d = bfs_from_zero()
+print("BFS distances from 0:", d[0], d[1], d[2], d[3], d[4])
+print("algorithm matches certified bound:", algorithm_matches_certificate())
+print("all 5 vertices reachable from 0:", all_reachable_from_zero())

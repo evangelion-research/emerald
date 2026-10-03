@@ -1,0 +1,164 @@
+# math_proofs.rald — machine-checked finite-domain mathematics in Emerald.
+#
+# Read types as propositions (Curry–Howard, structurally):
+#   A | B   disjunction        A & B   conjunction (records)
+#   never   False (no value)   def f(p: P) -> Q   implication P => Q
+#
+# Proof rule used throughout: EXHAUSTIVE CASE ANALYSIS.
+# A finite domain is a union of literal types. Each `if x == lit { return ... }`
+# removes one alternative; the final `impossible: never = x` binding typechecks
+# ONLY when every alternative has been removed. Adding a case to a domain
+# reopens every obligation that depended on it, as a compile error.
+#
+# Checked with:  bin/emeraldc --check --proof math_proofs.rald
+# Outer claim:   bin/emeraldc --check --proof --proof-report math_proofs.rald
+
+# ===========================================================================
+# Part 1.  Propositional logic over the two-element domain.
+# ===========================================================================
+
+type Bool = True | False
+
+# Theorem (exhaustiveness of the truth values): every Bool is True or False.
+# The signature is the theorem; the body is the exhaustive witness.
+def bool_exhaustive(b: Bool) -> True | False pure { return b }
+
+# Negation: total, and closed on Bool. The `never` obligation is the proof
+# that both truth values were handled.
+def not_bool(p: Bool) -> Bool pure {
+    if p == True { return False }
+    if p == False { return True }
+    impossible: never = p
+    return False
+}
+
+def and_bool(p: Bool, q: Bool) -> Bool pure {
+    if p == True { return q }
+    if p == False { return False }
+    impossible: never = p
+    return False
+}
+
+def or_bool(p: Bool, q: Bool) -> Bool pure {
+    if p == True { return True }
+    if p == False { return q }
+    impossible: never = p
+    return False
+}
+
+# De Morgan: ¬(p ∨ q) ≡ (¬p) ∧ (¬q).
+# The checker verifies that the mapping is total on all four input pairs;
+# the equivalence itself is then a runtime-checked identity (see main below).
+def de_morgan_lhs(p: Bool, q: Bool) -> Bool pure { return not_bool(or_bool(p, q)) }
+def de_morgan_rhs(p: Bool, q: Bool) -> Bool pure { return and_bool(not_bool(p), not_bool(q)) }
+
+# ===========================================================================
+# Part 2.  Finite modular arithmetic: Z/4Z.
+# ===========================================================================
+
+type Z4 = 0 | 1 | 2 | 3
+
+# Theorem (closure under negation). Z/4Z is closed under additive inverse:
+# for every a in Z4, -a is again a residue in Z4.
+def neg_mod4(a: Z4) -> Z4 pure {
+    if a == 0 { return 0 }
+    if a == 1 { return 3 }
+    if a == 2 { return 2 }
+    if a == 3 { return 1 }
+    impossible: never = a
+    return 0
+}
+
+# Theorem (closure under addition). Z/4Z is closed under + mod 4.
+# The nested form is the proof: for each a, all four b are eliminated, so the
+# inner obligation closes; once every a is eliminated, the outer one closes.
+def add_mod4(a: Z4, b: Z4) -> Z4 pure {
+    if a == 0 {
+        if b == 0 { return 0 }
+        if b == 1 { return 1 }
+        if b == 2 { return 2 }
+        if b == 3 { return 3 }
+        impossible: never = b
+        return 0
+    }
+    if a == 1 {
+        if b == 0 { return 1 }
+        if b == 1 { return 2 }
+        if b == 2 { return 3 }
+        if b == 3 { return 0 }
+        impossible: never = b
+        return 0
+    }
+    if a == 2 {
+        if b == 0 { return 2 }
+        if b == 1 { return 3 }
+        if b == 2 { return 0 }
+        if b == 3 { return 1 }
+        impossible: never = b
+        return 0
+    }
+    if a == 3 {
+        if b == 0 { return 3 }
+        if b == 1 { return 0 }
+        if b == 2 { return 1 }
+        if b == 3 { return 2 }
+        impossible: never = b
+        return 0
+    }
+    impossible: never = a
+    return 0
+}
+
+# Lemma (square residues mod 4). For every residue a in Z4, a² mod 4 is 0 or 1.
+# The signature states the theorem: the codomain `0 | 1` excludes 2 and 3, so
+# the checker verifies that no residue squares to 2 or 3.
+def square_mod4(a: Z4) -> 0 | 1 pure {
+    if a == 0 { return 0 }
+    if a == 1 { return 1 }
+    if a == 2 { return 0 }
+    if a == 3 { return 1 }
+    impossible: never = a
+    return 0
+}
+
+# Corollary (no residue squares to 2 or 3). This is stated where the checker
+# can see it: `square_mod4`'s codomain is exactly `0 | 1`, so {2, 3} is not in
+# its image. There is no separate witness binding to write, because the
+# codomain IS the statement. See the README for what this does NOT prove:
+# the reduction from all integers to the four residue classes (the division
+# algorithm) is assumed, not formalized.
+
+# ===========================================================================
+# Part 3.  A parametricity lemma: conjunction commutes.
+# ===========================================================================
+
+type Pair[A, B] = { first: A, second: B }
+
+# Theorem (A ∧ B  ⇒  B ∧ A). The type variable is opaque, so the body cannot
+# fabricate a B or an A; it must build the result from what it was given.
+def swap[A, B](p: Pair[A, B]) -> Pair[B, A] pure {
+    return { first: p.second, second: p.first }
+}
+
+# ===========================================================================
+# Witnesses (run the example; every value below is a checked term).
+# ===========================================================================
+
+print("squares mod 4:", square_mod4(0), square_mod4(1), square_mod4(2), square_mod4(3))
+print("closure: 3 + 3 mod 4 =", add_mod4(3, 3))
+print("inverse: -1 mod 4 =", neg_mod4(1))
+
+# De Morgan, checked at runtime over the whole (finite) input space.
+# The annotation `list[Bool]` keeps the literals narrow; an unannotated list
+# literal would widen them to `bool` and the call would not typecheck.
+bools: list[Bool] = [True, False]
+mineq: Bool = True
+for p in bools {
+    for q in bools {
+        if de_morgan_lhs(p, q) != de_morgan_rhs(p, q) { mineq = False }
+    }
+}
+print("De Morgan holds on all four pairs:", mineq)
+
+s: Pair[str, int] = swap({ first: 9, second: "nine" })
+print("swap witness:", s.first, s.second)

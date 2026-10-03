@@ -1,0 +1,115 @@
+# graph_trees.rald — trees by structural induction, checked in proof mode.
+#
+# Emerald's termination checker accepts a recursive call only when the argument
+# is a projection chain that stays inside the same inductive structure
+# (`t.l`, `t.r`, `t.kids[0]`). So a tree is not "a graph we reason about" — the
+# RECURSIVE ALIAS IS the acyclicity proof: a value of type Tree cannot contain a
+# cycle, because the type has no finite inhabitant that would.
+#
+# Checked with: bin/emeraldc --check --proof graph_trees.rald
+
+type Bool = True | False
+
+# ===========================================================================
+# Binary trees: full structural induction on both children.
+# ===========================================================================
+
+type Tree = None | { v: int, l: Tree, r: Tree }
+
+# Every one of these recurses on `t.l` / `t.r`, so termination is machine-checked
+# rather than asserted. Marking any of them `partial` is rejected under --proof.
+def size(t: Tree) -> int pure {
+    if t == None { return 0 }
+    return 1 + size(t.l) + size(t.r)
+}
+
+def depth(t: Tree) -> int pure {
+    if t == None { return 0 }
+    dl = depth(t.l)
+    dr = depth(t.r)
+    if dl > dr { return 1 + dl }
+    return 1 + dr
+}
+
+def leaves(t: Tree) -> int pure {
+    if t == None { return 0 }
+    if t.l == None and t.r == None { return 1 }
+    return leaves(t.l) + leaves(t.r)
+}
+
+# Involution: mirror twice is the identity. The function typechecks; the
+# equational content (mirror(mirror t) == t) is NOT statable here, so it is
+# checked at runtime below over concrete trees.
+def mirror(t: Tree) -> Tree pure {
+    if t == None { return None }
+    return { v: t.v, l: mirror(t.r), r: mirror(t.l) }
+}
+
+# NOTE: `and`/`or`/`==` yield the base type `bool`, which is NOT assignable to
+# the literal union `Bool = True | False`. So a Bool-returning function must
+# return the literals by case, not a computed boolean expression.
+def eq_tree(a: Tree, b: Tree) -> Bool pure {
+    if a == None and b == None { return True }
+    if a == None { return False }
+    if b == None { return False }
+    if a.v != b.v { return False }
+    if eq_tree(a.l, b.l) == False { return False }
+    return eq_tree(a.r, b.r)
+}
+
+# ===========================================================================
+# n-ary trees: descent works through a `seq` ELEMENT only.
+# ===========================================================================
+
+type NTree = None | { v: int, kids: seq[NTree] }
+
+# Accepted: descent through `t.kids[0]` (element-of is strictly smaller).
+def head_depth(t: NTree) -> int pure {
+    if t == None { return 0 }
+    if len(t.kids) == 0 { return 1 }
+    return 1 + head_depth(t.kids[0])
+}
+
+# NOT expressible under --proof. Uncommenting either body below is a hard error:
+#
+#   def total_weight(t: NTree) -> int pure {
+#       if t == None { return 0 }
+#       total = t.v
+#       for k in t.kids { total = total + total_weight(k) }   # E_TYPE_TERMINATION
+#       return total
+#   }
+#
+#   def tail_depth(t: NTree) -> int pure {
+#       if t == None { return 0 }
+#       rest: seq[NTree] = slice(t.kids, 1, len(t.kids))
+#       return 1 + tail_depth({ v: 0, kids: rest })           # E_TYPE_TERMINATION
+#   }
+#
+# A `for` loop variable is not a projection chain, and a slice is not a
+# projection, so neither is recognized as a structural decrease. Consequence:
+# full n-ary traversal needs the binary encoding above, or an explicit `partial`
+# function, which proof mode rejects.
+
+# ===========================================================================
+# Witnesses and runtime checks
+# ===========================================================================
+
+empty: seq[Tree] = []
+empty_n: seq[NTree] = []
+
+#       1
+#      / \
+#     2   3
+#          \
+#           4
+t: Tree = {
+    v: 1,
+    l: { v: 2, l: None, r: None },
+    r: { v: 3, l: None, r: { v: 4, l: None, r: None } }
+}
+
+print("size, depth, leaves:", size(t), depth(t), leaves(t))
+print("mirror involution holds:", eq_tree(mirror(mirror(t)), t))
+
+nt: NTree = { v: 1, kids: empty_n }
+print("n-ary head depth:", head_depth(nt))
