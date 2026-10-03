@@ -1,0 +1,54 @@
+# certs/op_5_Walecki.rald — GENERATED, do not edit by hand.
+#
+# GENERATOR : op_construct.rald (T0, Walecki's construction)
+# INSTANCE  : OP(5; C_5)  [K5]
+# n         : 5
+# sha256    : b662d1ace5c8077895673ce1ddf2b9628e284370a32d48f3723f28208a4e44af  (of the certificate body below, header excluded)
+#
+# Regenerate with: bin/emeraldc solve-oberwolfach-problem/op_construct.rald -o /tmp/opc && /tmp/opc
+from op_verify import verify_all
+
+type V = 0 | 1 | 2 | 3 | 4
+
+def succ_0(v: V) -> V pure {
+    if v == 0 { return 1 }
+    if v == 1 { return 3 }
+    if v == 2 { return 4 }
+    if v == 3 { return 2 }
+    if v == 4 { return 0 }
+    impossible: never = v
+    return 0
+}
+
+def succ_1(v: V) -> V pure {
+    if v == 0 { return 3 }
+    if v == 1 { return 2 }
+    if v == 2 { return 0 }
+    if v == 3 { return 4 }
+    if v == 4 { return 1 }
+    impossible: never = v
+    return 0
+}
+
+type J = 0 | 1
+
+def factor_at(j: J) -> (V) -> V pure {
+    if j == 0 { return succ_0 }
+    if j == 1 { return succ_1 }
+    impossible: never = j
+    return succ_0
+}
+
+vs: seq[V] = [0, 1, 2, 3, 4]
+n = 5
+nfactors = 2
+want: seq[int] = [0, 0, 0, 0, 0, 1]
+succs: seq[(V) -> V] = [succ_0, succ_1]
+mate_idx: seq[int] = [-1, -1, -1, -1, -1]
+
+ok = verify_all(vs, succs, mate_idx, want, n, False)
+if ok == True and len(succs) == nfactors {
+    print("PASS OP(5; C_5)", len(succs), "factors cover K5")
+} else {
+    print("FAIL OP(5; C_5)")
+}

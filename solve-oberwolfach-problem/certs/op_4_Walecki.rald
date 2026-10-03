@@ -1,0 +1,42 @@
+# certs/op_4_Walecki.rald — GENERATED, do not edit by hand.
+#
+# GENERATOR : op_construct.rald (T0, Walecki's construction)
+# INSTANCE  : OP(4; C_4)  [K4-I]
+# n         : 4
+# sha256    : 530677df7e578a454a6e99606aa0d1fac89a6b88ddc10e26808c6e3c6794a8fb  (of the certificate body below, header excluded)
+#
+# Regenerate with: bin/emeraldc solve-oberwolfach-problem/op_construct.rald -o /tmp/opc && /tmp/opc
+from op_verify import verify_all
+
+type V = 0 | 1 | 2 | 3
+
+def succ_0(v: V) -> V pure {
+    if v == 0 { return 1 }
+    if v == 1 { return 2 }
+    if v == 2 { return 3 }
+    if v == 3 { return 0 }
+    impossible: never = v
+    return 0
+}
+
+type J = 0
+
+def factor_at(j: J) -> (V) -> V pure {
+    if j == 0 { return succ_0 }
+    impossible: never = j
+    return succ_0
+}
+
+vs: seq[V] = [0, 1, 2, 3]
+n = 4
+nfactors = 1
+want: seq[int] = [0, 0, 0, 0, 1]
+succs: seq[(V) -> V] = [succ_0]
+mate_idx: seq[int] = [2, 3, 0, 1]
+
+ok = verify_all(vs, succs, mate_idx, want, n, True)
+if ok == True and len(succs) == nfactors {
+    print("PASS OP(4; C_4)", len(succs), "factors cover K4")
+} else {
+    print("FAIL OP(4; C_4)")
+}

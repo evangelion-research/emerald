@@ -1,0 +1,117 @@
+# certs/op_11_Walecki.rald — GENERATED, do not edit by hand.
+#
+# GENERATOR : op_construct.rald (T0, Walecki's construction)
+# INSTANCE  : OP(11; C_11)  [K11]
+# n         : 11
+# sha256    : 7a896677641500ca77812af187e7931c7f54faa86a1c9c8b2a7275cc3c7ea9a3  (of the certificate body below, header excluded)
+#
+# Regenerate with: bin/emeraldc solve-oberwolfach-problem/op_construct.rald -o /tmp/opc && /tmp/opc
+from op_verify import verify_all
+
+type V = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
+
+def succ_0(v: V) -> V pure {
+    if v == 0 { return 1 }
+    if v == 1 { return 9 }
+    if v == 2 { return 8 }
+    if v == 3 { return 7 }
+    if v == 4 { return 6 }
+    if v == 5 { return 10 }
+    if v == 6 { return 5 }
+    if v == 7 { return 4 }
+    if v == 8 { return 3 }
+    if v == 9 { return 2 }
+    if v == 10 { return 0 }
+    impossible: never = v
+    return 0
+}
+
+def succ_1(v: V) -> V pure {
+    if v == 0 { return 3 }
+    if v == 1 { return 2 }
+    if v == 2 { return 0 }
+    if v == 3 { return 9 }
+    if v == 4 { return 8 }
+    if v == 5 { return 7 }
+    if v == 6 { return 10 }
+    if v == 7 { return 6 }
+    if v == 8 { return 5 }
+    if v == 9 { return 4 }
+    if v == 10 { return 1 }
+    impossible: never = v
+    return 0
+}
+
+def succ_2(v: V) -> V pure {
+    if v == 0 { return 5 }
+    if v == 1 { return 4 }
+    if v == 2 { return 3 }
+    if v == 3 { return 1 }
+    if v == 4 { return 0 }
+    if v == 5 { return 9 }
+    if v == 6 { return 8 }
+    if v == 7 { return 10 }
+    if v == 8 { return 7 }
+    if v == 9 { return 6 }
+    if v == 10 { return 2 }
+    impossible: never = v
+    return 0
+}
+
+def succ_3(v: V) -> V pure {
+    if v == 0 { return 7 }
+    if v == 1 { return 6 }
+    if v == 2 { return 5 }
+    if v == 3 { return 4 }
+    if v == 4 { return 2 }
+    if v == 5 { return 1 }
+    if v == 6 { return 0 }
+    if v == 7 { return 9 }
+    if v == 8 { return 10 }
+    if v == 9 { return 8 }
+    if v == 10 { return 3 }
+    impossible: never = v
+    return 0
+}
+
+def succ_4(v: V) -> V pure {
+    if v == 0 { return 9 }
+    if v == 1 { return 8 }
+    if v == 2 { return 7 }
+    if v == 3 { return 6 }
+    if v == 4 { return 5 }
+    if v == 5 { return 3 }
+    if v == 6 { return 2 }
+    if v == 7 { return 1 }
+    if v == 8 { return 0 }
+    if v == 9 { return 10 }
+    if v == 10 { return 4 }
+    impossible: never = v
+    return 0
+}
+
+type J = 0 | 1 | 2 | 3 | 4
+
+def factor_at(j: J) -> (V) -> V pure {
+    if j == 0 { return succ_0 }
+    if j == 1 { return succ_1 }
+    if j == 2 { return succ_2 }
+    if j == 3 { return succ_3 }
+    if j == 4 { return succ_4 }
+    impossible: never = j
+    return succ_0
+}
+
+vs: seq[V] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+n = 11
+nfactors = 5
+want: seq[int] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+succs: seq[(V) -> V] = [succ_0, succ_1, succ_2, succ_3, succ_4]
+mate_idx: seq[int] = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]
+
+ok = verify_all(vs, succs, mate_idx, want, n, False)
+if ok == True and len(succs) == nfactors {
+    print("PASS OP(11; C_11)", len(succs), "factors cover K11")
+} else {
+    print("FAIL OP(11; C_11)")
+}

@@ -1,0 +1,71 @@
+# certs/op_7_Walecki.rald — GENERATED, do not edit by hand.
+#
+# GENERATOR : op_construct.rald (T0, Walecki's construction)
+# INSTANCE  : OP(7; C_7)  [K7]
+# n         : 7
+# sha256    : 668cd183307c8257324da191338794d7d530d53f96d3e47e92ce64df32520841  (of the certificate body below, header excluded)
+#
+# Regenerate with: bin/emeraldc solve-oberwolfach-problem/op_construct.rald -o /tmp/opc && /tmp/opc
+from op_verify import verify_all
+
+type V = 0 | 1 | 2 | 3 | 4 | 5 | 6
+
+def succ_0(v: V) -> V pure {
+    if v == 0 { return 1 }
+    if v == 1 { return 5 }
+    if v == 2 { return 4 }
+    if v == 3 { return 6 }
+    if v == 4 { return 3 }
+    if v == 5 { return 2 }
+    if v == 6 { return 0 }
+    impossible: never = v
+    return 0
+}
+
+def succ_1(v: V) -> V pure {
+    if v == 0 { return 3 }
+    if v == 1 { return 2 }
+    if v == 2 { return 0 }
+    if v == 3 { return 5 }
+    if v == 4 { return 6 }
+    if v == 5 { return 4 }
+    if v == 6 { return 1 }
+    impossible: never = v
+    return 0
+}
+
+def succ_2(v: V) -> V pure {
+    if v == 0 { return 5 }
+    if v == 1 { return 4 }
+    if v == 2 { return 3 }
+    if v == 3 { return 1 }
+    if v == 4 { return 0 }
+    if v == 5 { return 6 }
+    if v == 6 { return 2 }
+    impossible: never = v
+    return 0
+}
+
+type J = 0 | 1 | 2
+
+def factor_at(j: J) -> (V) -> V pure {
+    if j == 0 { return succ_0 }
+    if j == 1 { return succ_1 }
+    if j == 2 { return succ_2 }
+    impossible: never = j
+    return succ_0
+}
+
+vs: seq[V] = [0, 1, 2, 3, 4, 5, 6]
+n = 7
+nfactors = 3
+want: seq[int] = [0, 0, 0, 0, 0, 0, 0, 1]
+succs: seq[(V) -> V] = [succ_0, succ_1, succ_2]
+mate_idx: seq[int] = [-1, -1, -1, -1, -1, -1, -1]
+
+ok = verify_all(vs, succs, mate_idx, want, n, False)
+if ok == True and len(succs) == nfactors {
+    print("PASS OP(7; C_7)", len(succs), "factors cover K7")
+} else {
+    print("FAIL OP(7; C_7)")
+}

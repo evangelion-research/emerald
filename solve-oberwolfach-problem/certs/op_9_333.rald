@@ -1,0 +1,108 @@
+# certs/op_9_333.rald — hand-written certificate for OP(9; 3,3,3).
+#
+# PROVENANCE: hand-written (the affine plane of order 3), not generated. This is
+# the M0 exemplar whose mutations check.sh uses to show the verifier rejects
+# broken certificates. The four factors are the four parallel classes of
+# AG(2,3) — three classes of slope 0/1/2 and the three vertical lines — each
+# class being a disjoint union of three triangles. Every pair of the 9 points
+# lies on exactly one line, so the 12 lines give a resolvable triangle
+# decomposition: OP(9;3,3,3) is KTS(9), which exists.
+#
+# Vertex index = 3*x + y for (x, y) in Z3 x Z3.
+#
+# Checked with:
+#   bin/emeraldc --check --proof --proof-report -I solve-oberwolfach-problem certs/op_9_333.rald
+#   bin/emeraldc -I solve-oberwolfach-problem certs/op_9_333.rald -o /tmp/o933 && /tmp/o933
+
+from op_verify import verify_all
+
+type V = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+
+# factor 0 — lines y = 0, y = 1, y = 2  (slope 0)
+def succ_0(v: V) -> V pure {
+    if v == 0 { return 3 }
+    if v == 1 { return 4 }
+    if v == 2 { return 5 }
+    if v == 3 { return 6 }
+    if v == 4 { return 7 }
+    if v == 5 { return 8 }
+    if v == 6 { return 0 }
+    if v == 7 { return 1 }
+    if v == 8 { return 2 }
+    impossible: never = v
+    return 0
+}
+
+# factor 1 — lines y = x + c  (slope 1)
+def succ_1(v: V) -> V pure {
+    if v == 0 { return 4 }
+    if v == 1 { return 5 }
+    if v == 2 { return 3 }
+    if v == 3 { return 7 }
+    if v == 4 { return 8 }
+    if v == 5 { return 6 }
+    if v == 6 { return 1 }
+    if v == 7 { return 2 }
+    if v == 8 { return 0 }
+    impossible: never = v
+    return 0
+}
+
+# factor 2 — lines y = 2x + c  (slope 2)
+def succ_2(v: V) -> V pure {
+    if v == 0 { return 5 }
+    if v == 1 { return 3 }
+    if v == 2 { return 4 }
+    if v == 3 { return 8 }
+    if v == 4 { return 6 }
+    if v == 5 { return 7 }
+    if v == 6 { return 2 }
+    if v == 7 { return 0 }
+    if v == 8 { return 1 }
+    impossible: never = v
+    return 0
+}
+
+# factor 3 — vertical lines x = c
+def succ_3(v: V) -> V pure {
+    if v == 0 { return 1 }
+    if v == 1 { return 2 }
+    if v == 2 { return 0 }
+    if v == 3 { return 4 }
+    if v == 4 { return 5 }
+    if v == 5 { return 3 }
+    if v == 6 { return 7 }
+    if v == 7 { return 8 }
+    if v == 8 { return 6 }
+    impossible: never = v
+    return 0
+}
+
+# The factor index is a literal union, so `impossible: never = j` machine-checks
+# that there are exactly four factors.
+type J = 0 | 1 | 2 | 3
+
+def factor_at(j: J) -> (V) -> V pure {
+    if j == 0 { return succ_0 }
+    if j == 1 { return succ_1 }
+    if j == 2 { return succ_2 }
+    if j == 3 { return succ_3 }
+    impossible: never = j
+    return succ_0
+}
+
+vs: seq[V] = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+n = 9
+nfactors = 4
+# want[L] = number of cycles of length L; three triangles.
+want: seq[int] = [0, 0, 0, 3, 0, 0, 0, 0, 0, 0]
+succs: seq[(V) -> V] = [succ_0, succ_1, succ_2, succ_3]
+# n = 9 is odd: no edge is removed, so every entry is -1.
+mate_idx: seq[int] = [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1]
+
+ok = verify_all(vs, succs, mate_idx, want, n, False)
+if ok == True and len(succs) == nfactors {
+    print("PASS OP(9;3,3,3):", len(succs), "triangle factors cover K9 exactly once")
+} else {
+    print("FAIL OP(9;3,3,3)")
+}

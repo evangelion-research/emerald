@@ -1,0 +1,263 @@
+# op_construct.rald — T0 certificate generator (UNTRUSTED SOLVER).
+#
+# Plain Emerald: imports, `while`, and impure builtins are all allowed here.
+# This is the tier-1 half of the two-tier trust split (PLAN.md §5). It emits
+# certificates AS EMERALD SOURCE into certs/, and the trusted checker
+# op_verify.rald then referees them. Nothing in this file is a proof.
+#
+# T0 (PLAN.md §8): Walecki's zig-zag construction.
+#   * odd n  = 2m+1: the polygon 0..n-2 plus a hub n-1. The base zig-zag
+#     B = 0, 1, -1, 2, -2, ..., (m-1), -(m-1), m (indices mod n-1); factor k
+#     (k = 0..m-1) is the hub joined to B rotated by k.
+#   * even n = 2m  : the polygon 0..n-2 plus a hub n-1. The base zig-zag
+#     B = 0, 1, -1, ..., (m-1), -(m-1) (indices mod n-1); factor k
+#     (k = 0..m-2) is the hub joined to B rotated by k. The 1-factor I that is
+#     left over is {hub, m-1} together with {i, -(i+1)} for i = 0..m-2.
+# Both constructions were verified against the checker before being trusted
+# (the checker is the oracle). The hub is vertex n-1 throughout.
+#
+# Run with:
+#   bin/emeraldc solve-oberwolfach-problem/op_construct.rald -o /tmp/opc && /tmp/opc
+# from the repository root, or via solve-oberwolfach-problem/check.sh.
+
+import math
+import strings
+
+# Non-negative residue, since `%` may return a negative representative.
+def modp(a: int, m: int) -> int pure {
+    r = a % m
+    if r < 0 { r = r + m }
+    return r
+}
+
+# The base zig-zag path over the polygon Z_{n-1}, ending at m (mod n-1).
+# `tail_is_m` selects odd (an explicit final m) vs. even (the last pair already
+# lands on m, so no extra element is appended).
+def zigzag(n: int, tail_is_m: bool) -> list[int] {
+    m = math.floor_div(n, 2)
+    p = n - 1
+    b: list[int] = [0]
+    i = 1
+    while i < m {
+        append(b, modp(i, p))
+        append(b, modp(0 - i, p))
+        i = i + 1
+    }
+    if tail_is_m { append(b, modp(m, p)) }
+    return b
+}
+
+# Factors as cycles (lists of n+1 vertices, first == last). Odd n.
+def odd_cycles(n: int) -> list[list[int]] {
+    m = math.floor_div(n, 2)
+    p = n - 1
+    hub = n - 1
+    b = zigzag(n, True)
+    out: list[list[int]] = []
+    k = 0
+    while k < m {
+        c: list[int] = [hub]
+        j = 0
+        while j < p {
+            append(c, modp(b[j] + k, p))
+            j = j + 1
+        }
+        append(c, hub)
+        append(out, c)
+        k = k + 1
+    }
+    return out
+}
+
+# Factors as cycles. Even n.
+def even_cycles(n: int) -> list[list[int]] {
+    m = math.floor_div(n, 2)
+    p = n - 1
+    hub = n - 1
+    b = zigzag(n, False)
+    out: list[list[int]] = []
+    k = 0
+    while k < m - 1 {
+        c: list[int] = [hub]
+        j = 0
+        while j < p {
+            append(c, modp(b[j] + k, p))
+            j = j + 1
+        }
+        append(c, hub)
+        append(out, c)
+        k = k + 1
+    }
+    return out
+}
+
+# succ[vertex] from a cycle whose first and last elements coincide.
+def succ_of(c: list[int], n: int) -> list[int] {
+    s: list[int] = []
+    i = 0
+    while i < n { append(s, 0); i = i + 1 }
+    i = 0
+    while i < n {
+        s[c[i]] = c[i + 1]
+        i = i + 1
+    }
+    return s
+}
+
+# The removed 1-factor as index data: mate_idx[j] = partner index, or -1.
+def odd_mates(n: int) -> list[int] {
+    s: list[int] = []
+    i = 0
+    while i < n { append(s, 0 - 1); i = i + 1 }
+    return s
+}
+
+def even_mates(n: int) -> list[int] {
+    m = math.floor_div(n, 2)
+    p = n - 1
+    hub = n - 1
+    s: list[int] = []
+    i = 0
+    while i < n { append(s, 0 - 1); i = i + 1 }
+    s[hub] = m - 1
+    s[m - 1] = hub
+    i = 0
+    while i < m - 1 {
+        a = i
+        b = modp(0 - (i + 1), p)
+        s[a] = b
+        s[b] = a
+        i = i + 1
+    }
+    return s
+}
+
+def int_list(xs: list[int]) -> str {
+    parts: list[str] = []
+    for x in xs { append(parts, str(x)) }
+    return strings.join(", ", parts)
+}
+
+def union_alt(n: int) -> str {
+    parts: list[str] = []
+    i = 0
+    while i < n { append(parts, str(i)); i = i + 1 }
+    return strings.join(" | ", parts)
+}
+
+# The certificate body (no provenance header, so the hash can cover it).
+def certificate_body(n: int, even: bool) -> str {
+    cyc = odd_cycles(n)
+    if even { cyc = even_cycles(n) }
+    fcount = len(cyc)
+    succs: list[list[int]] = []
+    for c in cyc { append(succs, succ_of(c, n)) }
+
+    lines: list[str] = []
+    append(lines, "from op_verify import verify_all")
+    append(lines, "")
+    append(lines, "type V = " + union_alt(n))
+    append(lines, "")
+    f = 0
+    for s in succs {
+        append(lines, "def succ_" + str(f) + "(v: V) -> V pure {")
+        v = 0
+        while v < n {
+            append(lines, "    if v == " + str(v) + " { return " + str(s[v]) + " }")
+            v = v + 1
+        }
+        append(lines, "    impossible: never = v")
+        append(lines, "    return 0")
+        append(lines, "}")
+        append(lines, "")
+        f = f + 1
+    }
+
+    jparts: list[str] = []
+    f = 0
+    while f < fcount { append(jparts, str(f)); f = f + 1 }
+    append(lines, "type J = " + strings.join(" | ", jparts))
+    append(lines, "")
+    append(lines, "def factor_at(j: J) -> (V) -> V pure {")
+    f = 0
+    while f < fcount {
+        append(lines, "    if j == " + str(f) + " { return succ_" + str(f) + " }")
+        f = f + 1
+    }
+    append(lines, "    impossible: never = j")
+    append(lines, "    return succ_0")
+    append(lines, "}")
+    append(lines, "")
+
+    ident: list[int] = []
+    i = 0
+    while i < n { append(ident, i); i = i + 1 }
+    append(lines, "vs: seq[V] = [" + int_list(ident) + "]")
+    append(lines, "n = " + str(n))
+    append(lines, "nfactors = " + str(fcount))
+
+    # want[L] = number of cycles of length L. Every Walecki factor is one
+    # Hamiltonian cycle, so want[n] = 1.
+    want: list[int] = []
+    L = 0
+    while L <= n {
+        if L == n { append(want, 1) } else { append(want, 0) }
+        L = L + 1
+    }
+    append(lines, "want: seq[int] = [" + int_list(want) + "]")
+
+    succ_names: list[str] = []
+    f = 0
+    while f < fcount { append(succ_names, "succ_" + str(f)); f = f + 1 }
+    append(lines, "succs: seq[(V) -> V] = [" + strings.join(", ", succ_names) + "]")
+
+    mates = odd_mates(n)
+    if even { mates = even_mates(n) }
+    append(lines, "mate_idx: seq[int] = [" + int_list(mates) + "]")
+    append(lines, "")
+    flag = "False"
+    if even { flag = "True" }
+    append(lines, "ok = verify_all(vs, succs, mate_idx, want, n, " + flag + ")")
+    label = "OP(" + str(n) + "; C_" + str(n) + ")"
+    append(lines, "if ok == True and len(succs) == nfactors {")
+    append(lines, "    print(\"PASS " + label + "\", len(succs), \"factors cover K" + str(n) + "\")")
+    append(lines, "} else {")
+    append(lines, "    print(\"FAIL " + label + "\")")
+    append(lines, "}")
+    return strings.join("\n", lines) + "\n"
+}
+
+def write_cert(n: int, even: bool) -> None {
+    body = certificate_body(n, even)
+    digest = sha256(body)
+    kind = "K" + str(n)
+    if even { kind = "K" + str(n) + "-I" }
+    path = "certs/op_" + str(n) + "_Walecki.rald"
+    head: list[str] = []
+    append(head, "# certs/op_" + str(n) + "_Walecki.rald — GENERATED, do not edit by hand.")
+    append(head, "#")
+    append(head, "# GENERATOR : op_construct.rald (T0, Walecki's construction)")
+    append(head, "# INSTANCE  : OP(" + str(n) + "; C_" + str(n) + ")  [" + kind + "]")
+    append(head, "# n         : " + str(n))
+    append(head, "# sha256    : " + digest + "  (of the certificate body below, header excluded)")
+    append(head, "#")
+    append(head, "# Regenerate with: bin/emeraldc solve-oberwolfach-problem/op_construct.rald -o /tmp/opc && /tmp/opc")
+    write_file(path, strings.join("\n", head) + "\n" + body)
+    print("wrote", path, "n=" + str(n), "sha256=" + slice(digest, 0, 12))
+}
+
+# T0 covers every odd n <= 21 and every even n <= 20 (PLAN.md §11, M0 exit).
+def main() -> None {
+    n = 3
+    while n <= 21 {
+        write_cert(n, False)
+        n = n + 2
+    }
+    n = 4
+    while n <= 20 {
+        write_cert(n, True)
+        n = n + 2
+    }
+}
+
+main()

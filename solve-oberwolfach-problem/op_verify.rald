@@ -1,0 +1,170 @@
+# op_verify.rald — the trusted Oberwolfach certificate checker.
+#
+# Zero imports, builtins only, so it passes `emeraldc --check --proof`
+# (finding 4.3 in PLAN.md: no stdlib module can be pulled into a proof-mode
+# module). Every function here is `pure` and total *by construction*: there is
+# no recursion and no `while`, only bounded `for ... in range(...)` loops and
+# `for ... in seq` loops over a finite domain. So proof mode has nothing to
+# bound and nothing to descend.
+#
+# WHAT THIS FILE MACHINE-CHECKS vs. WHAT IT RUNTIME-CHECKS
+#
+#   * machine-checked here: termination, purity, no `any`, and — by the
+#     codomain obligations in each *certificate* (certs/) — that every vertex
+#     is handled by every factor and that the factor index is exhaustive. See
+#     certs/ for those `impossible: never = ...` obligations.
+#   * runtime-checked here, over the whole finite domain and not by sampling:
+#     that each factor is a permutation; that no cycle has length 1 or 2; that
+#     the cycle type of each factor equals the prescribed multiset; that the
+#     factors are pairwise edge-disjoint and (with the removed matching, when
+#     n is even) cover every edge of K_n exactly once; and that the removed
+#     matching is a genuine perfect matching.
+#
+# A data file would have gotten typing and termination. A certificate written
+# as Emerald source also gets the coverage obligation, because the vertex type
+# `V` is a literal union and each successor function must discharge `never`.
+#
+# The removed matching is passed as index data (`mate_idx[j]` = the index in
+# `vs` of vertex j's partner, or -1 when there is no matching) rather than as a
+# function value. A bare function-typed generic parameter does not instantiate
+# correctly at present — the checker keeps the body's `V` generic while fixing
+# the callee's to the concrete type — so indices keep the checker honest and
+# compilable. This is finding F1 in README.md.
+#
+# Checked with:
+#   bin/emeraldc --check --proof --proof-report solve-oberwolfach-problem/op_verify.rald
+
+# ===========================================================================
+# 1. A chosen successor map is a permutation of the vertex set.
+#    "every image is hit exactly once", runtime over the whole domain.
+# ===========================================================================
+
+def is_perm[V](vs: seq[V], succ: (V) -> V) -> bool pure {
+    ok = True
+    for v in vs {
+        c = 0
+        for w in vs { if succ(w) == v { c = c + 1 } }
+        if c != 1 { ok = False }
+    }
+    return ok
+}
+
+# ===========================================================================
+# 2. No fixed point, no 2-cycle. This is the "every cycle has length >= 3"
+#    obligation, stated directly rather than inferred from the orbit walk.
+# ===========================================================================
+
+def no_short_cycles[V](vs: seq[V], succ: (V) -> V) -> bool pure {
+    ok = True
+    for v in vs {
+        if succ(v) == v { ok = False }
+        if succ(succ(v)) == v { ok = False }
+    }
+    return ok
+}
+
+# ===========================================================================
+# 3. Orbit length. Walks succ from `start` for at most n steps. On a genuine
+#    permutation with cycles >= 3 this returns the true cycle length; on a
+#    malformed map it returns 0 (fell out of the bound), which can never match
+#    a prescribed count below. Being bounded, the loop is total by construction.
+# ===========================================================================
+
+def orbit_len[V](succ: (V) -> V, start: V, n: int) -> int pure {
+    cur: V = succ(start)
+    cnt = 1
+    for step in range(n) {
+        if cur == start { return cnt }
+        cur = succ(cur)
+        cnt = cnt + 1
+    }
+    return 0
+}
+
+# ===========================================================================
+# 4. Cycle type equals the prescribed multiset.
+#    `want[L]` is the number of cycles of length L; there are n vertices, so a
+#    length-L cycle contributes L vertices. The multiset is compared by
+#    counting vertices at every orbit length 1..n — no sorting required.
+# ===========================================================================
+
+def cycle_type_ok[V](vs: seq[V], succ: (V) -> V, want: seq[int], n: int) -> bool pure {
+    ok = True
+    for L in range(1, n + 1) {
+        c = 0
+        for v in vs { if orbit_len(succ, v, n) == L { c = c + 1 } }
+        if c != L * want[L] { ok = False }
+    }
+    return ok
+}
+
+# ===========================================================================
+# 5. Edge accounting. `edge_uses` counts how many times the unordered pair
+#    {a, b} appears across all factors. O(n * |factors|) per pair, which is
+#    nothing at n <= 21 and keeps the checker free of index arithmetic.
+# ===========================================================================
+
+def edge_uses[V](vs: seq[V], succs: seq[(V) -> V], a: V, b: V) -> int pure {
+    c = 0
+    for s in succs {
+        for v in vs {
+            u: V = s(v)
+            if v == a and u == b { c = c + 1 }
+            if v == b and u == a { c = c + 1 }
+        }
+    }
+    return c
+}
+
+# ===========================================================================
+# 6. The factors, plus the removed matching when n is even, cover every edge of
+#    K_n exactly once. `mate_idx[j]` is the partner index of vertex j, or -1.
+# ===========================================================================
+
+def edges_exact[V](vs: seq[V], succs: seq[(V) -> V], mate_idx: seq[int], n: int) -> bool pure {
+    ok = True
+    for i in range(n) {
+        a: V = vs[i]
+        for j in range(i + 1, n) {
+            b: V = vs[j]
+            have = edge_uses(vs, succs, a, b)
+            need = 1
+            if mate_idx[i] == j { need = 0 }
+            if have != need { ok = False }
+        }
+    }
+    return ok
+}
+
+# ===========================================================================
+# 7. The removed matching is a perfect matching: fixed-point-free and an
+#    involution. Only called when n is even.
+# ===========================================================================
+
+def matching_ok(mate_idx: seq[int], n: int) -> bool pure {
+    ok = True
+    for i in range(n) {
+        m = mate_idx[i]
+        if m == i { ok = False }
+        if m < 0 { ok = False }
+        if mate_idx[m] != i { ok = False }
+    }
+    return ok
+}
+
+# ===========================================================================
+# 8. The whole obligation. `even` chooses whether the removed matching is
+#    checked as a matching.
+# ===========================================================================
+
+def verify_all[V](vs: seq[V], succs: seq[(V) -> V], mate_idx: seq[int], want: seq[int], n: int, even: bool) -> bool pure {
+    ok = True
+    for s in succs {
+        if is_perm(vs, s) == False { ok = False }
+        if no_short_cycles(vs, s) == False { ok = False }
+        if cycle_type_ok(vs, s, want, n) == False { ok = False }
+    }
+    if edges_exact(vs, succs, mate_idx, n) == False { ok = False }
+    if even { if matching_ok(mate_idx, n) == False { ok = False } }
+    return ok
+}
