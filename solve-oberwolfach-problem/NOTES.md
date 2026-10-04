@@ -114,3 +114,4 @@ and transcribe the device rather than guess it, as `PLAN.md` §13 warns.
 3. §2 says `n ≤ 17` "was settled before 2010". I did not pin a citation for
    the pre-2010 boundary in this pass; it does not affect any milestone, since
    `M1` re-derives it from an exhaustive search regardless.
+ 
